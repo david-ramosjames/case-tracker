@@ -1,7 +1,8 @@
 import crypto from "crypto";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { getGoogleSheetsConfig, getGoogleSheetsRange, isGoogleSheetsSyncConfigured } from "@/lib/slack/config";
-import { resolveSlackChannelId } from "@/lib/slack/client";
+import { isSlackEnabled } from "@/lib/slack/config";
+import { loadChannelNameMap, lookupChannelId } from "@/lib/slack/client";
 import { upsertSlackChannels } from "@/lib/slack/channels";
 
 function base64Url(value: string) {
@@ -40,15 +41,15 @@ async function getGoogleAccessToken(clientEmail: string, privateKey: string) {
   return body.access_token;
 }
 
-export type SheetSyncResult = { synced: number; configured: boolean };
+export type SheetSyncResult = { synced: number; configured: boolean; unresolved?: number };
 
 /** Reads your Google Sheet and upserts case_number → Slack channel rows. No manual entry in the app. */
 export async function syncSlackChannelsFromGoogleSheetIfConfigured(): Promise<SheetSyncResult> {
   if (!isGoogleSheetsSyncConfigured()) {
     return { synced: 0, configured: false };
   }
-  const { synced } = await syncSlackChannelsFromGoogleSheet();
-  return { synced, configured: true };
+  const { synced, unresolved } = await syncSlackChannelsFromGoogleSheet();
+  return { synced, configured: true, unresolved };
 }
 
 export async function syncSlackChannelsFromGoogleSheet() {
@@ -90,23 +91,28 @@ export async function syncSlackChannelsFromGoogleSheet() {
     throw new Error('Sheet must include "Case No" and "Slack Channel" columns (see Client Contact Status / Sheet1).');
   }
 
+  // Resolve Slack channel IDs in one pass (not per row — that caused conversations.list rate limits).
+  const channelMap = isSlackEnabled() ? await loadChannelNameMap() : null;
+
   const mapped = [];
   for (const row of rows.slice(1)) {
     const caseNumber = cleanCaseNumber(row[caseIdx] ?? "");
     const channelName = (row[channelIdx] ?? "").trim();
     if (!caseNumber || !channelName) continue;
 
-    const slackChannelId = await resolveSlackChannelId(channelName);
+    const slackChannelName = channelName.replace(/^#/, "");
+    const slackChannelId = channelMap ? lookupChannelId(slackChannelName, channelMap) : null;
     mapped.push({
       caseNumber,
       slackChannelId,
-      slackChannelName: channelName.replace(/^#/, ""),
+      slackChannelName,
       topicStage: statusIdx >= 0 ? row[statusIdx]?.trim() || null : null,
     });
   }
 
   const synced = await upsertSlackChannels(mapped);
-  return { synced };
+  const unresolved = mapped.filter((row) => !row.slackChannelId).length;
+  return { synced, unresolved };
 }
 
 function findSheetColumnIndex(header: string[], matchers: Array<(cell: string) => boolean>) {

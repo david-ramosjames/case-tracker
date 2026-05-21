@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
 import { syncSlackChannelsFromGoogleSheet } from "@/lib/google/sheets-sync";
 
+export const maxDuration = 60;
+
 export async function POST() {
   try {
     const sessionUser = await requireApiSession();

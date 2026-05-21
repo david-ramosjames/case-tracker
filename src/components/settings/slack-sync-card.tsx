@@ -16,9 +16,13 @@ export function SlackSyncCard() {
     setError(null);
     try {
       const response = await fetch("/api/slack/sync-channels", { method: "POST" });
-      const body = (await response.json()) as { synced?: number; error?: string };
+      const body = (await response.json()) as { synced?: number; unresolved?: number; error?: string };
       if (!response.ok) throw new Error(body.error ?? "Sync failed.");
-      setMessage(`Synced ${body.synced ?? 0} rows from Google Sheet.`);
+      const unresolvedNote =
+        body.unresolved && body.unresolved > 0
+          ? ` ${body.unresolved} channel name(s) not found in Slack (check spelling or invite the bot).`
+          : "";
+      setMessage(`Synced ${body.synced ?? 0} rows from Google Sheet.${unresolvedNote}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed.");
     } finally {
