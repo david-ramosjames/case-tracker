@@ -1,16 +1,16 @@
 -- Google Auth provisioning notes
 --
--- The app assigns roles on first sign-in in /auth/callback:
+-- The app assigns roles on sign-in in /auth/callback:
 -- - david@ramosjames.com -> admin
 -- - jon@ramosjames.com   -> admin
--- - all other @ramosjames.com users -> attorney
+-- - other @ramosjames.com users -> role from public.contacts (matched by email)
+-- - no contact match -> no role row (user sees "Role pending" in the app)
 --
--- Ensure case_tracker_user_roles exists (from 001_case_tracker_schema.sql).
--- No manual seed is required if users sign in through Google OAuth.
+-- Ensure contacts.email is populated for firm users who need tracker access.
 
 begin;
 
 comment on table public.case_tracker_user_roles is
-  'Maps Supabase auth.users to tracker roles. Provisioned automatically on Google sign-in.';
+  'Maps Supabase auth.users to tracker roles. Admins are provisioned by email; other users from contacts.email or manual admin assignment.';
 
 commit;

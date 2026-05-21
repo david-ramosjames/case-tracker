@@ -30,6 +30,7 @@ export function AppShell({ children, sessionUser }: { children: React.ReactNode;
                 <p className="truncate text-xs text-muted-foreground">{sessionUser.email}</p>
               </div>
               {sessionUser.role === "admin" ? <Badge variant="pink">Admin</Badge> : null}
+              {!sessionUser.role ? <Badge variant="warning">Role pending</Badge> : null}
               <form action="/auth/signout" method="post">
                 <Button variant="ghost" size="icon" aria-label="Sign out" type="submit">
                   <LogOut className="h-4 w-4" />

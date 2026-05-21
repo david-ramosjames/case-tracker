@@ -4,6 +4,6 @@ export type SessionUser = {
   id: string;
   email: string;
   name: string;
-  role: UserRole;
+  role: UserRole | null;
   avatarInitials: string;
 };

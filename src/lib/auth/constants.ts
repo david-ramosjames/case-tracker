@@ -13,10 +13,11 @@ export function isAllowedEmail(email: string | null | undefined) {
   return normalizeEmail(email).endsWith(`@${ALLOWED_EMAIL_DOMAIN}`);
 }
 
-export function getRoleForEmail(email: string): UserRole {
+/** Only david@ and jon@ get admin from their email address. */
+export function getAdminRoleForEmail(email: string): "admin" | null {
   const normalized = normalizeEmail(email);
   if ((ADMIN_EMAILS as readonly string[]).includes(normalized)) return "admin";
-  return "attorney";
+  return null;
 }
 
 export function displayNameFromEmail(email: string, metadataName?: string | null) {
@@ -27,4 +28,9 @@ export function displayNameFromEmail(email: string, metadataName?: string | null
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+export function contactRoleToUserRole(role: string | null | undefined): UserRole | null {
+  if (role === "attorney" || role === "paralegal" || role === "manager") return role;
+  return null;
 }

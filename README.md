@@ -17,8 +17,8 @@ Create `.env.local` from `.env.example` with the Supabase project credentials.
 
 All pages require Google sign-in with a `@ramosjames.com` account. See [docs/GOOGLE_AUTH_SETUP.md](docs/GOOGLE_AUTH_SETUP.md) for Supabase and Google Cloud configuration.
 
-- **Admins:** `david@ramosjames.com`, `jon@ramosjames.com`
-- **Everyone else** at `@ramosjames.com` gets attorney access
+- **Admins:** `david@ramosjames.com`, `jon@ramosjames.com` (assigned automatically)
+- **Everyone else** at `@ramosjames.com` gets the role from their DocketFlow `contacts` record (attorney, paralegal, or manager). If no contact match exists, they can sign in but see **Role pending** until an admin assigns access.
 
 ## Data Source
 

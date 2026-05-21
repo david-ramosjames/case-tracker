@@ -1,20 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
+import { signInWithGoogleAction } from "@/app/login/actions";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { createSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { getClientAppOrigin } from "@/lib/auth/redirect-url";
 
 const ERROR_MESSAGES: Record<string, string> = {
   domain: "Only @ramosjames.com Google accounts can sign in.",
   auth: "Sign-in failed. Please try again.",
   config: "Google sign-in is not configured yet. Check Supabase Auth settings.",
+  redirect: "Supabase redirected to the wrong URL. Add your app callback URL in Supabase → Authentication → URL Configuration (see docs/GOOGLE_AUTH_SETUP.md).",
 };
 
 export function LoginForm() {
   const searchParams = useSearchParams();
-  const [isLoading, setIsLoading] = useState(false);
+  const [isPending, startTransition] = useTransition();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const queryError = useMemo(() => {
@@ -23,31 +25,20 @@ export function LoginForm() {
     return ERROR_MESSAGES[code] ?? "Unable to sign in.";
   }, [searchParams]);
 
-  async function signInWithGoogle() {
-    setIsLoading(true);
+  const configuredOrigin = getClientAppOrigin();
+
+  function handleSignIn() {
     setErrorMessage(null);
+    const nextPath = searchParams.get("next") || "/";
 
-    try {
-      const supabase = createSupabaseBrowserClient();
-      const nextPath = searchParams.get("next") || "/";
-      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(nextPath)}`;
-      const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: {
-          redirectTo,
-          queryParams: {
-            hd: "ramosjames.com",
-            access_type: "offline",
-            prompt: "consent",
-          },
-        },
-      });
-
-      if (error) throw error;
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : "Unable to start Google sign-in.");
-      setIsLoading(false);
-    }
+    startTransition(async () => {
+      try {
+        const { url } = await signInWithGoogleAction(nextPath);
+        window.location.assign(url);
+      } catch (error) {
+        setErrorMessage(error instanceof Error ? error.message : "Unable to start Google sign-in.");
+      }
+    });
   }
 
   return (
@@ -58,10 +49,18 @@ export function LoginForm() {
       </CardHeader>
       <CardContent className="space-y-4">
         <p className="text-sm text-muted-foreground">Only @ramosjames.com email addresses are allowed.</p>
+        {configuredOrigin ? (
+          <p className="text-xs text-muted-foreground">
+            Sign-in will return to <span className="font-medium text-navy-950">{configuredOrigin}</span>
+            {typeof window !== "undefined" && configuredOrigin !== window.location.origin ? (
+              <span> (not {window.location.origin} — set NEXT_PUBLIC_SITE_URL or update Supabase redirect URLs)</span>
+            ) : null}
+          </p>
+        ) : null}
         {queryError ? <p className="text-sm text-destructive">{queryError}</p> : null}
         {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
-        <Button className="w-full" variant="pink" onClick={signInWithGoogle} disabled={isLoading}>
-          {isLoading ? "Redirecting..." : "Continue with Google"}
+        <Button className="w-full" variant="pink" onClick={handleSignIn} disabled={isPending}>
+          {isPending ? "Redirecting..." : "Continue with Google"}
         </Button>
       </CardContent>
     </Card>

@@ -89,6 +89,7 @@ export function AppMobileNav({ sessionUser }: { sessionUser: SessionUser }) {
           <p className="truncate text-xs text-muted-foreground">{sessionUser.email}</p>
         </div>
         {sessionUser.role === "admin" ? <Badge variant="pink">Admin</Badge> : null}
+        {!sessionUser.role ? <Badge variant="warning">Role pending</Badge> : null}
         <form action="/auth/signout" method="post">
           <Button variant="outline" size="sm" type="submit">
             <LogOut className="h-4 w-4" />
