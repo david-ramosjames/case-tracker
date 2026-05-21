@@ -1,0 +1,919 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, MessageSquarePlus, Pencil, Save, ShieldAlert, Sparkles } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { ConfidenceBadge, StageBadge } from "@/components/cases/case-status-badge";
+import {
+  CASE_SIZE_OPTIONS,
+  CASE_STAGE_OPTIONS,
+  CASE_STATUS_OPTIONS,
+  CASE_TYPE_OPTIONS,
+  CHECK_STATUS_OPTIONS,
+  CLOSING_STATUS_OPTIONS,
+  DISBURSED_STATUS_OPTIONS,
+  EXPECTED_LITIGATION_OPTIONS,
+  LIABILITY_OPTIONS,
+  RELEASE_STATUS_OPTIONS,
+  getTargetPeriodOptions,
+} from "@/lib/case-options";
+import { getDataQualityFlags, getFeePercent, getOpenStageSuggestions, getProjectedFeeValue, needsQuarterlyCheckIn } from "@/lib/calculations";
+import { type SessionUser } from "@/lib/auth/types";
+import {
+  type ActivityLogEntry,
+  type CaseRecord,
+  type CaseStatus,
+  type CaseTrackerSettings,
+  type CheckStatus,
+  type ClosingStatus,
+  type CommentType,
+  type DisbursedStatus,
+  type ReleaseStatus,
+  type SettlementResult,
+  type TrackerUpdateInput,
+  type TrackerComment,
+  type TrackerEntry,
+} from "@/lib/types";
+import { formatCurrency, formatDate, getCalculatedAttorneyFees } from "@/lib/utils";
+
+export function CaseDetailView({
+  initialRecord,
+  initialComments,
+  initialActivity,
+  settings,
+  sessionUser,
+}: {
+  initialRecord: CaseRecord;
+  initialComments: TrackerComment[];
+  initialActivity: ActivityLogEntry[];
+  settings: CaseTrackerSettings;
+  sessionUser: SessionUser;
+}) {
+  const [shared, setShared] = useState(initialRecord.shared);
+  const [tracker, setTracker] = useState(initialRecord.tracker);
+  const [comments, setComments] = useState(initialComments);
+  const [activity, setActivity] = useState(initialActivity);
+  const [newComment, setNewComment] = useState("");
+  const [commentType, setCommentType] = useState<CommentType>("general_note");
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [isOverviewEditing, setIsOverviewEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isAddingComment, setIsAddingComment] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const quarterOptions = useMemo(() => getTargetPeriodOptions(), []);
+  const record = useMemo(() => ({ ...initialRecord, shared, tracker }), [initialRecord, shared, tracker]);
+  const flags = getDataQualityFlags(record, settings);
+  const openStageSuggestions = getOpenStageSuggestions(record);
+  const quarterlyCheckInDue = needsQuarterlyCheckIn(record);
+
+  function updateField<K extends keyof TrackerEntry>(key: K, value: TrackerEntry[K]) {
+    setTracker((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateShared<K extends keyof typeof shared>(key: K, value: (typeof shared)[K]) {
+    setShared((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateResult<K extends keyof SettlementResult>(key: K, value: SettlementResult[K]) {
+    setTracker((current) => ({
+      ...current,
+      result: {
+        ...current.result,
+        [key]: value,
+      },
+    }));
+  }
+
+  function updateResultWorkflow<K extends "releaseStatus" | "closingStatus" | "checkStatus" | "disbursedStatus">(
+    key: K,
+    value: SettlementResult[K],
+  ) {
+    const now = new Date().toISOString();
+    setTracker((current) => {
+      const result = { ...current.result, [key]: value };
+
+      if (key === "releaseStatus") result.releaseSignedAt = value === "Signed" ? (result.releaseSignedAt ?? now) : null;
+      if (key === "closingStatus") result.closingSignedAt = value === "Signed" ? (result.closingSignedAt ?? now) : null;
+      if (key === "checkStatus") result.checkDepositedAt = value === "Deposited" ? (result.checkDepositedAt ?? now) : null;
+      if (key === "disbursedStatus") result.checkDisbursedAt = value === "Yes" ? (result.checkDisbursedAt ?? now) : null;
+
+      return { ...current, result };
+    });
+  }
+
+  async function persistTracker(nextTracker: TrackerEntry, options?: { markReviewed?: boolean }) {
+    const payload = {
+      shared: {
+        status: shared.status,
+        caseType: shared.caseType,
+      },
+      tracker: {
+        caseStage: nextTracker.caseStage,
+        estimatedSettlementValue: nextTracker.estimatedSettlementValue,
+        estimatedFeeValue: nextTracker.estimatedFeeValue,
+        targetResolutionQuarter: nextTracker.targetResolutionQuarter,
+        confidenceLevel: nextTracker.confidenceLevel,
+        sourceOfEstimate: nextTracker.sourceOfEstimate,
+        liability: nextTracker.liability,
+        caseSize: nextTracker.caseSize,
+        minimumValue: nextTracker.minimumValue,
+        referralFee: nextTracker.referralFee,
+        referralFeeArrangement: nextTracker.referralFeeArrangement,
+        balanceCtaInfo: nextTracker.balanceCtaInfo,
+        policyLimits: nextTracker.policyLimits,
+        policyInfoSource: nextTracker.policyInfoSource,
+        expectedLitigation: nextTracker.expectedLitigation,
+        sources: nextTracker.sources,
+        litEventsNeeded: nextTracker.litEventsNeeded,
+        litEventsTimeline: nextTracker.litEventsTimeline,
+        injuries: nextTracker.injuries,
+        caseDescription: nextTracker.caseDescription,
+        statusNotes: nextTracker.statusNotes,
+        lastQuarterlyCheckInAt: nextTracker.lastQuarterlyCheckInAt,
+        forecastNotes: nextTracker.forecastNotes,
+        result: nextTracker.result,
+      },
+      actor: {
+        userId: sessionUser.id,
+        userName: sessionUser.name,
+      },
+      markReviewed: options?.markReviewed ?? true,
+    };
+
+    const response = await fetch(`/api/tracker/${record.shared.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const body = (await response.json()) as { tracker?: TrackerEntry; activity?: ActivityLogEntry; error?: string };
+    if (!response.ok || !body.tracker) throw new Error(body.error ?? "Unable to save tracker entry.");
+    return { tracker: body.tracker, activity: body.activity };
+  }
+
+  async function saveTracker(options?: { markReviewed?: boolean }) {
+    const markReviewed = options?.markReviewed ?? true;
+    const now = new Date().toISOString();
+    const nextTracker = {
+      ...tracker,
+      result: {
+        ...tracker.result,
+        attorneyFees: getCalculatedAttorneyFees(tracker.result.settlementAmount, tracker.result.feePercent),
+      },
+      lastReviewedAt: markReviewed ? now : tracker.lastReviewedAt,
+      updatedAt: now,
+    };
+
+    setIsSaving(true);
+    setErrorMessage(null);
+    try {
+      const { tracker: savedTracker, activity: savedActivity } = await persistTracker(nextTracker, { markReviewed });
+      setTracker((current) => ({
+        ...current,
+        ...savedTracker,
+        result: savedTracker.result ?? current.result,
+        detectedStageSignals: current.detectedStageSignals,
+      }));
+      if (savedActivity) {
+        setActivity((current) => [savedActivity, ...current]);
+      }
+      setSavedAt(now);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to save tracker entry.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function confirmQuarterlyCheckIn() {
+    const now = new Date().toISOString();
+    const nextTracker = {
+      ...tracker,
+      result: {
+        ...tracker.result,
+        attorneyFees: getCalculatedAttorneyFees(tracker.result.settlementAmount, tracker.result.feePercent),
+      },
+      lastQuarterlyCheckInAt: now,
+      lastReviewedAt: now,
+      updatedAt: now,
+    };
+
+    setIsSaving(true);
+    setErrorMessage(null);
+    try {
+      const { tracker: savedTracker, activity: savedActivity } = await persistTracker(nextTracker);
+      setTracker((current) => ({ ...current, ...savedTracker, detectedStageSignals: current.detectedStageSignals }));
+      if (savedActivity) {
+        setActivity((current) => [savedActivity, ...current]);
+      }
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to complete quarterly check-in.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  function confirmStageSuggestion(signalId: string) {
+    const now = new Date().toISOString();
+    const signal = tracker.detectedStageSignals.find((item) => item.id === signalId);
+    if (!signal) return;
+
+    setTracker((current) => ({
+      ...current,
+      caseStage: signal.suggestedStage,
+      expectedLitigation: signal.suggestedExpectedLitigation,
+      estimatedFeeValue: current.minimumValue ? Math.round(current.minimumValue * (signal.suggestedExpectedLitigation === "Pre" ? 0.3 : 0.4)) : current.estimatedFeeValue,
+      detectedStageSignals: current.detectedStageSignals.map((item) =>
+        item.id === signalId ? { ...item, confirmedAt: now } : item,
+      ),
+      updatedAt: now,
+    }));
+    setActivity((current) => [
+      {
+        id: `activity-${Date.now()}`,
+        caseId: record.shared.id,
+        userId: "u-manager-1",
+        userName: "Harper Quinn",
+        action: "Stage suggestion confirmed",
+        description: `Confirmed ${signal.source} signal: case stage is now ${signal.suggestedStage}.`,
+        createdAt: now,
+      },
+      ...current,
+    ]);
+  }
+
+  function dismissStageSuggestion(signalId: string) {
+    const now = new Date().toISOString();
+    setTracker((current) => ({
+      ...current,
+      detectedStageSignals: current.detectedStageSignals.map((item) =>
+        item.id === signalId ? { ...item, dismissedAt: now } : item,
+      ),
+    }));
+  }
+
+  async function addComment() {
+    if (!newComment.trim()) return;
+
+    setIsAddingComment(true);
+    setErrorMessage(null);
+    try {
+      const response = await fetch("/api/comments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caseId: record.shared.id,
+          type: commentType,
+          body: newComment.trim(),
+        }),
+      });
+      const body = (await response.json()) as { comment?: TrackerComment; activity?: ActivityLogEntry; error?: string };
+      if (!response.ok || !body.comment) throw new Error(body.error ?? "Unable to add comment.");
+
+      setComments((current) => [body.comment as TrackerComment, ...current]);
+      if (body.activity) {
+        setActivity((current) => [body.activity as ActivityLogEntry, ...current]);
+      }
+      setNewComment("");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to add comment.");
+    } finally {
+      setIsAddingComment(false);
+    }
+  }
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-[1fr_24rem]">
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+              <div>
+                <CardTitle className="text-xl">{record.shared.clientName}</CardTitle>
+                <CardDescription>
+                  {record.shared.caseNumber} - {record.shared.caseType} - DOL {formatDate(record.shared.dateOfIncident)}
+                </CardDescription>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <StageBadge stage={tracker.caseStage} />
+                <Badge variant="outline">{record.shared.status}</Badge>
+                <ConfidenceBadge level={tracker.confidenceLevel} />
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid gap-4 md:grid-cols-4">
+              <Info label="Attorney" value={record.attorney.name} />
+              <Info label="Paralegal" value={record.paralegal.name} />
+              <Info label="Date Signed" value={formatDate(record.shared.dateSigned)} />
+              <Info label="Last reviewed" value={formatDate(tracker.lastReviewedAt)} />
+            </div>
+          </CardContent>
+        </Card>
+
+        {openStageSuggestions.length > 0 ? (
+          <Card className="border-pink-500/40 bg-pink-100/35">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Sparkles className="h-5 w-5 text-pink-500" />
+                Suggested Stage Update
+              </CardTitle>
+              <CardDescription>
+                The system can use Slack, workflow, and matter events to suggest changes. Attorneys only need to confirm or dismiss.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {openStageSuggestions.map((signal) => (
+                <div key={signal.id} className="rounded-lg border bg-white p-4">
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <Badge variant="pink">{signal.source}</Badge>
+                    <Badge variant="outline">{signal.confidence} confidence</Badge>
+                    <span className="text-sm font-semibold text-navy-950">
+                      Looks like this case may now be in {signal.suggestedExpectedLitigation.toLowerCase()}.
+                    </span>
+                  </div>
+                  <p className="text-sm leading-6 text-muted-foreground">{signal.excerpt}</p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <Button onClick={() => confirmStageSuggestion(signal.id)} variant="pink" size="sm">
+                      Confirm
+                    </Button>
+                    <Button onClick={() => dismissStageSuggestion(signal.id)} variant="outline" size="sm">
+                      Dismiss
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {quarterlyCheckInDue ? (
+          <Card className="border-red-200">
+            <CardHeader>
+              <CardTitle>Quarterly Check-In Required</CardTitle>
+              <CardDescription>
+                Confirm or update expected completion quarter, minimum case value, and recent case description every 90 days.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap items-center gap-3">
+              <Button onClick={confirmQuarterlyCheckIn} disabled={isSaving}>
+                <CheckCircle2 className="h-4 w-4" />
+                Confirm no change
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                Last check-in: {formatDate(tracker.lastQuarterlyCheckInAt)}
+              </span>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+              <div>
+                <CardTitle>Case View</CardTitle>
+                <CardDescription>Primary case fields follow the quarterly sheet exactly, with editing available in place.</CardDescription>
+              </div>
+              <Button variant={isOverviewEditing ? "pink" : "outline"} size="sm" onClick={() => setIsOverviewEditing((current) => !current)}>
+                <Pencil className="h-4 w-4" />
+                {isOverviewEditing ? "View" : "Edit"}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className={isOverviewEditing ? "grid gap-4 md:grid-cols-2" : "grid gap-4 md:grid-cols-3"}>
+            {!isOverviewEditing ? (
+              <>
+                <Info label="Case #" value={record.shared.caseNumber} />
+                <Info label="Client" value={record.shared.clientName} />
+                <Info label="Paralegal" value={record.paralegal.name} />
+                <Info label="Date Signed" value={formatDate(record.shared.dateSigned)} />
+                <Info label="DOL" value={formatDate(record.shared.dateOfIncident)} />
+                <Info label="Status" value={record.shared.status} />
+                <Info label="Type" value={record.shared.caseType} />
+                <Info label="Liability" value={tracker.liability ?? "Not set"} />
+                <Info label="Quarter" value={tracker.targetResolutionQuarter ?? "Not set"} />
+                <Info label="Case Size" value={tracker.caseSize ?? "Not set"} />
+                <Info label="Minimum Value" value={formatCurrency(tracker.minimumValue)} />
+                <Info label="Referral Fee" value={formatPercentValue(tracker.referralFee)} />
+                <Info label="Policy Limits" value={formatCurrency(tracker.policyLimits)} />
+                <Info label="Policy Source" value={tracker.policyInfoSource ?? "Not set"} />
+                <Info label="Stage" value={tracker.caseStage} />
+                <Info label="Expected Lit" value={tracker.expectedLitigation ?? "Not set"} />
+                <Info label="Projected firm fee" value={formatCurrency(tracker.estimatedFeeValue)} />
+              </>
+            ) : (
+              <>
+                <Field label="Status">
+                  <Select value={shared.status} onChange={(event) => updateShared("status", event.target.value as CaseStatus)}>
+                    {CASE_STATUS_OPTIONS.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Type">
+                  <Select value={shared.caseType} onChange={(event) => updateShared("caseType", event.target.value)}>
+                    {CASE_TYPE_OPTIONS.map((type) => (
+                      <option key={type} value={type}>
+                        {type}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Quarter">
+                  <Select value={tracker.targetResolutionQuarter ?? ""} onChange={(event) => updateField("targetResolutionQuarter", event.target.value || null)}>
+                    <option value="">Select quarter</option>
+                    {quarterOptions.map((quarter) => (
+                      <option key={quarter} value={quarter}>
+                        {quarter}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Case Size">
+                  <Select value={tracker.caseSize ?? ""} onChange={(event) => updateField("caseSize", event.target.value || null)}>
+                    <option value="">Select case size</option>
+                    {CASE_SIZE_OPTIONS.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Minimum Value">
+                  <FormattedNumberInput
+                    prefix="$"
+                    value={tracker.minimumValue}
+                    onValueChange={(value) => {
+                      updateField("minimumValue", value);
+                      updateField("estimatedFeeValue", value ? Math.round(value * getFeePercent(record)) : null);
+                    }}
+                  />
+                </Field>
+                <Field label="Referral Fee">
+                  <FormattedNumberInput suffix="%" value={tracker.referralFee} onValueChange={(value) => updateField("referralFee", value)} />
+                </Field>
+                <Field label="Referral Fee Arrangement">
+                  <Input value={tracker.referralFeeArrangement ?? ""} placeholder="No referral fee, percentage split, flat fee..." onChange={(event) => updateField("referralFeeArrangement", event.target.value || null)} />
+                </Field>
+                <Field label="Balance / CTA Info">
+                  <Input value={tracker.balanceCtaInfo ?? ""} placeholder="CTA balance, balance reviewed, or setup note" onChange={(event) => updateField("balanceCtaInfo", event.target.value || null)} />
+                </Field>
+                <Field label="Policy Limits">
+                  <FormattedNumberInput prefix="$" value={tracker.policyLimits} onValueChange={(value) => updateField("policyLimits", value)} />
+                </Field>
+                <Field label="Source of Policy Information">
+                  <Input value={tracker.policyInfoSource ?? ""} placeholder="Declarations page, carrier email, adjuster call..." onChange={(event) => updateField("policyInfoSource", event.target.value || null)} />
+                </Field>
+                <Field label="Stage">
+                  <Select value={tracker.caseStage} onChange={(event) => updateField("caseStage", event.target.value as TrackerEntry["caseStage"])}>
+                    {CASE_STAGE_OPTIONS.map((stage) => (
+                      <option key={stage} value={stage}>
+                        {stage}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Liability">
+                  <Select value={tracker.liability ?? ""} onChange={(event) => updateField("liability", event.target.value || null)}>
+                    <option value="">Select liability</option>
+                    {LIABILITY_OPTIONS.map((liability) => (
+                      <option key={liability} value={liability}>
+                        {liability}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Expected Lit">
+                  <Select
+                    value={tracker.expectedLitigation ?? ""}
+                    onChange={(event) => {
+                      const expectedLitigation = event.target.value as TrackerEntry["expectedLitigation"];
+                      updateField("expectedLitigation", expectedLitigation || null);
+                      if (tracker.minimumValue) {
+                        updateField("estimatedFeeValue", Math.round(tracker.minimumValue * (expectedLitigation === "Pre" ? 0.3 : 0.4)));
+                      }
+                    }}
+                  >
+                    <option value="">Select expected litigation</option>
+                    {EXPECTED_LITIGATION_OPTIONS.map((status) => (
+                      <option key={status} value={status}>
+                        {status}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Confidence level">
+                  <Select value={tracker.confidenceLevel ?? ""} onChange={(event) => updateField("confidenceLevel", (event.target.value || null) as TrackerEntry["confidenceLevel"])}>
+                    <option value="">Select confidence</option>
+                    {settings.confidenceLevels.map((level) => (
+                      <option key={level} value={level}>
+                        {level}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Projected firm fee">
+                  <FormattedNumberInput prefix="$" value={tracker.estimatedFeeValue} onValueChange={(value) => updateField("estimatedFeeValue", value)} />
+                </Field>
+                <Field className="md:col-span-2" label="Forecast notes">
+                  <Textarea value={tracker.forecastNotes} onChange={(event) => updateField("forecastNotes", event.target.value)} />
+                </Field>
+                <div className="md:col-span-2 flex flex-wrap items-center gap-3">
+                  <Button onClick={() => saveTracker()} disabled={isSaving}>
+                    <Save className="h-4 w-4" />
+                    {isSaving ? "Saving..." : "Save and mark reviewed"}
+                  </Button>
+                  {savedAt ? (
+                    <span className="inline-flex items-center gap-2 text-sm text-emerald-700">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Saved {formatDate(savedAt)}
+                    </span>
+                  ) : null}
+                  {errorMessage ? <span className="text-sm text-destructive">{errorMessage}</span> : null}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+              <div>
+                <CardTitle>Sources and Litigation Detail</CardTitle>
+                <CardDescription>Long-form fields from the sheet live here instead of crowding the case list.</CardDescription>
+              </div>
+              <Button onClick={() => saveTracker({ markReviewed: false })} disabled={isSaving} variant="outline" size="sm">
+                <Save className="h-4 w-4" />
+                {isSaving ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <Field label="Sources">
+              <Textarea value={tracker.sources} onChange={(event) => updateField("sources", event.target.value)} />
+            </Field>
+            <Field label="Lit Events Needed">
+              <Textarea value={tracker.litEventsNeeded} onChange={(event) => updateField("litEventsNeeded", event.target.value)} />
+            </Field>
+            <Field label="Timeline for Lit Events">
+              <Textarea value={tracker.litEventsTimeline} onChange={(event) => updateField("litEventsTimeline", event.target.value)} />
+            </Field>
+            <Field label="Injuries">
+              <Textarea value={tracker.injuries} onChange={(event) => updateField("injuries", event.target.value)} />
+            </Field>
+            <Field className="md:col-span-2" label="Description">
+              <Textarea value={tracker.caseDescription} onChange={(event) => updateField("caseDescription", event.target.value)} />
+            </Field>
+            <Field className="md:col-span-2" label="Status">
+              <Textarea value={tracker.statusNotes} onChange={(event) => updateField("statusNotes", event.target.value)} />
+            </Field>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+              <div>
+                <CardTitle>Results Tracking</CardTitle>
+                <CardDescription>Release, closing, deposit, and disbursement tracking from the workbook results tab.</CardDescription>
+              </div>
+              <Button onClick={() => saveTracker({ markReviewed: false })} disabled={isSaving} variant="outline" size="sm">
+                <Save className="h-4 w-4" />
+                {isSaving ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-3">
+            <Field label="Settlement Date">
+              <Input type="date" value={toDateInput(tracker.result.settlementDate)} onChange={(event) => updateResult("settlementDate", fromDateInput(event.target.value))} />
+            </Field>
+            <Field label="Settlement Amount">
+              <FormattedNumberInput prefix="$" value={tracker.result.settlementAmount} onValueChange={(value) => updateResult("settlementAmount", value)} />
+            </Field>
+            <Field label="Fee Percent">
+              <FormattedNumberInput
+                suffix="%"
+                value={tracker.result.feePercent == null ? null : Math.round(tracker.result.feePercent * 100)}
+                onValueChange={(value) => updateResult("feePercent", value == null ? null : value / 100)}
+              />
+            </Field>
+            <Field label="RJL Attorney Fees">
+              <FormattedNumberInput prefix="$" value={getCalculatedAttorneyFees(tracker.result.settlementAmount, tracker.result.feePercent)} readOnly />
+            </Field>
+            <Field label="Release">
+              <Select value={tracker.result.releaseStatus} onChange={(event) => updateResultWorkflow("releaseStatus", event.target.value as ReleaseStatus)}>
+                {RELEASE_STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Closing">
+              <Select value={tracker.result.closingStatus} onChange={(event) => updateResultWorkflow("closingStatus", event.target.value as ClosingStatus)}>
+                {CLOSING_STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Check">
+              <Select value={tracker.result.checkStatus} onChange={(event) => updateResultWorkflow("checkStatus", event.target.value as CheckStatus)}>
+                {CHECK_STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Disbursed">
+              <Select value={tracker.result.disbursedStatus} onChange={(event) => updateResultWorkflow("disbursedStatus", event.target.value as DisbursedStatus)}>
+                {DISBURSED_STATUS_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Release Signed">
+              <Input type="date" value={toDateInput(tracker.result.releaseSignedAt)} onChange={(event) => updateResult("releaseSignedAt", fromDateInput(event.target.value))} />
+            </Field>
+            <Field label="Closing Signed">
+              <Input type="date" value={toDateInput(tracker.result.closingSignedAt)} onChange={(event) => updateResult("closingSignedAt", fromDateInput(event.target.value))} />
+            </Field>
+            <Field label="Check Deposited">
+              <Input type="date" value={toDateInput(tracker.result.checkDepositedAt)} onChange={(event) => updateResult("checkDepositedAt", fromDateInput(event.target.value))} />
+            </Field>
+            <Field label="Check Disbursed">
+              <Input type="date" value={toDateInput(tracker.result.checkDisbursedAt)} onChange={(event) => updateResult("checkDisbursedAt", fromDateInput(event.target.value))} />
+            </Field>
+            <Field label="Disburse Date">
+              <Input type="date" value={toDateInput(tracker.result.disburseDate)} onChange={(event) => updateResult("disburseDate", fromDateInput(event.target.value))} />
+            </Field>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Comments and Manager Notes</CardTitle>
+            <CardDescription>Every note becomes part of the lifetime case log.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Signed in as <span className="font-semibold text-navy-950">{sessionUser.name}</span> ({sessionUser.email})
+            </p>
+            <div className="grid gap-3 md:grid-cols-[14rem_1fr_auto]">
+              <Select value={commentType} onChange={(event) => setCommentType(event.target.value as CommentType)}>
+                <option value="general_note">General note</option>
+                <option value="attorney_update">Attorney update</option>
+                <option value="manager_note">Manager note</option>
+                <option value="risk_flag">Risk flag</option>
+                <option value="value_change">Value change</option>
+              </Select>
+              <Input value={newComment} onChange={(event) => setNewComment(event.target.value)} placeholder="Add a case note..." />
+              <Button onClick={addComment} variant="pink" disabled={isAddingComment}>
+                <MessageSquarePlus className="h-4 w-4" />
+                {isAddingComment ? "Adding..." : "Add"}
+              </Button>
+            </div>
+            {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
+            <div className="space-y-3">
+              {comments.map((comment) => (
+                <div
+                  key={comment.id}
+                  className={
+                    comment.type === "manager_note" || comment.type === "risk_flag"
+                      ? "rounded-lg border border-pink-500/30 bg-pink-100/50 p-4"
+                      : "rounded-lg border bg-white p-4"
+                  }
+                >
+                  <div className="mb-2 flex flex-wrap items-center gap-2">
+                    <Badge variant={comment.type === "risk_flag" ? "danger" : comment.type === "manager_note" ? "pink" : "outline"}>
+                      {comment.type.replace(/_/g, " ")}
+                    </Badge>
+                    <span className="text-sm font-semibold text-navy-950">Posted by {comment.authorName}</span>
+                    <span className="text-xs text-muted-foreground">{formatDate(comment.createdAt)}</span>
+                  </div>
+                  <p className="text-sm leading-6 text-navy-900">{comment.body}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <aside className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Living Forecast</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Info label="Minimum Value" value={formatCurrency(tracker.minimumValue)} />
+            <Info label="Policy Limits" value={formatCurrency(tracker.policyLimits)} />
+            <Info label="Fee Percent" value={`${Math.round(getFeePercent(record) * 100)}%`} />
+            <Info label="Projected Firm Fee" value={formatCurrency(getProjectedFeeValue(record))} />
+            <Info label="Quarter" value={tracker.targetResolutionQuarter ?? "Not set"} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Setup Completeness</CardTitle>
+            <CardDescription>One-time setup fields must be entered at least once.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <SetupRow label="Client name" complete={Boolean(record.shared.clientName)} />
+            <SetupRow label="Date signed" complete={Boolean(record.shared.dateSigned)} />
+            <SetupRow label="Date of loss" complete={Boolean(record.shared.dateOfIncident)} />
+            <SetupRow label="Case type" complete={Boolean(record.shared.caseType)} />
+            <SetupRow label="Referral fee arrangement" complete={Boolean(tracker.referralFeeArrangement)} />
+            <SetupRow label="Balance / CTA info" complete={Boolean(tracker.balanceCtaInfo)} />
+            <SetupRow label="Policy limits" complete={Boolean(tracker.policyLimits)} />
+            <SetupRow label="Policy source" complete={Boolean(tracker.policyInfoSource)} />
+            <SetupRow label="Injuries" complete={Boolean(tracker.injuries)} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Result Status</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <ResultStep label="Release" value={tracker.result.releaseStatus} complete={tracker.result.releaseStatus === "Signed"} />
+            <ResultStep label="Closing" value={tracker.result.closingStatus} complete={tracker.result.closingStatus === "Signed"} />
+            <ResultStep label="Check" value={tracker.result.checkStatus} complete={tracker.result.checkStatus === "Deposited"} />
+            <ResultStep label="Disbursed" value={tracker.result.disbursedStatus} complete={tracker.result.disbursedStatus === "Yes"} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Data Quality</CardTitle>
+            <CardDescription>Frontend helper flags until Supabase rules are mapped.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {flags.length === 0 ? (
+              <Badge variant="success">No flags</Badge>
+            ) : (
+              flags.map((flag) => (
+                <div key={flag.id} className="flex items-center gap-2 rounded-lg border bg-white p-3 text-sm">
+                  <ShieldAlert className={flag.severity === "danger" ? "h-4 w-4 text-red-600" : "h-4 w-4 text-amber-600"} />
+                  {flag.label}
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Lifetime Log</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {activity.map((entry) => (
+              <div key={entry.id} className="border-l-2 border-pink-500 pl-3">
+                <p className="text-sm font-semibold text-navy-950">{entry.action}</p>
+                <p className="text-xs text-muted-foreground">
+                  {entry.userName} - {formatDate(entry.createdAt)}
+                </p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">{entry.description}</p>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </aside>
+    </div>
+  );
+}
+
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-xs font-semibold uppercase text-muted-foreground">{label}</p>
+      <p className="mt-1 text-sm font-medium text-navy-950">{value}</p>
+    </div>
+  );
+}
+
+function FormattedNumberInput({
+  value,
+  onValueChange,
+  prefix,
+  suffix,
+  readOnly,
+}: {
+  value: number | null;
+  onValueChange?: (value: number | null) => void;
+  prefix?: string;
+  suffix?: string;
+  readOnly?: boolean;
+}) {
+  const [isFocused, setIsFocused] = useState(false);
+  const [draft, setDraft] = useState(value == null ? "" : formatNumberForInput(value));
+
+  useEffect(() => {
+    if (!isFocused) setDraft(value == null ? "" : formatNumberForInput(value));
+  }, [isFocused, value]);
+
+  function commit() {
+    if (readOnly) return;
+    const nextValue = parseFormattedNumber(draft);
+    if (nextValue !== null && Number.isNaN(nextValue)) {
+      setDraft(value == null ? "" : formatNumberForInput(value));
+      return;
+    }
+    onValueChange?.(nextValue);
+    setDraft(nextValue == null ? "" : formatNumberForInput(nextValue));
+    setIsFocused(false);
+  }
+
+  return (
+    <div className="flex h-10 items-center rounded-md border border-input bg-white px-3 focus-within:ring-2 focus-within:ring-ring">
+      {prefix ? <span className="mr-1 text-muted-foreground">{prefix}</span> : null}
+      <Input
+        className="h-8 min-w-0 border-0 bg-transparent px-0 py-0 shadow-none focus-visible:ring-0"
+        inputMode="decimal"
+        readOnly={readOnly}
+        type="text"
+        value={draft}
+        onChange={(event) => setDraft(event.target.value)}
+        onFocus={() => {
+          if (readOnly) return;
+          setIsFocused(true);
+          setDraft(value == null ? "" : String(value));
+        }}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+          if (event.key === "Escape") {
+            setDraft(value == null ? "" : formatNumberForInput(value));
+            setIsFocused(false);
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      {suffix ? <span className="ml-1 text-muted-foreground">{suffix}</span> : null}
+    </div>
+  );
+}
+
+function formatNumberForInput(value: number) {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+}
+
+function parseFormattedNumber(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return Number(trimmed.replace(/[$,%\s,]/g, ""));
+}
+
+function formatPercentValue(value: number | null) {
+  if (value == null) return "Not set";
+  return `${formatNumberForInput(value)}%`;
+}
+
+function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+  return (
+    <label className={className}>
+      <span className="mb-2 block text-sm font-medium text-navy-950">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function ResultStep({ label, value, complete }: { label: string; value: string; complete: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border bg-white p-3">
+      <span className="text-sm font-medium text-navy-950">{label}</span>
+      <Badge variant={complete ? "success" : "warning"}>{value}</Badge>
+    </div>
+  );
+}
+
+function SetupRow({ label, complete }: { label: string; complete: boolean }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border bg-white p-3">
+      <span className="text-sm font-medium text-navy-950">{label}</span>
+      <Badge variant={complete ? "success" : "warning"}>{complete ? "Complete" : "Missing"}</Badge>
+    </div>
+  );
+}
+
+function toDateInput(value: string | null) {
+  if (!value) return "";
+  return value.slice(0, 10);
+}
+
+function fromDateInput(value: string) {
+  if (!value) return null;
+  return new Date(`${value}T10:00:00.000Z`).toISOString();
+}
