@@ -20,9 +20,12 @@ Apply `supabase/sql/006_slack_integration.sql` in the Supabase SQL editor.
 ## 3. Event Subscriptions (thread replies)
 
 1. Enable **Event Subscriptions**.
-2. Request URL: `https://YOUR_DOMAIN/api/slack/events`
-3. Subscribe to bot event: `message.channels` (and `message.groups` if private case channels).
-4. Reinstall the app if prompted.
+2. Request URL: `https://YOUR_DOMAIN/api/slack/events` (e.g. `https://rjl-case-tracker.vercel.app/api/slack/events`)
+3. Set `SLACK_SIGNING_SECRET` on your host (Vercel → Environment Variables) and redeploy before clicking **Retry**.
+4. Subscribe to bot event: `message.channels` (and `message.groups` if private case channels).
+5. Reinstall the app if prompted.
+
+If verification fails with “didn't respond with the challenge”, the app was likely redirecting Slack to `/login` — ensure the latest deploy includes the public `/api/slack/*` middleware exception.
 
 Thread replies on reminder messages can update the tracker using lines like:
 

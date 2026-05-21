@@ -5,8 +5,13 @@ import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/env";
 
 const PUBLIC_PATHS = ["/login", "/auth/callback", "/auth/signout"];
 
+/** Webhooks and cron must bypass session auth (Slack, schedulers). */
+const PUBLIC_API_PREFIXES = ["/api/slack/", "/api/cron/"];
+
 function isPublicPath(pathname: string) {
-  return PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+  if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))) return true;
+  if (PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true;
+  return false;
 }
 
 export async function updateSession(request: NextRequest) {

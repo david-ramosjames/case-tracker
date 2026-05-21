@@ -41,14 +41,23 @@ export async function POST(request: Request) {
   const timestamp = request.headers.get("x-slack-request-timestamp");
   const signature = request.headers.get("x-slack-signature");
 
-  if (!verifySlackSignature(rawBody, timestamp, signature)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  let payload: SlackEventPayload;
+  try {
+    payload = JSON.parse(rawBody) as SlackEventPayload;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const payload = JSON.parse(rawBody) as SlackEventPayload;
-
+  // Slack URL verification handshake (must return challenge before any other logic).
   if (payload.type === "url_verification" && payload.challenge) {
+    if (!verifySlackSignature(rawBody, timestamp, signature)) {
+      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+    }
     return NextResponse.json({ challenge: payload.challenge });
+  }
+
+  if (!verifySlackSignature(rawBody, timestamp, signature)) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
   if (!isSlackEnabled()) {
