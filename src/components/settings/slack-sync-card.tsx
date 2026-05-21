@@ -16,13 +16,9 @@ export function SlackSyncCard() {
     setError(null);
     try {
       const response = await fetch("/api/slack/sync-channels", { method: "POST" });
-      const body = (await response.json()) as { synced?: number; unresolved?: number; error?: string };
+      const body = (await response.json()) as { synced?: number; error?: string };
       if (!response.ok) throw new Error(body.error ?? "Sync failed.");
-      const unresolvedNote =
-        body.unresolved && body.unresolved > 0
-          ? ` ${body.unresolved} channel name(s) not found in Slack (check spelling or invite the bot).`
-          : "";
-      setMessage(`Synced ${body.synced ?? 0} rows from Google Sheet.${unresolvedNote}`);
+      setMessage(`Imported ${body.synced ?? 0} case → channel mappings from Google Sheet.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed.");
     } finally {
@@ -35,9 +31,9 @@ export function SlackSyncCard() {
       <CardHeader>
         <CardTitle>Slack case channels (Google Sheet)</CardTitle>
         <CardDescription>
-          You do not enter Slack channels in this app. Maintain your existing spreadsheet with Case #, Slack channel name, and
-          Status (from the channel topic). The tracker pulls that sheet automatically before daily Slack reminders, or use Sync now
-          for an immediate refresh. See docs/SLACK_SETUP.md.
+          Copies <strong>Client Contact Status → Sheet1</strong> into the tracker: Case No → Slack channel name → Status. This only
+          reads Google Sheets — it does not call Slack. Slack is used later when sending reminders or comments (to find the channel by
+          name). See docs/SLACK_SETUP.md.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -50,7 +46,7 @@ export function SlackSyncCard() {
         </ul>
         <Button variant="outline" disabled={isSyncing} onClick={() => void syncChannels()}>
           {isSyncing ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Sync now from Google Sheet
+          Import from Google Sheet
         </Button>
         {message ? <p className="text-sm text-emerald-700">{message}</p> : null}
         {error ? <p className="text-sm text-rose-700">{error}</p> : null}
