@@ -24,6 +24,7 @@ const TRACKER_FIELD_LABELS: Record<string, string> = {
   statusNotes: "Status",
   forecastNotes: "Forecast notes",
   lastQuarterlyCheckInAt: "Last quarterly check-in",
+  lastSourcesLitUpdatedAt: "Sources & litigation updated",
 };
 
 const RESULT_FIELD_LABELS: Record<keyof SettlementResult, string> = {
@@ -46,6 +47,7 @@ const RESULT_FIELD_LABELS: Record<keyof SettlementResult, string> = {
 const SHARED_FIELD_LABELS: Record<string, string> = {
   status: "Status",
   caseType: "Type",
+  dateOfIncident: "DOL",
 };
 
 function valuesEqual(before: unknown, after: unknown) {
@@ -59,8 +61,8 @@ export function describeTrackerChanges(
   before: TrackerEntry,
   input: TrackerUpdateInput & { result?: SettlementResult },
   shared?: {
-    before?: { status?: string; caseType?: string };
-    after?: { status?: string; caseType?: string };
+    before?: { status?: string; caseType?: string; dateOfIncident?: string | null };
+    after?: { status?: string; caseType?: string; dateOfIncident?: string | null };
   },
 ): string[] {
   const labels: string[] = [];

@@ -39,7 +39,7 @@ import {
   type TrackerComment,
   type TrackerEntry,
 } from "@/lib/types";
-import { formatCurrency, formatDate, getCalculatedAttorneyFees } from "@/lib/utils";
+import { formatCurrency, formatDate, formatOptionalDate, getCalculatedAttorneyFees } from "@/lib/utils";
 
 export function CaseDetailView({
   initialRecord,
@@ -62,6 +62,8 @@ export function CaseDetailView({
   const [commentType, setCommentType] = useState<CommentType>("general_note");
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [isOverviewEditing, setIsOverviewEditing] = useState(false);
+  const [isSourcesEditing, setIsSourcesEditing] = useState(false);
+  const [isResultsEditing, setIsResultsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingComment, setIsAddingComment] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -112,6 +114,7 @@ export function CaseDetailView({
       shared: {
         status: shared.status,
         caseType: shared.caseType,
+        dateOfIncident: shared.dateOfIncident,
       },
       tracker: {
         caseStage: nextTracker.caseStage,
@@ -296,7 +299,7 @@ export function CaseDetailView({
               <div>
                 <CardTitle className="text-xl">{record.shared.clientName}</CardTitle>
                 <CardDescription>
-                  {record.shared.caseNumber} - {record.shared.caseType} - DOL {formatDate(record.shared.dateOfIncident)}
+                  {record.shared.caseNumber} - {record.shared.caseType} - DOL {formatOptionalDate(record.shared.dateOfIncident)}
                 </CardDescription>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -357,7 +360,7 @@ export function CaseDetailView({
             <CardHeader>
               <CardTitle>Quarterly Check-In Required</CardTitle>
               <CardDescription>
-                Confirm or update expected completion quarter, minimum case value, and recent case description every 90 days.
+                Confirm or update expected completion quarter, minimum case value, and Sources & Litigation Detail every 90 days. You can also reply in the case Slack channel thread when reminded.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-wrap items-center gap-3">
@@ -392,7 +395,7 @@ export function CaseDetailView({
                 <Info label="Client" value={record.shared.clientName} />
                 <Info label="Paralegal" value={record.paralegal.name} />
                 <Info label="Date Signed" value={formatDate(record.shared.dateSigned)} />
-                <Info label="DOL" value={formatDate(record.shared.dateOfIncident)} />
+                <Info label="DOL" value={formatOptionalDate(record.shared.dateOfIncident)} />
                 <Info label="Status" value={record.shared.status} />
                 <Info label="Type" value={record.shared.caseType} />
                 <Info label="Liability" value={tracker.liability ?? "Not set"} />
@@ -408,6 +411,13 @@ export function CaseDetailView({
               </>
             ) : (
               <>
+                <Field label="DOL">
+                  <Input
+                    type="date"
+                    value={toDateInput(shared.dateOfIncident)}
+                    onChange={(event) => updateShared("dateOfIncident", fromDateInput(event.target.value))}
+                  />
+                </Field>
                 <Field label="Status">
                   <Select value={shared.status} onChange={(event) => updateShared("status", event.target.value as CaseStatus)}>
                     {CASE_STATUS_OPTIONS.map((status) => (
@@ -550,31 +560,52 @@ export function CaseDetailView({
                 <CardTitle>Sources and Litigation Detail</CardTitle>
                 <CardDescription>Long-form fields from the sheet live here instead of crowding the case list.</CardDescription>
               </div>
-              <Button onClick={() => saveTracker({ markReviewed: false })} disabled={isSaving} variant="outline" size="sm">
-                <Save className="h-4 w-4" />
-                {isSaving ? "Saving..." : "Save"}
+              <Button variant={isSourcesEditing ? "pink" : "outline"} size="sm" onClick={() => setIsSourcesEditing((current) => !current)}>
+                <Pencil className="h-4 w-4" />
+                {isSourcesEditing ? "View" : "Edit"}
               </Button>
             </div>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-2">
-            <Field label="Sources">
-              <Textarea value={tracker.sources} onChange={(event) => updateField("sources", event.target.value)} />
-            </Field>
-            <Field label="Lit Events Needed">
-              <Textarea value={tracker.litEventsNeeded} onChange={(event) => updateField("litEventsNeeded", event.target.value)} />
-            </Field>
-            <Field label="Timeline for Lit Events">
-              <Textarea value={tracker.litEventsTimeline} onChange={(event) => updateField("litEventsTimeline", event.target.value)} />
-            </Field>
-            <Field label="Injuries">
-              <Textarea value={tracker.injuries} onChange={(event) => updateField("injuries", event.target.value)} />
-            </Field>
-            <Field className="md:col-span-2" label="Description">
-              <Textarea value={tracker.caseDescription} onChange={(event) => updateField("caseDescription", event.target.value)} />
-            </Field>
-            <Field className="md:col-span-2" label="Status">
-              <Textarea value={tracker.statusNotes} onChange={(event) => updateField("statusNotes", event.target.value)} />
-            </Field>
+            {!isSourcesEditing ? (
+              <>
+                <LongInfo label="Sources" value={tracker.sources} />
+                <LongInfo label="Lit Events Needed" value={tracker.litEventsNeeded} />
+                <LongInfo label="Timeline for Lit Events" value={tracker.litEventsTimeline} />
+                <LongInfo label="Injuries" value={tracker.injuries} />
+                <LongInfo className="md:col-span-2" label="Description" value={tracker.caseDescription} />
+                <LongInfo className="md:col-span-2" label="Status" value={tracker.statusNotes} />
+              </>
+            ) : (
+              <>
+                <Field label="Sources">
+                  <Textarea value={tracker.sources} onChange={(event) => updateField("sources", event.target.value)} />
+                </Field>
+                <Field label="Lit Events Needed">
+                  <Textarea value={tracker.litEventsNeeded} onChange={(event) => updateField("litEventsNeeded", event.target.value)} />
+                </Field>
+                <Field label="Timeline for Lit Events">
+                  <Textarea value={tracker.litEventsTimeline} onChange={(event) => updateField("litEventsTimeline", event.target.value)} />
+                </Field>
+                <Field label="Injuries">
+                  <Textarea value={tracker.injuries} onChange={(event) => updateField("injuries", event.target.value)} />
+                </Field>
+                <Field className="md:col-span-2" label="Description">
+                  <Textarea value={tracker.caseDescription} onChange={(event) => updateField("caseDescription", event.target.value)} />
+                </Field>
+                <Field className="md:col-span-2" label="Status">
+                  <Textarea value={tracker.statusNotes} onChange={(event) => updateField("statusNotes", event.target.value)} />
+                </Field>
+                <SaveActions
+                  className="md:col-span-2"
+                  isSaving={isSaving}
+                  savedAt={savedAt}
+                  errorMessage={errorMessage}
+                  saveLabel="Save"
+                  onSave={() => saveTracker({ markReviewed: false })}
+                />
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -585,80 +616,114 @@ export function CaseDetailView({
                 <CardTitle>Results Tracking</CardTitle>
                 <CardDescription>Release, closing, deposit, and disbursement tracking from the workbook results tab.</CardDescription>
               </div>
-              <Button onClick={() => saveTracker({ markReviewed: false })} disabled={isSaving} variant="outline" size="sm">
-                <Save className="h-4 w-4" />
-                {isSaving ? "Saving..." : "Save"}
+              <Button variant={isResultsEditing ? "pink" : "outline"} size="sm" onClick={() => setIsResultsEditing((current) => !current)}>
+                <Pencil className="h-4 w-4" />
+                {isResultsEditing ? "View" : "Edit"}
               </Button>
             </div>
           </CardHeader>
           <CardContent className="grid gap-4 md:grid-cols-3">
-            <Field label="Settlement Date">
-              <Input type="date" value={toDateInput(tracker.result.settlementDate)} onChange={(event) => updateResult("settlementDate", fromDateInput(event.target.value))} />
-            </Field>
-            <Field label="Settlement Amount">
-              <FormattedNumberInput prefix="$" value={tracker.result.settlementAmount} onValueChange={(value) => updateResult("settlementAmount", value)} />
-            </Field>
-            <Field label="Fee Percent">
-              <FormattedNumberInput
-                suffix="%"
-                value={tracker.result.feePercent == null ? null : Math.round(tracker.result.feePercent * 100)}
-                onValueChange={(value) => updateResult("feePercent", value == null ? null : value / 100)}
-              />
-            </Field>
-            <Field label="RJL Attorney Fees">
-              <FormattedNumberInput prefix="$" value={getCalculatedAttorneyFees(tracker.result.settlementAmount, tracker.result.feePercent)} readOnly />
-            </Field>
-            <Field label="Release">
-              <Select value={tracker.result.releaseStatus} onChange={(event) => updateResultWorkflow("releaseStatus", event.target.value as ReleaseStatus)}>
-                {RELEASE_STATUS_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Closing">
-              <Select value={tracker.result.closingStatus} onChange={(event) => updateResultWorkflow("closingStatus", event.target.value as ClosingStatus)}>
-                {CLOSING_STATUS_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Check">
-              <Select value={tracker.result.checkStatus} onChange={(event) => updateResultWorkflow("checkStatus", event.target.value as CheckStatus)}>
-                {CHECK_STATUS_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Disbursed">
-              <Select value={tracker.result.disbursedStatus} onChange={(event) => updateResultWorkflow("disbursedStatus", event.target.value as DisbursedStatus)}>
-                {DISBURSED_STATUS_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-            <Field label="Release Signed">
-              <Input type="date" value={toDateInput(tracker.result.releaseSignedAt)} onChange={(event) => updateResult("releaseSignedAt", fromDateInput(event.target.value))} />
-            </Field>
-            <Field label="Closing Signed">
-              <Input type="date" value={toDateInput(tracker.result.closingSignedAt)} onChange={(event) => updateResult("closingSignedAt", fromDateInput(event.target.value))} />
-            </Field>
-            <Field label="Check Deposited">
-              <Input type="date" value={toDateInput(tracker.result.checkDepositedAt)} onChange={(event) => updateResult("checkDepositedAt", fromDateInput(event.target.value))} />
-            </Field>
-            <Field label="Check Disbursed">
-              <Input type="date" value={toDateInput(tracker.result.checkDisbursedAt)} onChange={(event) => updateResult("checkDisbursedAt", fromDateInput(event.target.value))} />
-            </Field>
-            <Field label="Disburse Date">
-              <Input type="date" value={toDateInput(tracker.result.disburseDate)} onChange={(event) => updateResult("disburseDate", fromDateInput(event.target.value))} />
-            </Field>
+            {!isResultsEditing ? (
+              <>
+                <Info label="Settlement Date" value={formatDate(tracker.result.settlementDate)} />
+                <Info label="Settlement Amount" value={formatCurrency(tracker.result.settlementAmount)} />
+                <Info
+                  label="Fee Percent"
+                  value={tracker.result.feePercent == null ? "Not set" : `${Math.round(tracker.result.feePercent * 100)}%`}
+                />
+                <Info
+                  label="RJL Attorney Fees"
+                  value={formatCurrency(getCalculatedAttorneyFees(tracker.result.settlementAmount, tracker.result.feePercent))}
+                />
+                <Info label="Release" value={tracker.result.releaseStatus} />
+                <Info label="Closing" value={tracker.result.closingStatus} />
+                <Info label="Check" value={tracker.result.checkStatus} />
+                <Info label="Disbursed" value={tracker.result.disbursedStatus} />
+                <Info label="Release Signed" value={formatDate(tracker.result.releaseSignedAt)} />
+                <Info label="Closing Signed" value={formatDate(tracker.result.closingSignedAt)} />
+                <Info label="Check Deposited" value={formatDate(tracker.result.checkDepositedAt)} />
+                <Info label="Check Disbursed" value={formatDate(tracker.result.checkDisbursedAt)} />
+                <Info label="Disburse Date" value={formatDate(tracker.result.disburseDate)} />
+              </>
+            ) : (
+              <>
+                <Field label="Settlement Date">
+                  <Input type="date" value={toDateInput(tracker.result.settlementDate)} onChange={(event) => updateResult("settlementDate", fromDateInput(event.target.value))} />
+                </Field>
+                <Field label="Settlement Amount">
+                  <FormattedNumberInput prefix="$" value={tracker.result.settlementAmount} onValueChange={(value) => updateResult("settlementAmount", value)} />
+                </Field>
+                <Field label="Fee Percent">
+                  <FormattedNumberInput
+                    suffix="%"
+                    value={tracker.result.feePercent == null ? null : Math.round(tracker.result.feePercent * 100)}
+                    onValueChange={(value) => updateResult("feePercent", value == null ? null : value / 100)}
+                  />
+                </Field>
+                <Field label="RJL Attorney Fees">
+                  <FormattedNumberInput prefix="$" value={getCalculatedAttorneyFees(tracker.result.settlementAmount, tracker.result.feePercent)} readOnly />
+                </Field>
+                <Field label="Release">
+                  <Select value={tracker.result.releaseStatus} onChange={(event) => updateResultWorkflow("releaseStatus", event.target.value as ReleaseStatus)}>
+                    {RELEASE_STATUS_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Closing">
+                  <Select value={tracker.result.closingStatus} onChange={(event) => updateResultWorkflow("closingStatus", event.target.value as ClosingStatus)}>
+                    {CLOSING_STATUS_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Check">
+                  <Select value={tracker.result.checkStatus} onChange={(event) => updateResultWorkflow("checkStatus", event.target.value as CheckStatus)}>
+                    {CHECK_STATUS_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Disbursed">
+                  <Select value={tracker.result.disbursedStatus} onChange={(event) => updateResultWorkflow("disbursedStatus", event.target.value as DisbursedStatus)}>
+                    {DISBURSED_STATUS_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Release Signed">
+                  <Input type="date" value={toDateInput(tracker.result.releaseSignedAt)} onChange={(event) => updateResult("releaseSignedAt", fromDateInput(event.target.value))} />
+                </Field>
+                <Field label="Closing Signed">
+                  <Input type="date" value={toDateInput(tracker.result.closingSignedAt)} onChange={(event) => updateResult("closingSignedAt", fromDateInput(event.target.value))} />
+                </Field>
+                <Field label="Check Deposited">
+                  <Input type="date" value={toDateInput(tracker.result.checkDepositedAt)} onChange={(event) => updateResult("checkDepositedAt", fromDateInput(event.target.value))} />
+                </Field>
+                <Field label="Check Disbursed">
+                  <Input type="date" value={toDateInput(tracker.result.checkDisbursedAt)} onChange={(event) => updateResult("checkDisbursedAt", fromDateInput(event.target.value))} />
+                </Field>
+                <Field label="Disburse Date">
+                  <Input type="date" value={toDateInput(tracker.result.disburseDate)} onChange={(event) => updateResult("disburseDate", fromDateInput(event.target.value))} />
+                </Field>
+                <SaveActions
+                  className="md:col-span-3"
+                  isSaving={isSaving}
+                  savedAt={savedAt}
+                  errorMessage={errorMessage}
+                  saveLabel="Save"
+                  onSave={() => saveTracker({ markReviewed: false })}
+                />
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -800,6 +865,47 @@ function Info({ label, value }: { label: string; value: string }) {
     <div>
       <p className="text-xs font-semibold uppercase text-muted-foreground">{label}</p>
       <p className="mt-1 text-sm font-medium text-navy-950">{value}</p>
+    </div>
+  );
+}
+
+function LongInfo({ label, value, className }: { label: string; value: string; className?: string }) {
+  return (
+    <div className={className}>
+      <p className="text-xs font-semibold uppercase text-muted-foreground">{label}</p>
+      <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-navy-950">{value.trim() ? value : "Not set"}</p>
+    </div>
+  );
+}
+
+function SaveActions({
+  className,
+  isSaving,
+  savedAt,
+  errorMessage,
+  saveLabel,
+  onSave,
+}: {
+  className?: string;
+  isSaving: boolean;
+  savedAt: string | null;
+  errorMessage: string | null;
+  saveLabel: string;
+  onSave: () => void;
+}) {
+  return (
+    <div className={`flex flex-wrap items-center gap-3 ${className ?? ""}`}>
+      <Button onClick={onSave} disabled={isSaving}>
+        <Save className="h-4 w-4" />
+        {isSaving ? "Saving..." : saveLabel}
+      </Button>
+      {savedAt ? (
+        <span className="inline-flex items-center gap-2 text-sm text-emerald-700">
+          <CheckCircle2 className="h-4 w-4" />
+          Saved {formatDate(savedAt)}
+        </span>
+      ) : null}
+      {errorMessage ? <span className="text-sm text-destructive">{errorMessage}</span> : null}
     </div>
   );
 }

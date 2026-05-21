@@ -47,3 +47,9 @@ export function getTargetPeriodOptions(date = new Date()) {
 
   return years.flatMap((year) => [`Q1-${year}`, `Q2-${year}`, `Q3-${year}`, `Q4-${year}`, `1H-${year}`, `2H-${year}`]);
 }
+
+/** Calendar years for attorney fee goals (supports year rollover). */
+export function getGoalYearOptions(date = new Date()) {
+  const currentYear = date.getFullYear();
+  return Array.from({ length: 5 }, (_, index) => currentYear - 1 + index);
+}

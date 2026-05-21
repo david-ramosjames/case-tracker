@@ -25,6 +25,16 @@ export function formatDate(value: string | null | undefined) {
   }).format(new Date(value));
 }
 
+export function formatOptionalDate(value: string | null | undefined) {
+  if (!value) return "Not set";
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(value));
+}
+
 export function getCurrentQuarter(date = new Date()) {
   const quarter = Math.floor(date.getMonth() / 3) + 1;
   return `${date.getFullYear()} Q${quarter}`;

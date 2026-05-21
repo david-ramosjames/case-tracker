@@ -1,17 +1,100 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getFirmOutputMetrics } from "@/lib/calculations";
-import { type AttorneyGoal, type CaseRecord } from "@/lib/types";
+import { type AppUser, type AttorneyGoal, type CaseRecord } from "@/lib/types";
 import { formatCurrency, percent } from "@/lib/utils";
 
-export function OutputView({ records, goals }: { records: CaseRecord[]; goals: AttorneyGoal[] }) {
-  const output = getFirmOutputMetrics(records, goals);
+export function OutputView({
+  records,
+  goals,
+  users,
+}: {
+  records: CaseRecord[];
+  goals: AttorneyGoal[];
+  users: AppUser[];
+}) {
+  const [attorney, setAttorney] = useState("all");
+  const [paralegal, setParalegal] = useState("all");
+
+  const attorneys = users.filter((user) => user.role === "attorney");
+  const paralegals = users.filter((user) => user.role === "paralegal");
+
+  const filteredRecords = useMemo(() => {
+    return records.filter((record) => {
+      if (attorney !== "all" && record.shared.attorneyId !== attorney) return false;
+      if (paralegal !== "all" && record.shared.paralegalId !== paralegal) return false;
+      return true;
+    });
+  }, [attorney, paralegal, records]);
+
+  const filteredGoals = useMemo(() => {
+    if (attorney !== "all") return goals.filter((goal) => goal.attorneyId === attorney);
+    const attorneyIds = new Set(filteredRecords.map((record) => record.shared.attorneyId));
+    return goals.filter((goal) => attorneyIds.has(goal.attorneyId));
+  }, [attorney, filteredRecords, goals]);
+
+  const output = useMemo(() => getFirmOutputMetrics(filteredRecords, filteredGoals), [filteredGoals, filteredRecords]);
   const { results } = output;
+
+  const activeFilterCount = [attorney !== "all", paralegal !== "all"].filter(Boolean).length;
+  const selectedAttorneyName = attorneys.find((user) => user.id === attorney)?.name;
+  const selectedParalegalName = paralegals.find((user) => user.id === paralegal)?.name;
+
+  function clearFilters() {
+    setAttorney("all");
+    setParalegal("all");
+  }
 
   return (
     <div className="space-y-6">
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="flex flex-wrap items-center gap-2">
+              <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-semibold text-navy-950">Filters</span>
+              {activeFilterCount > 0 ? <Badge variant="pink">{activeFilterCount}</Badge> : null}
+              {activeFilterCount > 0 ? (
+                <Button variant="ghost" size="sm" onClick={clearFilters}>
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+            <p className="text-sm text-muted-foreground lg:ml-auto">
+              Showing {filteredRecords.length} of {records.length} cases
+              {selectedAttorneyName ? ` · ${selectedAttorneyName}` : ""}
+              {selectedParalegalName ? ` · ${selectedParalegalName}` : ""}
+            </p>
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:max-w-2xl">
+            <Select value={attorney} onChange={(event) => setAttorney(event.target.value)} aria-label="Attorney">
+              <option value="all">All attorneys</option>
+              {attorneys.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </Select>
+            <Select value={paralegal} onChange={(event) => setParalegal(event.target.value)} aria-label="Paralegal">
+              <option value="all">All paralegals</option>
+              {paralegals.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 lg:grid-cols-4">
         <SummaryCard label="Gross Settled" value={formatCurrency(results.grossSettled)} detail="Settlement amounts signed" />
         <SummaryCard label="Gross Disbursed" value={formatCurrency(results.grossDisbursed)} detail="Settlement dollars disbursed" />
@@ -22,7 +105,10 @@ export function OutputView({ records, goals }: { records: CaseRecord[]; goals: A
       <Card>
         <CardHeader>
           <CardTitle>Results vs Goals</CardTitle>
-          <CardDescription>Full-year goal and current pacing view for settlements and attorney fees.</CardDescription>
+          <CardDescription>
+            Full-year goal and current pacing view for settlements and attorney fees
+            {attorney !== "all" || paralegal !== "all" ? " (filtered)." : "."}
+          </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table>
@@ -117,7 +203,7 @@ export function OutputView({ records, goals }: { records: CaseRecord[]; goals: A
             <CardDescription>Disbursed fees compared with the commission threshold.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
-            <SummaryCard label="Commission Threshold" value={formatCurrency(results.commissionThreshold)} detail="Based on current annual fee goals" />
+            <SummaryCard label="Commission Threshold" value={formatCurrency(results.commissionThreshold)} detail="Based on filtered annual fee goals" />
             <SummaryCard label="Commissionable Amount" value={formatCurrency(results.commissionableAmount)} detail="Disbursed fees above threshold" />
           </CardContent>
         </Card>
@@ -162,11 +248,11 @@ function ResultsRow({
       <TableCell>{formatCurrency(settled)}</TableCell>
       <TableCell>{formatCurrency(disbursed)}</TableCell>
       <TableCell>{formatCurrency(fullYearGoal)}</TableCell>
-      <TableCell>{percent((disbursed / fullYearGoal) * 100)}</TableCell>
-      <TableCell>{percent((settled / fullYearGoal) * 100)}</TableCell>
+      <TableCell>{percent(fullYearGoal > 0 ? (disbursed / fullYearGoal) * 100 : 0)}</TableCell>
+      <TableCell>{percent(fullYearGoal > 0 ? (settled / fullYearGoal) * 100 : 0)}</TableCell>
       <TableCell>{percent(yearElapsed)}</TableCell>
       <TableCell>{formatCurrency(pacingGoal)}</TableCell>
-      <TableCell>{percent((disbursed / pacingGoal) * 100)}</TableCell>
+      <TableCell>{percent(pacingGoal > 0 ? (disbursed / pacingGoal) * 100 : 0)}</TableCell>
     </TableRow>
   );
 }

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Eye } from "lucide-react";
+import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -157,6 +158,7 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
               <TableRow>
                 <TableHead>Case #</TableHead>
                 <TableHead>Client</TableHead>
+                <TableHead>Attorney</TableHead>
                 <TableHead>Paralegal</TableHead>
                 <TableHead>Settlement Date</TableHead>
                 <TableHead>Settlement Amount</TableHead>
@@ -177,8 +179,11 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
 
                 return (
                   <TableRow key={record.shared.id}>
-                    <TableCell className="font-semibold text-navy-950">{record.shared.caseNumber}</TableCell>
+                    <TableCell>
+                      <CaseNumberLink caseId={record.shared.id} caseNumber={record.shared.caseNumber} />
+                    </TableCell>
                     <TableCell>{record.shared.clientName}</TableCell>
+                    <TableCell>{record.attorney.name}</TableCell>
                     <TableCell>{record.paralegal.name}</TableCell>
                     <TableCell>
                       <Input className="h-9 min-w-32 text-xs" type="date" value={toDateInput(result.settlementDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, settlementDate: fromDateInput(event.target.value) }))} />

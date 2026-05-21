@@ -1,3 +1,12 @@
+import { cleanCaseNumber } from "@/lib/csv/parse";
+import { parseCaseBackfillCsv, type ParsedCaseBackfillRow } from "@/lib/csv/case-backfill";
+import { trackerTouchesSourcesLit } from "@/lib/slack/reminders";
+import {
+  notifySlackCaseStageUpdated,
+  notifySlackCommentPosted,
+  notifySlackTrackerSaved,
+} from "@/lib/slack/notify";
+import { parseSlackThreadUpdate } from "@/lib/slack/thread-update";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildTrackerActivityDescription, describeTrackerChanges } from "@/lib/tracker-changes";
@@ -8,6 +17,7 @@ import {
   type AttorneyGoal,
   type CaseRecord,
   type CaseStage,
+  type CaseBackfillImportResult,
   type CaseStatus,
   type CaseTrackerSettings,
   type CaseTrackerSnapshot,
@@ -87,7 +97,10 @@ export async function getCases(): Promise<CaseRecord[]> {
 
   const [{ data: caseRows }, { data: trackerRows }, { data: resultRows }, { data: contactRows }, { data: suggestionRows }] =
     await Promise.all([
-      sharedClient.from("cases").select("*").order("created_at", { ascending: false }),
+      sharedClient
+        .from("cases")
+        .select("id,case_number,client_name,name,status,case_type,date_of_incident,assigned_contact_ids,created_at,updated_at")
+        .order("created_at", { ascending: false }),
       trackerClient.from("case_tracker_entries").select("*").order("created_at", { ascending: false }),
       trackerClient.from("case_tracker_results").select("*"),
       sharedClient.from("contacts").select("id,name,email,role"),
@@ -131,8 +144,10 @@ export type TrackerActor = {
 
 export type TrackerUpdateOptions = {
   actor?: TrackerActor;
-  shared?: { status?: CaseStatus; caseType?: string };
+  shared?: { status?: CaseStatus; caseType?: string; dateOfIncident?: string | null };
   markReviewed?: boolean;
+  /** When saving a partial patch, pass the patch here so activity logs only list changed fields. */
+  changeInput?: TrackerUpdateInput & { result?: SettlementResult };
 };
 
 export async function updateTrackerEntry(
@@ -145,17 +160,28 @@ export async function updateTrackerEntry(
   const existingRecord = await getCaseById(caseId);
   const existingTracker = existingRecord?.tracker ?? null;
   const markReviewed = options.markReviewed ?? true;
+  const changeInput = options.changeInput ?? input;
   const changedFields = existingTracker
-    ? describeTrackerChanges(existingTracker, input, {
+    ? describeTrackerChanges(existingTracker, changeInput, {
         before: existingRecord
-          ? { status: existingRecord.shared.status, caseType: existingRecord.shared.caseType }
+          ? {
+              status: existingRecord.shared.status,
+              caseType: existingRecord.shared.caseType,
+              dateOfIncident: existingRecord.shared.dateOfIncident,
+            }
           : undefined,
         after: options.shared,
       })
     : [];
 
-  const payload = trackerUpdateToRow(input, markReviewed);
+  const now = new Date().toISOString();
+  const inputWithSourcesLit = trackerTouchesSourcesLit(changeInput)
+    ? { ...input, lastSourcesLitUpdatedAt: input.lastSourcesLitUpdatedAt ?? now }
+    : input;
+
+  const payload = trackerUpdateToRow(inputWithSourcesLit, markReviewed);
   const requestedResult = input.result;
+  const previousStage = existingTracker?.caseStage;
   const { data, error } = await client
     .from("case_tracker_entries")
     .update(payload)
@@ -174,6 +200,11 @@ export async function updateTrackerEntry(
       options.actor,
       { changedFields },
     );
+    if (existingRecord) {
+      void runSlackTrackerSideEffects(existingRecord, tracker, changeInput, previousStage).catch((error) => {
+        console.error("Slack tracker notification failed", error);
+      });
+    }
     return { tracker, activity: activity ?? undefined };
   }
 
@@ -198,12 +229,113 @@ export async function updateTrackerEntry(
   return { tracker, activity: activity ?? undefined };
 }
 
-export async function updateSharedCaseFields(caseId: string, input: { status?: CaseStatus; caseType?: string }) {
+export async function importCaseBackfillCsv(
+  csvText: string,
+  options: { actor?: TrackerActor; dryRun?: boolean } = {},
+): Promise<CaseBackfillImportResult> {
+  const parsedRows = parseCaseBackfillCsv(csvText);
+  const cases = await getCases();
+  const byCaseNumber = new Map(cases.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
+
+  const preview: CaseBackfillImportResult["preview"] = [];
+  const unmatched: string[] = [];
+  let matched = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (const row of parsedRows) {
+    const existing = byCaseNumber.get(row.caseNumber);
+    const fieldCount = countBackfillFields(row);
+
+    preview.push({ caseNumber: row.caseNumber, matched: Boolean(existing), fieldCount });
+
+    if (!existing) {
+      unmatched.push(row.caseNumber);
+      continue;
+    }
+
+    matched += 1;
+    if (fieldCount === 0) {
+      skipped += 1;
+      continue;
+    }
+
+    if (options.dryRun) continue;
+
+    if (Object.keys(row.shared).length > 0) {
+      await updateSharedCaseFields(existing.shared.id, row.shared);
+    }
+
+    const trackerPatch = row.tracker;
+    const resultPatch = row.result;
+    const hasTrackerPatch = Object.keys(trackerPatch).length > 0;
+    const hasResultPatch = Object.keys(resultPatch).length > 0;
+
+    if (hasTrackerPatch || hasResultPatch) {
+      const mergedTracker = mergeTrackerImport(existing.tracker, trackerPatch);
+      const mergedResult = hasResultPatch ? { ...existing.tracker.result, ...resultPatch } : undefined;
+      await updateTrackerEntry(
+        existing.shared.id,
+        {
+          ...mergedTracker,
+          ...(mergedResult ? { result: mergedResult } : {}),
+        },
+        {
+          actor: options.actor,
+          shared: Object.keys(row.shared).length > 0 ? row.shared : undefined,
+          markReviewed: false,
+          changeInput: {
+            ...trackerPatch,
+            ...(hasResultPatch ? { result: resultPatch as SettlementResult } : {}),
+          },
+        },
+      );
+    } else if (Object.keys(row.shared).length > 0) {
+      await createActivityEntry(
+        existing.shared.id,
+        "CSV backfill",
+        buildTrackerActivityDescription(
+          describeTrackerChanges(existing.tracker, {}, {
+            before: {
+              status: existing.shared.status,
+              caseType: existing.shared.caseType,
+              dateOfIncident: existing.shared.dateOfIncident,
+            },
+            after: row.shared,
+          }),
+          false,
+        ),
+        options.actor,
+        { source: "csv_backfill" },
+      );
+    }
+
+    updated += 1;
+  }
+
+  return {
+    totalRows: parsedRows.length,
+    matched,
+    updated: options.dryRun ? 0 : updated,
+    skipped,
+    unmatched,
+    preview,
+    dryRun: Boolean(options.dryRun),
+  };
+}
+
+export async function updateSharedCaseFields(
+  caseId: string,
+  input: { status?: CaseStatus; caseType?: string; dateOfIncident?: string | null },
+) {
   const client = await createSharedDataClient();
 
-  const payload: { status?: string; case_type?: string } = {};
+  const payload: { status?: string; case_type?: string; date_of_incident?: string | null } = {};
   if (input.status) payload.status = input.status === "Closed" ? "archived" : "active";
   if (input.caseType) payload.case_type = input.caseType;
+  if (input.dateOfIncident !== undefined) {
+    payload.date_of_incident = input.dateOfIncident ? toDateOnly(input.dateOfIncident) : null;
+  }
 
   if (Object.keys(payload).length === 0) return;
 
@@ -214,7 +346,7 @@ export async function updateSharedCaseFields(caseId: string, input: { status?: C
 export async function createTrackerComment(
   input: Omit<TrackerComment, "id" | "createdAt">,
 ): Promise<{ comment: TrackerComment; activity: ActivityLogEntry | null }> {
-  const client = await createTrackerClient();
+  const client = (await createSupabaseAdminClient()) ?? (await createTrackerClient());
 
   const authorName = input.authorName?.trim() || "Unknown user";
   const basePayload = {
@@ -236,26 +368,76 @@ export async function createTrackerComment(
 
   const { data, error } = insertResult;
   if (error) throw error;
+
   const commentTypeLabel = input.type.replace(/_/g, " ");
+  const commentId = toString(data.id, "comment");
   const activity = await createActivityEntry(
     input.caseId,
     "Comment added",
     `${authorName} added ${commentTypeLabel}.`,
     { userId: input.authorId, userName: authorName },
+    { comment_id: commentId, user_name: authorName },
   );
-  return { comment: commentRowToComment(data as UnknownRow), activity };
+
+  const record = await getCaseById(input.caseId);
+  if (record) {
+    void notifySlackCommentPosted(record, {
+      type: input.type,
+      body: input.body,
+      authorName,
+    }).catch((error) => console.error("Slack comment notification failed", error));
+  }
+
+  return {
+    comment: commentRowToComment(data as UnknownRow, authorName),
+    activity,
+  };
+}
+
+export async function applySlackThreadUpdate(caseId: string, text: string, actor?: TrackerActor) {
+  const parsed = parseSlackThreadUpdate(text);
+  if (!parsed) return { applied: false as const, reason: "No recognizable tracker fields in thread reply." };
+
+  const existing = await getCaseById(caseId);
+  if (!existing) return { applied: false as const, reason: "Case not found." };
+
+  const merged = mergeTrackerImport(existing.tracker, parsed.tracker);
+  await updateTrackerEntry(caseId, merged, {
+    actor: actor ?? { userName: "Slack thread" },
+    markReviewed: true,
+    changeInput: parsed.tracker,
+  });
+
+  return { applied: true as const, fields: Object.keys(parsed.tracker) };
 }
 
 export async function getCaseComments(caseId: string): Promise<TrackerComment[]> {
   const client = await createTrackerClient();
 
-  const { data } = await client
-    .from("case_tracker_comments")
-    .select("*")
-    .or(`case_id.eq.${caseId},tracker_entry_id.eq.${caseId}`)
-    .order("created_at", { ascending: false });
+  const [{ data: commentRows }, { data: activityRows }] = await Promise.all([
+    client
+      .from("case_tracker_comments")
+      .select("*")
+      .or(`case_id.eq.${caseId},tracker_entry_id.eq.${caseId}`)
+      .order("created_at", { ascending: false }),
+    client.from("case_tracker_activity").select("metadata").eq("case_id", caseId).eq("action", "Comment added"),
+  ]);
 
-  return ((data ?? []) as UnknownRow[]).map(commentRowToComment);
+  const authorByCommentId = new Map<string, string>();
+  for (const row of (activityRows ?? []) as UnknownRow[]) {
+    const metadata = asObject(row.metadata);
+    const commentId = toStringOrNull(metadata.comment_id as string | undefined);
+    const userName = toStringOrNull(metadata.user_name as string | undefined);
+    if (commentId && userName) authorByCommentId.set(commentId, userName);
+  }
+
+  return ((commentRows ?? []) as UnknownRow[]).map((row) => {
+    const comment = commentRowToComment(row);
+    return {
+      ...comment,
+      authorName: authorByCommentId.get(comment.id) ?? comment.authorName,
+    };
+  });
 }
 
 export async function getCaseActivity(caseId: string): Promise<ActivityLogEntry[]> {
@@ -295,12 +477,60 @@ export async function createSnapshot(quarter: string, capturedBy: string): Promi
   };
 }
 
-export async function getAttorneyGoals(): Promise<AttorneyGoal[]> {
+export type AttorneyGoalInput = {
+  attorneyId: string;
+  attorneyName: string;
+  year: number;
+  annualFeeGoal: number;
+  q1Goal: number;
+  q2Goal: number;
+  q3Goal: number;
+  q4Goal: number;
+};
+
+export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<AttorneyGoal> {
   const client = await createTrackerClient();
 
+  const payload = {
+    attorney_name: input.attorneyName,
+    year: input.year,
+    annual_fee_goal: input.annualFeeGoal,
+    q1_goal: input.q1Goal,
+    q2_goal: input.q2Goal,
+    q3_goal: input.q3Goal,
+    q4_goal: input.q4Goal,
+  };
+
+  const { data, error } = await client
+    .from("attorney_goals")
+    .upsert(payload, { onConflict: "attorney_name,year" })
+    .select("*")
+    .single();
+
+  if (error) throw error;
+
+  return {
+    id: toString(data.id, "goal"),
+    attorneyId: input.attorneyId,
+    year: input.year,
+    annualFeeGoal: Number(data.annual_fee_goal ?? 0),
+    q1Goal: Number(data.q1_goal ?? 0),
+    q2Goal: Number(data.q2_goal ?? 0),
+    q3Goal: Number(data.q3_goal ?? 0),
+    q4Goal: Number(data.q4_goal ?? 0),
+  };
+}
+
+export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
+  const client = await createTrackerClient();
+
+  let goalsQuery = client.from("attorney_goals").select("*").order("year", { ascending: false });
+  if (year) goalsQuery = goalsQuery.eq("year", year);
+
+  const sharedClient = await createSharedDataClient();
   const [{ data: goalRows }, { data: contactRows }] = await Promise.all([
-    client.from("attorney_goals").select("*").order("year", { ascending: false }),
-    client.from("contacts").select("id,name,email,role"),
+    goalsQuery,
+    sharedClient.from("contacts").select("id,name,email,role"),
   ]);
   const attorneys = ((contactRows ?? []) as ContactRow[]).filter((row) => row.role === "attorney");
 
@@ -477,7 +707,7 @@ function rowToCaseRecord(
       status: normalizeCaseStatus(caseRow?.status),
       caseType: normalizeCaseType(caseRow?.case_type ?? toStringOrNull(trackerRow.case_type)),
       dateSigned: normalizeDate(caseRow?.created_at),
-      dateOfIncident: normalizeDate(caseRow?.date_of_incident),
+      dateOfIncident: normalizeOptionalDate(caseRow?.date_of_incident),
       createdAt: normalizeDate(caseRow?.created_at),
       updatedAt: normalizeDate(caseRow?.updated_at),
     },
@@ -516,6 +746,9 @@ function rowToTrackerEntry(row: TrackerEntryRow, resultRow: ResultRow | null, su
     lrjNotes: toString(row.lrj_notes, ""),
     result: rowToResult(resultRow),
     lastQuarterlyCheckInAt: toStringOrNull(row.last_quarterly_check_in_at),
+    lastSourcesLitUpdatedAt: toStringOrNull(row.last_sources_lit_updated_at),
+    lastSlackReminderAt: toStringOrNull(row.last_slack_reminder_at),
+    slackReminderThreadTs: toStringOrNull(row.slack_reminder_thread_ts),
     detectedStageSignals: suggestionRows.map(suggestionRowToSuggestion),
     forecastNotes: toString(row.forecast_notes, ""),
     attorneyNotes: toString(row.attorney_notes, ""),
@@ -572,6 +805,52 @@ function makeEmptyTrackerRow(caseRow: DocketFlowCaseRow): TrackerEntryRow {
   };
 }
 
+function countBackfillFields(row: ParsedCaseBackfillRow) {
+  return Object.keys(row.shared).length + Object.keys(row.tracker).length + Object.keys(row.result).length;
+}
+
+function mergeTrackerImport(existing: TrackerEntry, patch: TrackerUpdateInput): TrackerUpdateInput {
+  return {
+    caseStage: patch.caseStage ?? existing.caseStage,
+    estimatedSettlementValue: patch.estimatedSettlementValue ?? existing.estimatedSettlementValue,
+    estimatedFeeValue: patch.estimatedFeeValue ?? existing.estimatedFeeValue,
+    targetResolutionQuarter: patch.targetResolutionQuarter ?? existing.targetResolutionQuarter,
+    confidenceLevel: patch.confidenceLevel ?? existing.confidenceLevel,
+    sourceOfEstimate: patch.sourceOfEstimate ?? existing.sourceOfEstimate,
+    liability: patch.liability ?? existing.liability,
+    caseSize: patch.caseSize ?? existing.caseSize,
+    minimumValue: patch.minimumValue ?? existing.minimumValue,
+    referralFee: patch.referralFee ?? existing.referralFee,
+    referralFeeArrangement: patch.referralFeeArrangement ?? existing.referralFeeArrangement,
+    balanceCtaInfo: patch.balanceCtaInfo ?? existing.balanceCtaInfo,
+    policyLimits: patch.policyLimits ?? existing.policyLimits,
+    policyInfoSource: patch.policyInfoSource ?? existing.policyInfoSource,
+    expectedLitigation: patch.expectedLitigation ?? existing.expectedLitigation,
+    sources: patch.sources ?? existing.sources,
+    litEventsNeeded: patch.litEventsNeeded ?? existing.litEventsNeeded,
+    litEventsTimeline: patch.litEventsTimeline ?? existing.litEventsTimeline,
+    injuries: patch.injuries ?? existing.injuries,
+    caseDescription: patch.caseDescription ?? existing.caseDescription,
+    statusNotes: patch.statusNotes ?? existing.statusNotes,
+    gvNotes: patch.gvNotes ?? existing.gvNotes,
+    lrjNotes: patch.lrjNotes ?? existing.lrjNotes,
+    lastQuarterlyCheckInAt: patch.lastQuarterlyCheckInAt ?? existing.lastQuarterlyCheckInAt,
+    lastSourcesLitUpdatedAt: patch.lastSourcesLitUpdatedAt ?? existing.lastSourcesLitUpdatedAt,
+    forecastNotes: patch.forecastNotes ?? existing.forecastNotes,
+  };
+}
+
+async function runSlackTrackerSideEffects(
+  before: CaseRecord,
+  afterTracker: TrackerEntry,
+  patch: TrackerUpdateInput,
+  previousStage: string | undefined,
+) {
+  const after: CaseRecord = { ...before, tracker: afterTracker };
+  await notifySlackCaseStageUpdated(after, previousStage);
+  await notifySlackTrackerSaved(after, patch);
+}
+
 function trackerUpdateToRow(input: TrackerUpdateInput, markReviewed = true) {
   return {
     case_stage: toDatabaseStage(input.caseStage),
@@ -597,6 +876,7 @@ function trackerUpdateToRow(input: TrackerUpdateInput, markReviewed = true) {
     gv_notes: input.gvNotes,
     lrj_notes: input.lrjNotes,
     last_quarterly_check_in_at: input.lastQuarterlyCheckInAt,
+    last_sources_lit_updated_at: input.lastSourcesLitUpdatedAt,
     forecast_notes: input.forecastNotes,
     ...(markReviewed ? { last_reviewed_at: new Date().toISOString() } : {}),
   };
@@ -607,12 +887,13 @@ function isUuid(value: string | null | undefined) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function commentRowToComment(row: UnknownRow): TrackerComment {
+function commentRowToComment(row: UnknownRow, fallbackAuthorName?: string): TrackerComment {
+  const storedName = toStringOrNull(row.author_name);
   return {
     id: toString(row.id, "comment"),
     caseId: toString(row.case_id, toString(row.tracker_entry_id, "")),
     authorId: toString(row.author_id, ""),
-    authorName: toString(row.author_name, "Unknown user"),
+    authorName: storedName || fallbackAuthorName || "Unknown user",
     type: normalizeCommentType(toStringOrNull(row.comment_type)),
     body: toString(row.body, ""),
     createdAt: toString(row.created_at, new Date().toISOString()),
@@ -679,6 +960,21 @@ function normalizeDate(value: string | number | null | undefined) {
   }
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+function normalizeOptionalDate(value: string | number | null | undefined): string | null {
+  if (value == null || value === "") return null;
+  if (typeof value === "number") {
+    const milliseconds = value > 10_000_000_000 ? value : value * 1000;
+    const parsed = new Date(milliseconds);
+    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  }
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
+function toDateOnly(value: string) {
+  return value.slice(0, 10);
 }
 
 function normalizeCaseStatus(value: string | null | undefined): CaseStatus {

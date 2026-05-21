@@ -1,12 +1,12 @@
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { AttorneyGoalsManager } from "@/components/settings/attorney-goals-manager";
 import { BackfillImportCard } from "@/components/settings/backfill-import-card";
+import { SlackSyncCard } from "@/components/settings/slack-sync-card";
 import { type AppUser, type AttorneyGoal, type CaseTrackerSettings } from "@/lib/types";
-import { formatCurrency } from "@/lib/utils";
 
 export function SettingsView({
   settings,
@@ -22,48 +22,9 @@ export function SettingsView({
       <div className="space-y-6">
         <BackfillImportCard />
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Attorney Goals</CardTitle>
-            <CardDescription>Supabase-backed admin surface for yearly and quarterly fee goals.</CardDescription>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Attorney</TableHead>
-                  <TableHead>Annual fee goal</TableHead>
-                  <TableHead>Q1</TableHead>
-                  <TableHead>Q2</TableHead>
-                  <TableHead>Q3</TableHead>
-                  <TableHead>Q4</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {goals.map((goal) => {
-                  const attorney = users.find((user) => user.id === goal.attorneyId);
+        <SlackSyncCard />
 
-                  return (
-                    <TableRow key={goal.id}>
-                      <TableCell className="font-semibold">{attorney?.name}</TableCell>
-                      <TableCell>{formatCurrency(goal.annualFeeGoal)}</TableCell>
-                      <TableCell>{formatCurrency(goal.q1Goal)}</TableCell>
-                      <TableCell>{formatCurrency(goal.q2Goal)}</TableCell>
-                      <TableCell>{formatCurrency(goal.q3Goal)}</TableCell>
-                      <TableCell>{formatCurrency(goal.q4Goal)}</TableCell>
-                      <TableCell>
-                        <Button variant="outline" size="sm">
-                          Edit
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <AttorneyGoalsManager users={users} goals={goals} />
 
         <Card>
           <CardHeader>

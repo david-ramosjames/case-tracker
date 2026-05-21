@@ -8,7 +8,17 @@ import {
 } from "@/lib/types";
 import { daysSince, getCurrentQuarter, getQuarterElapsedPercentage, getYearElapsedPercentage } from "@/lib/utils";
 
-const QUARTERLY_CHECK_IN_FIELDS = ["targetResolutionQuarter", "minimumValue", "caseDescription"] as const;
+import { QUARTERLY_REVIEW_DAYS, SOURCES_LIT_REVIEW_DAYS } from "@/lib/slack/config";
+
+const QUARTERLY_CHECK_IN_FIELDS = ["targetResolutionQuarter", "minimumValue"] as const;
+const SOURCES_LIT_FIELDS = ["sources", "litEventsNeeded", "litEventsTimeline", "injuries", "caseDescription"] as const;
+
+export function sourcesLitNeedsReview(record: CaseRecord) {
+  const { tracker } = record;
+  const hasContent = SOURCES_LIT_FIELDS.some((field) => Boolean(tracker[field]?.trim()));
+  if (!hasContent) return true;
+  return daysSince(tracker.lastSourcesLitUpdatedAt) >= SOURCES_LIT_REVIEW_DAYS;
+}
 
 export function getDataQualityFlags(
   record: CaseRecord,
@@ -150,7 +160,9 @@ export function getProjectedFeeValue(record: CaseRecord) {
 
 export function needsQuarterlyCheckIn(record: CaseRecord) {
   const missingQuarterlyField = QUARTERLY_CHECK_IN_FIELDS.some((field) => !record.tracker[field]);
-  return missingQuarterlyField || daysSince(record.tracker.lastQuarterlyCheckInAt) >= 90;
+  const sourcesLitDue = sourcesLitNeedsReview(record);
+  const reviewStale = daysSince(record.tracker.lastQuarterlyCheckInAt) >= QUARTERLY_REVIEW_DAYS;
+  return missingQuarterlyField || sourcesLitDue || reviewStale;
 }
 
 export function getOpenStageSuggestions(record: CaseRecord) {

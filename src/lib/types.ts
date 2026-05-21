@@ -60,7 +60,7 @@ export type SharedCase = {
   status: CaseStatus;
   caseType: string;
   dateSigned: string;
-  dateOfIncident: string;
+  dateOfIncident: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -110,6 +110,9 @@ export type TrackerEntry = {
   lrjNotes: string;
   result: SettlementResult;
   lastQuarterlyCheckInAt: string | null;
+  lastSourcesLitUpdatedAt: string | null;
+  lastSlackReminderAt: string | null;
+  slackReminderThreadTs: string | null;
   detectedStageSignals: StageSuggestion[];
   forecastNotes: string;
   attorneyNotes: string;
@@ -121,6 +124,22 @@ export type TrackerEntry = {
   actualFeeValue: number | null;
   updatedAt: string;
 };
+
+export type CaseSlackChannel = {
+  caseNumber: string;
+  slackChannelId: string | null;
+  slackChannelName: string;
+  topicStage: string | null;
+  syncedAt: string;
+  updatedAt: string;
+};
+
+export type SlackReminderReason =
+  | "quarterly_review"
+  | "missing_quarter"
+  | "missing_minimum_value"
+  | "sources_lit_stale"
+  | "missing_fields";
 
 export type CaseRecord = {
   shared: SharedCase;
@@ -180,6 +199,16 @@ export type CaseTrackerSnapshot = {
   entries: TrackerEntry[];
 };
 
+export type CaseBackfillImportResult = {
+  totalRows: number;
+  matched: number;
+  updated: number;
+  skipped: number;
+  unmatched: string[];
+  preview: Array<{ caseNumber: string; matched: boolean; fieldCount: number }>;
+  dryRun: boolean;
+};
+
 export type TrackerUpdateInput = Partial<
   Pick<
     TrackerEntry,
@@ -207,6 +236,7 @@ export type TrackerUpdateInput = Partial<
     | "gvNotes"
     | "lrjNotes"
     | "lastQuarterlyCheckInAt"
+    | "lastSourcesLitUpdatedAt"
     | "forecastNotes"
   >
 >;
