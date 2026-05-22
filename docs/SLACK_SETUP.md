@@ -16,6 +16,7 @@ Apply `supabase/sql/006_slack_integration.sql` in the Supabase SQL editor.
    - `channels:manage` (for `conversations.setTopic` on public channels)
 3. Install to workspace and copy **Bot User OAuth Token** → `SLACK_BOT_TOKEN`.
 4. **Basic Information** → copy **Signing Secret** → `SLACK_SIGNING_SECRET`.
+5. Set `NEXT_PUBLIC_SLACK_WORKSPACE_URL` to your workspace URL (e.g. `https://ramosjameslaw.slack.com`) so case detail pages show **Open in Slack** links.
 
 ## 3. Event Subscriptions (thread replies)
 

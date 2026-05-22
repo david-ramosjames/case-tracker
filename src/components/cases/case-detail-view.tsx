@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, MessageSquarePlus, Pencil, Save, ShieldAlert, Sparkles } from "lucide-react";
+import { CheckCircle2, ExternalLink, MessageSquarePlus, Pencil, Save, ShieldAlert, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,9 +24,11 @@ import {
 } from "@/lib/case-options";
 import { getDataQualityFlags, getFeePercent, getOpenStageSuggestions, getProjectedFeeValue, needsQuarterlyCheckIn } from "@/lib/calculations";
 import { type SessionUser } from "@/lib/auth/types";
+import { formatSlackChannelLabel, getSlackChannelArchiveUrl } from "@/lib/slack/links";
 import {
   type ActivityLogEntry,
   type CaseRecord,
+  type CaseSlackChannel,
   type CaseStatus,
   type CaseTrackerSettings,
   type CheckStatus,
@@ -47,12 +49,14 @@ export function CaseDetailView({
   initialActivity,
   settings,
   sessionUser,
+  slackChannel,
 }: {
   initialRecord: CaseRecord;
   initialComments: TrackerComment[];
   initialActivity: ActivityLogEntry[];
   settings: CaseTrackerSettings;
   sessionUser: SessionUser;
+  slackChannel: CaseSlackChannel | null;
 }) {
   const [shared, setShared] = useState(initialRecord.shared);
   const [tracker, setTracker] = useState(initialRecord.tracker);
@@ -73,6 +77,8 @@ export function CaseDetailView({
   const flags = getDataQualityFlags(record, settings);
   const openStageSuggestions = getOpenStageSuggestions(record);
   const quarterlyCheckInDue = needsQuarterlyCheckIn(record);
+  const slackChannelUrl = slackChannel ? getSlackChannelArchiveUrl(slackChannel) : null;
+  const slackChannelLabel = slackChannel ? formatSlackChannelLabel(slackChannel.slackChannelName) : null;
 
   function updateField<K extends keyof TrackerEntry>(key: K, value: TrackerEntry[K]) {
     setTracker((current) => ({ ...current, [key]: value }));
@@ -301,6 +307,33 @@ export function CaseDetailView({
                 <CardDescription>
                   {record.shared.caseNumber} - {record.shared.caseType} - DOL {formatOptionalDate(record.shared.dateOfIncident)}
                 </CardDescription>
+                {slackChannelLabel ? (
+                  <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-navy-950">
+                    <span className="text-muted-foreground">Slack channel</span>
+                    {slackChannelUrl ? (
+                      <a
+                        href={slackChannelUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 font-medium text-pink-600 hover:text-pink-500"
+                      >
+                        {slackChannelLabel}
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    ) : (
+                      <span className="font-medium">{slackChannelLabel}</span>
+                    )}
+                    {slackChannel?.topicStage ? (
+                      <Badge variant="outline" className="font-normal">
+                        Sheet status: {slackChannel.topicStage}
+                      </Badge>
+                    ) : null}
+                  </p>
+                ) : (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    No Slack channel mapped — import Client Contact Status in Settings.
+                  </p>
+                )}
               </div>
               <div className="flex flex-wrap gap-2">
                 <StageBadge stage={tracker.caseStage} />
