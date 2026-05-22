@@ -6,14 +6,16 @@ export function getSlackWorkspaceUrl() {
   return value.replace(/\/$/, "");
 }
 
-/** Web link to open a Slack channel (requires channel ID for a direct jump). */
+/** Web link to a Slack channel (direct archive link when ID is known, otherwise workspace search). */
 export function getSlackChannelArchiveUrl(channel: Pick<CaseSlackChannel, "slackChannelId" | "slackChannelName">) {
   const workspaceUrl = getSlackWorkspaceUrl();
   if (!workspaceUrl) return null;
   if (channel.slackChannelId) {
     return `${workspaceUrl}/archives/${channel.slackChannelId}`;
   }
-  return null;
+  const label = formatSlackChannelLabel(channel.slackChannelName);
+  if (!label) return null;
+  return `${workspaceUrl}/search?q=${encodeURIComponent(label)}`;
 }
 
 export function formatSlackChannelLabel(channelName: string) {
