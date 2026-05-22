@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cleanCaseNumber } from "@/lib/csv/parse";
 import { syncSlackChannelsFromGoogleSheetIfConfigured } from "@/lib/google/sheets-sync";
 import { getCronSecret } from "@/lib/slack/config";
 import { sendSlackCaseReminders } from "@/lib/slack/notify";
@@ -16,10 +17,34 @@ export async function GET(request: Request) {
   }
 
   try {
-    const sheetSync = await syncSlackChannelsFromGoogleSheetIfConfigured();
-    const [records, settings] = await Promise.all([getCases(), getSettings()]);
-    const reminders = await sendSlackCaseReminders(records, settings);
-    return NextResponse.json({ ok: true, sheetSync, reminders });
+    const { searchParams } = new URL(request.url);
+    const caseNumberParam = searchParams.get("caseNumber")?.trim();
+    const force = searchParams.get("force") === "true";
+    const skipSheetSync = searchParams.get("syncSheet") === "false";
+
+    const sheetSync = skipSheetSync
+      ? { synced: 0, configured: false }
+      : await syncSlackChannelsFromGoogleSheetIfConfigured();
+
+    let records = await getCases();
+    const settings = await getSettings();
+
+    if (caseNumberParam) {
+      const key = cleanCaseNumber(caseNumberParam);
+      records = records.filter((record) => cleanCaseNumber(record.shared.caseNumber) === key);
+    }
+
+    const reminders = await sendSlackCaseReminders(records, settings, {
+      force,
+      forceSend: force && Boolean(caseNumberParam),
+    });
+
+    return NextResponse.json({
+      ok: true,
+      sheetSync,
+      reminders,
+      filter: caseNumberParam ? { caseNumber: caseNumberParam, force } : null,
+    });
   } catch (error) {
     console.error("Slack reminder cron failed", error);
     const message = error instanceof Error ? error.message : "Slack reminder cron failed.";

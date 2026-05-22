@@ -70,11 +70,24 @@ export function buildSlackReminderMessage(record: CaseRecord, reasons: SlackRemi
   return lines.join("\n");
 }
 
-export function buildCaseStageTopic(record: CaseRecord) {
-  const stage = record.tracker.caseStage;
-  const client = record.shared.clientName;
-  const caseNumber = record.shared.caseNumber;
-  return `${caseNumber} · ${client} · Stage: ${stage}`.slice(0, 250);
+const STAGE_TOPIC_SUFFIX_RE = / · Stage: [^·\n]*$/;
+
+/** Update only the `Stage: …` portion of a channel topic; preserve the rest. */
+export function mergeStageIntoChannelTopic(existingTopic: string, stage: string) {
+  const maxLen = 250;
+  const stageSuffix = ` · Stage: ${stage}`;
+  const base = existingTopic.trim();
+
+  if (STAGE_TOPIC_SUFFIX_RE.test(base)) {
+    return base.replace(STAGE_TOPIC_SUFFIX_RE, stageSuffix).slice(0, maxLen);
+  }
+
+  if (/Stage:\s*/i.test(base)) {
+    return base.replace(/Stage:\s*[^·\n]+/i, `Stage: ${stage}`).slice(0, maxLen);
+  }
+
+  if (!base) return `Stage: ${stage}`.slice(0, maxLen);
+  return `${base}${stageSuffix}`.slice(0, maxLen);
 }
 
 export function trackerTouchesSourcesLit(patch: Record<string, unknown>) {

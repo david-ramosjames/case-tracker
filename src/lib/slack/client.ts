@@ -1,4 +1,5 @@
 import { getSlackBotToken, isSlackEnabled } from "@/lib/slack/config";
+import { mergeStageIntoChannelTopic } from "@/lib/slack/reminders";
 
 type SlackPostMessageResponse = {
   ok: boolean;
@@ -57,6 +58,22 @@ export async function postSlackMessage(input: {
 export async function setSlackChannelTopic(channelId: string, topic: string) {
   if (!isSlackEnabled()) return false;
   await slackApi("conversations.setTopic", { channel: channelId, topic });
+  return true;
+}
+
+export async function getSlackChannelTopic(channelId: string) {
+  if (!isSlackEnabled()) return "";
+  const payload = await slackApi<{
+    channel?: { topic?: { value?: string } };
+  }>("conversations.info", { channel: channelId });
+  return payload.channel?.topic?.value?.trim() ?? "";
+}
+
+export async function updateSlackChannelStageTopic(channelId: string, stage: string) {
+  const existing = await getSlackChannelTopic(channelId);
+  const merged = mergeStageIntoChannelTopic(existing, stage);
+  if (merged === existing) return false;
+  await setSlackChannelTopic(channelId, merged);
   return true;
 }
 

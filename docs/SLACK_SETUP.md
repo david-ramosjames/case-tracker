@@ -81,7 +81,18 @@ curl "https://YOUR_DOMAIN/api/cron/slack-reminders" \
   -H "Authorization: Bearer YOUR_CRON_SECRET"
 ```
 
+**Test one case** (bypasses reminder rules and cooldown; sends even if fields are complete):
+
+```bash
+curl "https://YOUR_DOMAIN/api/cron/slack-reminders?caseNumber=99999&force=true&syncSheet=false" \
+  -H "Authorization: Bearer YOUR_CRON_SECRET"
+```
+
+Set `NEXT_PUBLIC_SITE_URL=https://YOUR_DOMAIN` on Vercel (then redeploy) so Slack messages use production links, not `localhost`.
+
 Response includes `sheetSync: { synced, configured }` and `reminders: { sent, skipped }`.
+
+**Channel topics:** stage changes only update the `Stage: …` portion of the existing topic (or append ` · Stage: …`); the rest of the topic text is left as-is.
 
 Set `CRON_SECRET` in env. Optional: `SLACK_REMINDER_COOLDOWN_DAYS=3` (default) to avoid spamming the same case.
 
