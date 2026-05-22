@@ -39,15 +39,15 @@ async function getGoogleAccessToken(clientEmail: string, privateKey: string) {
   return body.access_token;
 }
 
-export type SheetSyncResult = { synced: number; configured: boolean };
+export type SheetSyncResult = { synced: number; configured: boolean; duplicatesRemoved?: number };
 
 /** Reads your Google Sheet and upserts case_number → Slack channel rows. No manual entry in the app. */
 export async function syncSlackChannelsFromGoogleSheetIfConfigured(): Promise<SheetSyncResult> {
   if (!isGoogleSheetsSyncConfigured()) {
     return { synced: 0, configured: false };
   }
-  const { synced } = await syncSlackChannelsFromGoogleSheet();
-  return { synced, configured: true };
+  const { synced, duplicatesRemoved } = await syncSlackChannelsFromGoogleSheet();
+  return { synced, configured: true, duplicatesRemoved };
 }
 
 export async function syncSlackChannelsFromGoogleSheet() {
@@ -104,8 +104,8 @@ export async function syncSlackChannelsFromGoogleSheet() {
     });
   }
 
-  const synced = await upsertSlackChannels(mapped);
-  return { synced };
+  const { synced, duplicatesRemoved } = await upsertSlackChannels(mapped);
+  return { synced, duplicatesRemoved };
 }
 
 function findSheetColumnIndex(header: string[], matchers: Array<(cell: string) => boolean>) {

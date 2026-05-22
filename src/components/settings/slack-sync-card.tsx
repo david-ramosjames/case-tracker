@@ -16,9 +16,17 @@ export function SlackSyncCard() {
     setError(null);
     try {
       const response = await fetch("/api/slack/sync-channels", { method: "POST" });
-      const body = (await response.json()) as { synced?: number; error?: string };
+      const body = (await response.json()) as {
+        synced?: number;
+        duplicatesRemoved?: number;
+        error?: string;
+      };
       if (!response.ok) throw new Error(body.error ?? "Sync failed.");
-      setMessage(`Imported ${body.synced ?? 0} case → channel mappings from Google Sheet.`);
+      const duplicateNote =
+        body.duplicatesRemoved && body.duplicatesRemoved > 0
+          ? ` (${body.duplicatesRemoved} duplicate Case No rows in the sheet used the last row for each case.)`
+          : "";
+      setMessage(`Imported ${body.synced ?? 0} case → channel mappings from Google Sheet.${duplicateNote}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed.");
     } finally {

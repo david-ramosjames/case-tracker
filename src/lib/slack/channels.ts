@@ -36,7 +36,15 @@ export async function upsertSlackChannels(rows: Array<Omit<CaseSlackChannel, "sy
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required to sync Slack channels.");
 
-  const payload = rows.map((row) => ({
+  // Sheet rows can repeat the same Case No; Postgres rejects duplicate keys in one upsert batch.
+  const byCaseNumber = new Map<string, Omit<CaseSlackChannel, "syncedAt" | "updatedAt">>();
+  for (const row of rows) {
+    byCaseNumber.set(cleanCaseNumber(row.caseNumber), row);
+  }
+  const deduped = [...byCaseNumber.values()];
+  const duplicatesRemoved = rows.length - deduped.length;
+
+  const payload = deduped.map((row) => ({
     case_number: cleanCaseNumber(row.caseNumber),
     slack_channel_id: row.slackChannelId,
     slack_channel_name: row.slackChannelName,
@@ -46,8 +54,10 @@ export async function upsertSlackChannels(rows: Array<Omit<CaseSlackChannel, "sy
   }));
 
   const { error } = await admin.from("case_slack_channels").upsert(payload, { onConflict: "case_number" });
-  if (error) throw error;
-  return payload.length;
+  if (error) {
+    throw new Error(error.message + (error.hint ? ` ${error.hint}` : ""));
+  }
+  return { synced: payload.length, duplicatesRemoved };
 }
 
 export async function findCaseNumberByReminderThread(threadTs: string) {
