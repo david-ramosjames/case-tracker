@@ -94,13 +94,22 @@ export async function updateSlackChannelTopic(channelId: string, topic: string) 
 }
 
 let channelNameCache: Map<string, string> | null = null;
+let channelTopicByIdCache: Map<string, string> | null = null;
 let channelCacheExpiresAt = 0;
+
+function parseTopicField(topic: string | { value?: string } | undefined) {
+  if (typeof topic === "string") return topic.trim();
+  return topic?.value?.trim() ?? "";
+}
 
 /** Load all workspace channels once (cached 30 min). */
 export async function loadChannelNameMap(forceRefresh = false) {
-  if (!forceRefresh && channelNameCache && Date.now() < channelCacheExpiresAt) return channelNameCache;
+  if (!forceRefresh && channelNameCache && channelTopicByIdCache && Date.now() < channelCacheExpiresAt) {
+    return channelNameCache;
+  }
 
   const map = new Map<string, string>();
+  const topicsById = new Map<string, string>();
   let cursor: string | undefined;
   let page = 0;
 
@@ -108,7 +117,7 @@ export async function loadChannelNameMap(forceRefresh = false) {
     if (page > 0) await sleep(1200);
     const payload = await slackApi<{
       ok: boolean;
-      channels?: Array<{ id: string; name: string }>;
+      channels?: Array<{ id: string; name: string; topic?: string | { value?: string } }>;
       response_metadata?: { next_cursor?: string };
     }>("conversations.list", {
       types: "public_channel,private_channel",
@@ -120,6 +129,8 @@ export async function loadChannelNameMap(forceRefresh = false) {
       map.set(channel.name.toLowerCase(), channel.id);
       map.set(`#${channel.name}`.toLowerCase(), channel.id);
       map.set(channel.id, channel.id);
+      const topic = parseTopicField(channel.topic);
+      if (topic) topicsById.set(channel.id, topic);
     }
 
     cursor = payload.response_metadata?.next_cursor || undefined;
@@ -127,8 +138,19 @@ export async function loadChannelNameMap(forceRefresh = false) {
   } while (cursor);
 
   channelNameCache = map;
+  channelTopicByIdCache = topicsById;
   channelCacheExpiresAt = Date.now() + 30 * 60 * 1000;
   return map;
+}
+
+/** Read topic from conversations.list cache (avoids conversations.info). */
+export async function getSlackChannelTopicFromList(channelId: string) {
+  if (!isSlackEnabled()) return null;
+  const normalized = normalizeSlackChannelId(channelId);
+  if (!normalized) return null;
+
+  await loadChannelNameMap();
+  return channelTopicByIdCache?.get(normalized) ?? null;
 }
 
 export function normalizeSlackChannelId(value: string) {

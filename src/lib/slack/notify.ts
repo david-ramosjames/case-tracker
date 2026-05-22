@@ -1,7 +1,12 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
-import { normalizeSlackChannelId, postSlackMessage, updateSlackChannelTopic } from "@/lib/slack/client";
-import { getSlackChannelForCaseNumber, saveReminderThread } from "@/lib/slack/channels";
-import { buildSlackChannelTopic, resolveTopicStatusLabel } from "@/lib/slack/topic";
+import {
+  getSlackChannelTopicFromList,
+  normalizeSlackChannelId,
+  postSlackMessage,
+  updateSlackChannelTopic,
+} from "@/lib/slack/client";
+import { getSlackChannelForCaseNumber, saveReminderThread, saveSlackTopicPrefix } from "@/lib/slack/channels";
+import { buildTopicFromPrefix, extractTopicPrefix, resolveTopicStatusLabel } from "@/lib/slack/topic";
 import { SLACK_REMINDER_COOLDOWN_DAYS, isSlackEnabled } from "@/lib/slack/config";
 import {
   buildSlackReminderMessage,
@@ -36,8 +41,30 @@ async function syncSlackTopicForCase(record: CaseRecord, options?: { fromTracker
   const context = await getSlackContextForRecord(record);
   if (!context) return;
 
-  const statusLabel = resolveTopicStatusLabel(record, context.mapping, options);
-  const topic = buildSlackChannelTopic(record, statusLabel);
+  let prefix = context.mapping.topicPrefix?.trim() ?? "";
+
+  if (!prefix) {
+    const liveTopic = await getSlackChannelTopicFromList(context.channelId);
+    if (liveTopic) {
+      prefix = extractTopicPrefix(liveTopic);
+      if (prefix) {
+        await saveSlackTopicPrefix(record.shared.caseNumber, prefix);
+      }
+    }
+  }
+
+  if (!prefix) {
+    console.warn("Slack topic update skipped — no cached prefix with mentions", {
+      caseNumber: record.shared.caseNumber,
+      channelId: context.channelId,
+    });
+    return;
+  }
+
+  const statusLabel = resolveTopicStatusLabel(record.tracker.caseStage, context.mapping, options);
+  const topic = buildTopicFromPrefix(prefix, statusLabel);
+  if (!topic) return;
+
   await updateSlackChannelTopic(context.channelId, topic);
 }
 

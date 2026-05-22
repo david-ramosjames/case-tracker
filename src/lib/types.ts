@@ -130,6 +130,8 @@ export type CaseSlackChannel = {
   slackChannelId: string | null;
   slackChannelName: string;
   topicStage: string | null;
+  /** Attorney | Paralegal line with Slack <@mentions>; status in () is updated separately. */
+  topicPrefix: string | null;
   syncedAt: string;
   updatedAt: string;
 };

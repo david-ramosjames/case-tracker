@@ -1,5 +1,5 @@
 import { sanitizeSlackTopic } from "@/lib/slack/reminders";
-import { type CaseRecord, type CaseSlackChannel, type CaseStage } from "@/lib/types";
+import { type CaseSlackChannel, type CaseStage } from "@/lib/types";
 
 /** Tracker stage → text shown in channel topic parentheses. */
 const CASE_STAGE_TOPIC_STATUS: Record<CaseStage, string> = {
@@ -22,22 +22,30 @@ export function caseStageToTopicStatusLabel(stage: CaseStage) {
  * On stage save we use the tracker stage label; otherwise prefer sheet column F (topic_stage).
  */
 export function resolveTopicStatusLabel(
-  record: CaseRecord,
+  stage: CaseStage,
   mapping: CaseSlackChannel | null,
   options?: { fromTrackerStage?: boolean },
 ) {
   if (options?.fromTrackerStage) {
-    return caseStageToTopicStatusLabel(record.tracker.caseStage);
+    return caseStageToTopicStatusLabel(stage);
   }
   const sheetStatus = mapping?.topicStage?.trim();
   if (sheetStatus) return sheetStatus;
-  return caseStageToTopicStatusLabel(record.tracker.caseStage);
+  return caseStageToTopicStatusLabel(stage);
 }
 
-/** Firm format: Attorney @Name | Paralegal @Name (Status) */
-export function buildSlackChannelTopic(record: CaseRecord, statusInParens: string) {
-  const attorney = record.attorney.name.trim();
-  const paralegal = record.paralegal.name.trim();
+/** Keeps Attorney | Paralegal mentions; strips trailing (Status). */
+export function extractTopicPrefix(fullTopic: string) {
+  const trimmed = fullTopic.trim();
+  if (!trimmed) return "";
+  const match = trimmed.match(/^(.+)\s+\([^)]*\)\s*$/);
+  return (match?.[1] ?? trimmed).trim();
+}
+
+/** Rebuild topic: existing prefix + new (Status) only. */
+export function buildTopicFromPrefix(prefix: string, statusInParens: string) {
+  const base = prefix.trim();
   const status = statusInParens.trim();
-  return sanitizeSlackTopic(`Attorney @${attorney} | Paralegal @${paralegal} (${status})`);
+  if (!base || !status) return "";
+  return sanitizeSlackTopic(`${base} (${status})`);
 }

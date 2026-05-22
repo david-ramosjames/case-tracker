@@ -93,7 +93,7 @@ Set `NEXT_PUBLIC_SITE_URL=https://YOUR_DOMAIN` on Vercel (then redeploy) so Slac
 
 Response includes `sheetSync: { synced, configured }` and `reminders: { sent, skipped }`.
 
-**Channel topics:** rebuilt as `Attorney @Name | Paralegal @Name (Status)` from the case’s attorney/paralegal and either the sheet **Status** column (F) or the tracker stage label when you save a stage change (e.g. `Dmd` → `(Demand)`). The app does not read the topic from Slack (`conversations.info` is not used).
+**Channel topics:** only the trailing `(Status)` is updated. The `Attorney … | Paralegal …` prefix (with Slack `<@USER>` mentions) is read once from the channel topic via `conversations.list`, cached in `case_slack_channels.slack_topic_prefix`, and reused. Run migration `007_slack_topic_prefix.sql`. The app never replaces mention lines with plain `@Display Name` text.
 
 Set `CRON_SECRET` in env. Optional: `SLACK_REMINDER_COOLDOWN_DAYS=3` (default) to avoid spamming the same case.
 
