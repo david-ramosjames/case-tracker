@@ -28,7 +28,7 @@ export function isGoogleSheetsSyncConfigured() {
   return getGoogleSheetsConfig() !== null;
 }
 
-/** Client Contact Status tab: A Slack Channel, B Case No, … F Status (Sheet1!A:H) */
+/** Client Contact Status tab: A Slack Channel, B Case No, … F Status, G Slack Channel ID (Sheet1!A:H) */
 export function getGoogleSheetsRange() {
   return process.env.GOOGLE_SHEETS_CHANNEL_RANGE?.trim() || "Sheet1!A:H";
 }

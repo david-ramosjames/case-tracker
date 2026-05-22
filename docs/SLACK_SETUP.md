@@ -38,15 +38,15 @@ Sources: Updated treatment plan...
 
 ## 4. Case channel mapping (Google Sheet only — no manual entry)
 
-**You never type Slack channels into the case tracker.** The app reads your existing Google Sheet and stores Case # → channel name (and optional Status from the topic).
+**You never type Slack channels into the case tracker.** The app reads your existing Google Sheet and stores Case # → channel name, Slack channel ID, and optional Status.
 
 **Client Contact Status** workbook, tab **Sheet1** (default range `Sheet1!A:H`):
 
-| A Slack Channel | B Case No | C Case | D Lead Attorney | E Paralegal | F Status | … |
-|-----------------|-----------|--------|-----------------|-------------|----------|---|
-| jessicagutierrez-153 | 153 | Jessicagutierrez | Eric Cuellar | Giselle | Litigation | |
+| A Slack Channel | B Case No | C Case | D Lead Attorney | E Paralegal | F Status | G Slack Channel ID |
+|-----------------|-----------|--------|-----------------|-------------|----------|---------------------|
+| jessicagutierrez-153 | 153 | Jessicagutierrez | Eric Cuellar | Giselle | Litigation | C0123456789 |
 
-Sync uses **Slack Channel** (A), **Case No** (B), and **Status** (F). Client name and attorney/paralegal columns are ignored for mapping.
+Sync uses **Slack Channel** (A), **Case No** (B), **Status** (F), and **Slack Channel ID** (G). The channel ID enables direct links on case pages and avoids listing every Slack channel when posting. Client name and attorney/paralegal columns are ignored for mapping.
 
 Set env vars:
 
@@ -54,7 +54,7 @@ Set env vars:
 GOOGLE_SHEETS_SPREADSHEET_ID=
 GOOGLE_SERVICE_ACCOUNT_EMAIL=
 GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-GOOGLE_SHEETS_CHANNEL_RANGE=Sheet1!A:C
+GOOGLE_SHEETS_CHANNEL_RANGE=Sheet1!A:H
 ```
 
 1. Create a [Google Cloud service account](https://cloud.google.com/iam/docs/service-account-create) with no extra roles.

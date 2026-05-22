@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { cleanCaseNumber } from "@/lib/csv/parse";
+import { normalizeSlackChannelId } from "@/lib/slack/client";
 import { getGoogleSheetsConfig, getGoogleSheetsRange, isGoogleSheetsSyncConfigured } from "@/lib/slack/config";
 import { upsertSlackChannels } from "@/lib/slack/channels";
 
@@ -69,15 +70,21 @@ export async function syncSlackChannelsFromGoogleSheet() {
   if (rows.length < 2) return { synced: 0 };
 
   const header = rows[0].map((cell) => cell.trim().toLowerCase());
-  // Client Contact Status layout: A Slack Channel, B Case No, C Case, D Lead Attorney, E Paralegal, F Status
+  // Client Contact Status: A Slack Channel, B Case No, … F Status, G Slack Channel ID
   const caseIdx = findSheetColumnIndex(header, [
     (cell) => /case\s*(#|no|number)/.test(cell),
     (cell) => cell === "case no" || cell === "case #",
   ]);
   const channelIdx = findSheetColumnIndex(header, [
-    (cell) => cell.includes("slack") && cell.includes("channel"),
-    (cell) => cell.includes("slack"),
+    (cell) => cell.includes("slack") && cell.includes("channel") && !cell.includes("id"),
+    (cell) => cell === "slack channel",
+    (cell) => cell.includes("slack") && !cell.includes("id"),
     (cell) => cell === "channel",
+  ]);
+  const channelIdIdx = findSheetColumnIndex(header, [
+    (cell) => cell.includes("slack") && cell.includes("channel") && cell.includes("id"),
+    (cell) => cell.includes("slack") && cell.includes("id"),
+    (cell) => cell === "channel id" || cell === "slack channel id",
   ]);
   const statusIdx = findSheetColumnIndex(header, [
     (cell) => cell === "status",
@@ -89,16 +96,18 @@ export async function syncSlackChannelsFromGoogleSheet() {
     throw new Error('Sheet must include "Case No" and "Slack Channel" columns (see Client Contact Status / Sheet1).');
   }
 
-  // Sheet → database only. Channel names come from column A; Slack IDs are resolved later when posting.
   const mapped = [];
   for (const row of rows.slice(1)) {
     const caseNumber = cleanCaseNumber(row[caseIdx] ?? "");
     const channelName = (row[channelIdx] ?? "").trim();
     if (!caseNumber || !channelName) continue;
 
+    const channelIdRaw = channelIdIdx >= 0 ? (row[channelIdIdx] ?? "").trim() : "";
+    const slackChannelId = normalizeSlackChannelId(channelIdRaw);
+
     mapped.push({
       caseNumber,
-      slackChannelId: null,
+      slackChannelId,
       slackChannelName: channelName.replace(/^#/, ""),
       topicStage: statusIdx >= 0 ? row[statusIdx]?.trim() || null : null,
     });

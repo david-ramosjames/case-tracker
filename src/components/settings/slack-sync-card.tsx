@@ -39,15 +39,15 @@ export function SlackSyncCard() {
       <CardHeader>
         <CardTitle>Slack case channels (Google Sheet)</CardTitle>
         <CardDescription>
-          Copies <strong>Client Contact Status → Sheet1</strong> into the tracker: Case No → Slack channel name → Status. This only
-          reads Google Sheets — it does not call Slack. Slack is used later when sending reminders or comments (to find the channel by
-          name). See docs/SLACK_SETUP.md.
+          Copies <strong>Client Contact Status → Sheet1</strong> into the tracker: Case No, Slack channel name, Status, and Slack channel
+          ID. This only reads Google Sheets — it does not call Slack. Stored channel IDs are used for case page links and posting. See
+          docs/SLACK_SETUP.md.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
           <li>
-            <span className="font-medium text-navy-950">Client Contact Status</span> → Sheet1: Slack Channel, Case No, Status (columns A, B, F)
+            <span className="font-medium text-navy-950">Client Contact Status</span> → Sheet1: Slack Channel, Case No, Status, Slack Channel ID (A, B, F, G)
           </li>
           <li>Share the spreadsheet with your Google service account email</li>
           <li>Set GOOGLE_SHEETS_* env vars — cron syncs daily with reminders</li>

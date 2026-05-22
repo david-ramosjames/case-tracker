@@ -98,10 +98,17 @@ export async function loadChannelNameMap(forceRefresh = false) {
   return map;
 }
 
+export function normalizeSlackChannelId(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return /^[CDG][A-Z0-9]+$/i.test(trimmed) ? trimmed : null;
+}
+
 export function lookupChannelId(channelNameOrId: string, map: Map<string, string>) {
   const trimmed = channelNameOrId.trim();
   if (!trimmed) return null;
-  if (/^[CDG][A-Z0-9]+$/i.test(trimmed)) return trimmed;
+  const asId = normalizeSlackChannelId(trimmed);
+  if (asId) return asId;
 
   const normalized = trimmed.replace(/^#/, "").toLowerCase();
   return map.get(normalized) ?? map.get(`#${normalized}`) ?? null;
