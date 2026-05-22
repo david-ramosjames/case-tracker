@@ -177,8 +177,15 @@ export async function sendSlackCaseReminders(
         ? buildSlackReminderMessage(record, reasons, appUrl)
         : buildForcedReminderMessage(record, appUrl);
     const posted = await postSlackMessage({ channel: context.channelId, text });
-    if (posted?.ts && record.shared.id) {
-      await saveReminderThread(record.shared.id, posted.ts);
+    if (posted?.ts) {
+      const saved = await saveReminderThread(record.shared.id, record.shared.caseNumber, posted.ts);
+      if (!saved) {
+        console.warn("Slack reminder posted but thread id was not saved to tracker", {
+          caseNumber: record.shared.caseNumber,
+          caseId: record.shared.id,
+          threadTs: posted.ts,
+        });
+      }
     }
     sent += 1;
   }

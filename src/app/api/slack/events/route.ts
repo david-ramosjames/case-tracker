@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
-import { findCaseNumberByReminderThread } from "@/lib/slack/channels";
+import { findCaseForSlackThread } from "@/lib/slack/channels";
 import { getSlackSigningSecret, isSlackEnabled } from "@/lib/slack/config";
 import { postSlackMessage } from "@/lib/slack/client";
 import { applySlackThreadUpdate } from "@/lib/supabase/services";
@@ -20,6 +20,17 @@ type SlackEventPayload = {
   };
 };
 
+const IGNORED_MESSAGE_SUBTYPES = new Set([
+  "message_changed",
+  "message_deleted",
+  "channel_join",
+  "channel_leave",
+  "channel_archive",
+  "channel_unarchive",
+  "group_join",
+  "group_leave",
+]);
+
 function verifySlackSignature(rawBody: string, timestamp: string | null, signature: string | null) {
   const secret = getSlackSigningSecret();
   if (!secret || !timestamp || !signature) return false;
@@ -36,6 +47,20 @@ function verifySlackSignature(rawBody: string, timestamp: string | null, signatu
   }
 }
 
+type SlackThreadReplyEvent = NonNullable<SlackEventPayload["event"]> & {
+  thread_ts: string;
+  channel: string;
+  text: string;
+};
+
+function isUserThreadReply(event: SlackEventPayload["event"]): event is SlackThreadReplyEvent {
+  if (!event || event.type !== "message" || !event.thread_ts || !event.text?.trim() || event.bot_id) {
+    return false;
+  }
+  if (event.subtype && IGNORED_MESSAGE_SUBTYPES.has(event.subtype)) return false;
+  return true;
+}
+
 export async function POST(request: Request) {
   const rawBody = await request.text();
   const timestamp = request.headers.get("x-slack-request-timestamp");
@@ -48,7 +73,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  // Slack URL verification handshake (must return challenge before any other logic).
   if (payload.type === "url_verification" && payload.challenge) {
     if (!verifySlackSignature(rawBody, timestamp, signature)) {
       return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
@@ -65,18 +89,46 @@ export async function POST(request: Request) {
   }
 
   const event = payload.event;
-  if (event?.type === "message" && event.thread_ts && event.text && !event.bot_id && !event.subtype) {
-    const mapping = await findCaseNumberByReminderThread(event.thread_ts);
-    if (mapping?.caseId) {
-      const result = await applySlackThreadUpdate(mapping.caseId, event.text, { userName: "Slack thread" });
-      if (result.applied) {
-        await postSlackMessage({
-          channel: event.channel ?? "",
-          threadTs: event.thread_ts,
-          text: `Thanks — applied tracker update from thread: ${result.fields.join(", ")}.`,
-        });
-      }
+  if (!isUserThreadReply(event)) {
+    return NextResponse.json({ ok: true });
+  }
+
+  const mapping = await findCaseForSlackThread(event.channel, event.thread_ts);
+  if (!mapping?.caseId) {
+    console.warn("Slack thread reply: no case linked to thread", {
+      channel: event.channel,
+      threadTs: event.thread_ts,
+    });
+    await postSlackMessage({
+      channel: event.channel,
+      threadTs: event.thread_ts,
+      text: "Could not link this thread to a case reminder. Ask an admin to re-send the reminder from the case tracker.",
+    }).catch(() => undefined);
+    return NextResponse.json({ ok: true });
+  }
+
+  try {
+    const result = await applySlackThreadUpdate(mapping.caseId, event.text, { userName: "Slack thread" });
+    if (result.applied) {
+      await postSlackMessage({
+        channel: event.channel,
+        threadTs: event.thread_ts,
+        text: `Thanks — applied tracker update: ${result.fields.join(", ")}.`,
+      });
+    } else {
+      await postSlackMessage({
+        channel: event.channel,
+        threadTs: event.thread_ts,
+        text: `Could not apply update — ${result.reason ?? "use lines like Quarter: 2026 Q3, Minimum: 75000, Sources: …"}`,
+      });
     }
+  } catch (error) {
+    console.error("Slack thread apply failed", error);
+    await postSlackMessage({
+      channel: event.channel,
+      threadTs: event.thread_ts,
+      text: "Something went wrong saving to the case tracker. Try again or update the case in the app.",
+    }).catch(() => undefined);
   }
 
   return NextResponse.json({ ok: true });

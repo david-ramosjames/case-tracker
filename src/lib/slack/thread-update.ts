@@ -94,6 +94,6 @@ function normalizeQuarterInput(value: string) {
 }
 
 function parseMoney(value: string) {
-  const numeric = Number(value.replace(/[$,\s]/g, ""));
+  const numeric = Number(value.replace(/[$,\s]/g, "").replace(/,/g, ""));
   return Number.isFinite(numeric) ? numeric : null;
 }

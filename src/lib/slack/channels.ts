@@ -1,6 +1,11 @@
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { type CaseSlackChannel } from "@/lib/types";
+import { daysSince } from "@/lib/utils";
+
+function trackerCaseId(row: { case_id: string | null; id?: string | null }) {
+  return (row.case_id as string | null) ?? (row.id as string | null) ?? null;
+}
 
 type ChannelRow = {
   case_number: string;
@@ -66,26 +71,100 @@ export async function findCaseNumberByReminderThread(threadTs: string) {
 
   const { data, error } = await admin
     .from("case_tracker_entries")
-    .select("case_number, case_id")
+    .select("case_number, case_id, id")
     .eq("slack_reminder_thread_ts", threadTs)
     .maybeSingle();
 
   if (error || !data) return null;
+  const caseId = trackerCaseId(data as { case_id: string | null; id?: string | null });
+  if (!caseId) return null;
   return {
     caseNumber: data.case_number as string | null,
-    caseId: data.case_id as string | null,
+    caseId,
   };
 }
 
-export async function saveReminderThread(caseId: string, threadTs: string | null) {
-  const admin = createSupabaseAdminClient();
-  if (!admin) return;
+/** Resolve case from reminder thread_ts, with channel fallback when thread id was not stored. */
+export async function findCaseForSlackThread(channelId: string, threadTs: string) {
+  const direct = await findCaseNumberByReminderThread(threadTs);
+  if (direct?.caseId) return direct;
 
-  await admin
+  const admin = createSupabaseAdminClient();
+  if (!admin) return null;
+
+  const { data: channelRow } = await admin
+    .from("case_slack_channels")
+    .select("case_number")
+    .eq("slack_channel_id", channelId)
+    .maybeSingle();
+
+  if (!channelRow?.case_number) return null;
+
+  const caseNumber = cleanCaseNumber(channelRow.case_number);
+  const { data: trackerRow } = await admin
     .from("case_tracker_entries")
-    .update({
-      slack_reminder_thread_ts: threadTs,
-      last_slack_reminder_at: new Date().toISOString(),
-    })
-    .eq("case_id", caseId);
+    .select("case_number, case_id, id, slack_reminder_thread_ts, last_slack_reminder_at")
+    .eq("case_number", caseNumber)
+    .order("last_slack_reminder_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!trackerRow) return null;
+
+  const storedThread = trackerRow.slack_reminder_thread_ts as string | null;
+  if (storedThread && storedThread !== threadTs) {
+    console.warn("Slack thread reply: ts mismatch on channel fallback", {
+      channelId,
+      expected: storedThread,
+      received: threadTs,
+      caseNumber,
+    });
+    return null;
+  }
+
+  if (!storedThread) {
+    const remindedAt = trackerRow.last_slack_reminder_at as string | null;
+    if (!remindedAt || daysSince(remindedAt) > 14) {
+      return null;
+    }
+    console.warn("Slack thread reply: applying to latest reminded case (thread id was not stored)", {
+      channelId,
+      caseNumber,
+      threadTs,
+    });
+  }
+
+  const caseId = trackerCaseId(trackerRow as { case_id: string | null; id?: string | null });
+  if (!caseId) return null;
+
+  return { caseNumber, caseId };
+}
+
+export async function saveReminderThread(caseId: string, caseNumber: string, threadTs: string | null) {
+  const admin = createSupabaseAdminClient();
+  if (!admin || !threadTs) return false;
+
+  const payload = {
+    slack_reminder_thread_ts: threadTs,
+    last_slack_reminder_at: new Date().toISOString(),
+  };
+
+  const byCaseId = await admin
+    .from("case_tracker_entries")
+    .update(payload)
+    .or(`case_id.eq.${caseId},id.eq.${caseId}`)
+    .select("id");
+
+  if (!byCaseId.error && (byCaseId.data?.length ?? 0) > 0) return true;
+
+  const key = cleanCaseNumber(caseNumber);
+  if (!key) return false;
+
+  const byCaseNumber = await admin
+    .from("case_tracker_entries")
+    .update(payload)
+    .eq("case_number", key)
+    .select("id");
+
+  return !byCaseNumber.error && (byCaseNumber.data?.length ?? 0) > 0;
 }
