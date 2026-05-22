@@ -43,12 +43,19 @@ export async function notifySlackCaseStageUpdated(record: CaseRecord, previousSt
   const channelId = await getChannelIdForRecord(record);
   if (!channelId) return;
 
-  await updateSlackChannelStageTopic(channelId, record.tracker.caseStage);
-
-  await postSlackMessage({
-    channel: channelId,
-    text: `Case stage updated to *${record.tracker.caseStage}* for ${record.shared.caseNumber} (${record.shared.clientName}).`,
-  });
+  try {
+    await updateSlackChannelStageTopic(channelId, record.tracker.caseStage);
+    await postSlackMessage({
+      channel: channelId,
+      text: `Case stage updated to *${record.tracker.caseStage}* for ${record.shared.caseNumber} (${record.shared.clientName}).`,
+    });
+  } catch (error) {
+    console.error("Slack stage notification failed", {
+      caseNumber: record.shared.caseNumber,
+      channelId,
+      error: error instanceof Error ? error.message : error,
+    });
+  }
 }
 
 export async function notifySlackTrackerSaved(record: CaseRecord, patch: TrackerUpdateInput) {
@@ -57,15 +64,23 @@ export async function notifySlackTrackerSaved(record: CaseRecord, patch: Tracker
   const channelId = await getChannelIdForRecord(record);
   if (!channelId) return;
 
-  if ("caseStage" in patch && patch.caseStage) {
-    await updateSlackChannelStageTopic(channelId, record.tracker.caseStage);
-  }
+  try {
+    if ("caseStage" in patch && patch.caseStage) {
+      await updateSlackChannelStageTopic(channelId, record.tracker.caseStage);
+    }
 
-  if (trackerTouchesSourcesLit(patch)) {
-    const appUrl = requireAppUrl();
-    await postSlackMessage({
-      channel: channelId,
-      text: `Sources & Litigation Detail updated for *${record.shared.caseNumber}* by the case tracker.\n<${appUrl}/cases/${record.shared.id}|View case>`,
+    if (trackerTouchesSourcesLit(patch)) {
+      const appUrl = requireAppUrl();
+      await postSlackMessage({
+        channel: channelId,
+        text: `Sources & Litigation Detail updated for *${record.shared.caseNumber}* by the case tracker.\n<${appUrl}/cases/${record.shared.id}|View case>`,
+      });
+    }
+  } catch (error) {
+    console.error("Slack tracker notification failed", {
+      caseNumber: record.shared.caseNumber,
+      channelId,
+      error: error instanceof Error ? error.message : error,
     });
   }
 }

@@ -1,5 +1,5 @@
 import { getSlackBotToken, isSlackEnabled } from "@/lib/slack/config";
-import { mergeStageIntoChannelTopic } from "@/lib/slack/reminders";
+import { mergeStageIntoChannelTopic, sanitizeSlackTopic } from "@/lib/slack/reminders";
 
 type SlackPostMessageResponse = {
   ok: boolean;
@@ -31,9 +31,24 @@ async function slackApi<T>(method: string, body: Record<string, unknown>, attemp
   }
 
   if (!response.ok || payload.ok === false) {
-    throw new Error(payload.error ?? `Slack API ${method} failed.`);
+    const detail = payload.error ?? "unknown";
+    throw new Error(`${detail} (Slack ${method})`);
   }
   return payload;
+}
+
+function resolveSlackChannelParam(channelId: string) {
+  const trimmed = channelId.trim();
+  const normalized = normalizeSlackChannelId(trimmed);
+  if (!normalized) {
+    throw new Error(`invalid_channel_id (Slack channel "${trimmed}")`);
+  }
+  return normalized;
+}
+
+function parseChannelTopicField(topic: string | { value?: string } | undefined) {
+  if (typeof topic === "string") return topic.trim();
+  return topic?.value?.trim() ?? "";
 }
 
 export async function postSlackMessage(input: {
@@ -45,7 +60,7 @@ export async function postSlackMessage(input: {
   if (!isSlackEnabled()) return null;
 
   const payload = await slackApi<SlackPostMessageResponse>("chat.postMessage", {
-    channel: input.channel,
+    channel: resolveSlackChannelParam(input.channel),
     text: input.text,
     thread_ts: input.threadTs,
     blocks: input.blocks,
@@ -57,24 +72,42 @@ export async function postSlackMessage(input: {
 
 export async function setSlackChannelTopic(channelId: string, topic: string) {
   if (!isSlackEnabled()) return false;
-  await slackApi("conversations.setTopic", { channel: channelId, topic });
+  const sanitized = sanitizeSlackTopic(topic);
+  if (!sanitized) return false;
+  await slackApi("conversations.setTopic", {
+    channel: resolveSlackChannelParam(channelId),
+    topic: sanitized,
+  });
   return true;
 }
 
 export async function getSlackChannelTopic(channelId: string) {
   if (!isSlackEnabled()) return "";
   const payload = await slackApi<{
-    channel?: { topic?: { value?: string } };
-  }>("conversations.info", { channel: channelId });
-  return payload.channel?.topic?.value?.trim() ?? "";
+    channel?: { topic?: string | { value?: string } };
+  }>("conversations.info", { channel: resolveSlackChannelParam(channelId) });
+  return parseChannelTopicField(payload.channel?.topic);
 }
 
+/** Updates only the (stage) segment; never fails tracker saves if Slack rejects the topic. */
 export async function updateSlackChannelStageTopic(channelId: string, stage: string) {
-  const existing = await getSlackChannelTopic(channelId);
-  const merged = mergeStageIntoChannelTopic(existing, stage);
-  if (merged === existing) return false;
-  await setSlackChannelTopic(channelId, merged);
-  return true;
+  const trimmedStage = stage.trim();
+  if (!trimmedStage) return false;
+
+  try {
+    const existing = sanitizeSlackTopic(await getSlackChannelTopic(channelId));
+    const merged = sanitizeSlackTopic(mergeStageIntoChannelTopic(existing, trimmedStage));
+    if (!merged || merged === existing) return false;
+    await setSlackChannelTopic(channelId, merged);
+    return true;
+  } catch (error) {
+    console.error("Slack topic update skipped", {
+      channelId: channelId.trim(),
+      stage: trimmedStage,
+      error: error instanceof Error ? error.message : error,
+    });
+    return false;
+  }
 }
 
 let channelNameCache: Map<string, string> | null = null;

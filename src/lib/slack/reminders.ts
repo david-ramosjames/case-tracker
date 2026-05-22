@@ -72,6 +72,13 @@ export function buildSlackReminderMessage(record: CaseRecord, reasons: SlackRemi
 
 const TRAILING_PARENS_RE = /\([^)]*\)\s*$/;
 
+/** Slack topics: no newlines, max 250 chars. */
+export function sanitizeSlackTopic(topic: string) {
+  const cleaned = topic.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned) return "";
+  return cleaned.slice(0, 250);
+}
+
 /**
  * Update only the case stage in a Slack channel topic.
  * Firm convention: stage is the text inside parentheses, e.g. "Client · 153 · (Lit)".
