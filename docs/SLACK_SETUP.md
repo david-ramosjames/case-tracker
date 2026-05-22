@@ -47,7 +47,7 @@ Sources: Updated treatment plan...
 |-----------------|-----------|--------|-----------------|-------------|----------|---------------------|
 | jessicagutierrez-153 | 153 | Jessicagutierrez | Eric Cuellar | Giselle | Litigation | C0123456789 |
 
-Sync uses **Slack Channel** (A), **Case No** (B), **Status** (F), and **Slack Channel ID** (G). The channel ID enables direct links on case pages and avoids listing every Slack channel when posting. Client name and attorney/paralegal columns are ignored for mapping.
+Sync uses **Slack Channel** (A), **Case No** (B), **Status** (F), and **Slack Channel ID** (G). IDs are stored in Supabase (`case_slack_channels`); posting and reminders read from the database only — not the sheet or Slack channel list on each save. Re-import when the sheet changes. Client name and attorney/paralegal columns are ignored for mapping.
 
 Set env vars:
 

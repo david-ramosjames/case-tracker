@@ -40,7 +40,7 @@ export function SlackSyncCard() {
         <CardTitle>Slack case channels (Google Sheet)</CardTitle>
         <CardDescription>
           Copies <strong>Client Contact Status → Sheet1</strong> into the tracker: Case No, Slack channel name, Status, and Slack channel
-          ID. This only reads Google Sheets — it does not call Slack. Stored channel IDs are used for case page links and posting. See
+          ID. This only reads Google Sheets — it does not call Slack. IDs are saved to Supabase and used for links and posting (no per-save sheet or Slack lookup). See
           docs/SLACK_SETUP.md.
         </CardDescription>
       </CardHeader>

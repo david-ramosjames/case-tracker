@@ -1,8 +1,7 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
-import { syncSlackChannelsFromGoogleSheetIfConfigured } from "@/lib/google/sheets-sync";
-import { postSlackMessage, resolveSlackChannelId, updateSlackChannelStageTopic } from "@/lib/slack/client";
+import { normalizeSlackChannelId, postSlackMessage, updateSlackChannelStageTopic } from "@/lib/slack/client";
 import { getSlackChannelForCaseNumber, saveReminderThread } from "@/lib/slack/channels";
-import { SLACK_REMINDER_COOLDOWN_DAYS, isGoogleSheetsSyncConfigured, isSlackEnabled } from "@/lib/slack/config";
+import { SLACK_REMINDER_COOLDOWN_DAYS, isSlackEnabled } from "@/lib/slack/config";
 import {
   buildSlackReminderMessage,
   getSlackReminderReasons,
@@ -24,17 +23,11 @@ function requireAppUrl() {
   return appUrl;
 }
 
-async function getChannelIdForRecord(record: CaseRecord, allowSheetSync = true) {
+/** Channel ID from Supabase only (imported from Google Sheet column G). No Slack API or sheet lookup here. */
+async function getChannelIdForRecord(record: CaseRecord) {
   const mapping = await getSlackChannelForCaseNumber(record.shared.caseNumber);
-  if (!mapping) {
-    if (allowSheetSync && isGoogleSheetsSyncConfigured()) {
-      await syncSlackChannelsFromGoogleSheetIfConfigured();
-      return getChannelIdForRecord(record, false);
-    }
-    return null;
-  }
-  const channelId = mapping.slackChannelId ?? (await resolveSlackChannelId(mapping.slackChannelName));
-  return channelId;
+  if (!mapping?.slackChannelId) return null;
+  return normalizeSlackChannelId(mapping.slackChannelId);
 }
 
 export async function notifySlackCaseStageUpdated(record: CaseRecord, previousStage: string | undefined) {
