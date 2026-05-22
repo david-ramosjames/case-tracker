@@ -1,5 +1,5 @@
 import { getSlackBotToken, isSlackEnabled } from "@/lib/slack/config";
-import { mergeStageIntoChannelTopic, sanitizeSlackTopic } from "@/lib/slack/reminders";
+import { sanitizeSlackTopic } from "@/lib/slack/reminders";
 
 type SlackPostMessageResponse = {
   ok: boolean;
@@ -46,11 +46,6 @@ function resolveSlackChannelParam(channelId: string) {
   return normalized;
 }
 
-function parseChannelTopicField(topic: string | { value?: string } | undefined) {
-  if (typeof topic === "string") return topic.trim();
-  return topic?.value?.trim() ?? "";
-}
-
 export async function postSlackMessage(input: {
   channel: string;
   text: string;
@@ -81,29 +76,17 @@ export async function setSlackChannelTopic(channelId: string, topic: string) {
   return true;
 }
 
-export async function getSlackChannelTopic(channelId: string) {
-  if (!isSlackEnabled()) return "";
-  const payload = await slackApi<{
-    channel?: { topic?: string | { value?: string } };
-  }>("conversations.info", { channel: resolveSlackChannelParam(channelId) });
-  return parseChannelTopicField(payload.channel?.topic);
-}
-
-/** Updates only the (stage) segment; never fails tracker saves if Slack rejects the topic. */
-export async function updateSlackChannelStageTopic(channelId: string, stage: string) {
-  const trimmedStage = stage.trim();
-  if (!trimmedStage) return false;
+/** Sets the full channel topic (built from case data — no conversations.info). */
+export async function updateSlackChannelTopic(channelId: string, topic: string) {
+  const sanitized = sanitizeSlackTopic(topic);
+  if (!sanitized) return false;
 
   try {
-    const existing = sanitizeSlackTopic(await getSlackChannelTopic(channelId));
-    const merged = sanitizeSlackTopic(mergeStageIntoChannelTopic(existing, trimmedStage));
-    if (!merged || merged === existing) return false;
-    await setSlackChannelTopic(channelId, merged);
+    await setSlackChannelTopic(channelId, sanitized);
     return true;
   } catch (error) {
     console.error("Slack topic update skipped", {
       channelId: channelId.trim(),
-      stage: trimmedStage,
       error: error instanceof Error ? error.message : error,
     });
     return false;

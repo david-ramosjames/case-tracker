@@ -93,7 +93,7 @@ Set `NEXT_PUBLIC_SITE_URL=https://YOUR_DOMAIN` on Vercel (then redeploy) so Slac
 
 Response includes `sheetSync: { synced, configured }` and `reminders: { sent, skipped }`.
 
-**Channel topics:** stage changes only replace the text inside parentheses `(Lit)`, `(Settled)`, etc., or append ` (stage)` if no parentheses exist. The rest of the topic is left as-is.
+**Channel topics:** rebuilt as `Attorney @Name | Paralegal @Name (Status)` from the case’s attorney/paralegal and either the sheet **Status** column (F) or the tracker stage label when you save a stage change (e.g. `Dmd` → `(Demand)`). The app does not read the topic from Slack (`conversations.info` is not used).
 
 Set `CRON_SECRET` in env. Optional: `SLACK_REMINDER_COOLDOWN_DAYS=3` (default) to avoid spamming the same case.
 

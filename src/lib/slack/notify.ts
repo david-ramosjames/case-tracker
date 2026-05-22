@@ -1,6 +1,7 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
-import { normalizeSlackChannelId, postSlackMessage, updateSlackChannelStageTopic } from "@/lib/slack/client";
+import { normalizeSlackChannelId, postSlackMessage, updateSlackChannelTopic } from "@/lib/slack/client";
 import { getSlackChannelForCaseNumber, saveReminderThread } from "@/lib/slack/channels";
+import { buildSlackChannelTopic, resolveTopicStatusLabel } from "@/lib/slack/topic";
 import { SLACK_REMINDER_COOLDOWN_DAYS, isSlackEnabled } from "@/lib/slack/config";
 import {
   buildSlackReminderMessage,
@@ -23,29 +24,39 @@ function requireAppUrl() {
   return appUrl;
 }
 
-/** Channel ID from Supabase only (imported from Google Sheet column G). No Slack API or sheet lookup here. */
-async function getChannelIdForRecord(record: CaseRecord) {
+async function getSlackContextForRecord(record: CaseRecord) {
   const mapping = await getSlackChannelForCaseNumber(record.shared.caseNumber);
   if (!mapping?.slackChannelId) return null;
-  return normalizeSlackChannelId(mapping.slackChannelId);
+  const channelId = normalizeSlackChannelId(mapping.slackChannelId);
+  if (!channelId) return null;
+  return { channelId, mapping };
+}
+
+async function syncSlackTopicForCase(record: CaseRecord, options?: { fromTrackerStage?: boolean }) {
+  const context = await getSlackContextForRecord(record);
+  if (!context) return;
+
+  const statusLabel = resolveTopicStatusLabel(record, context.mapping, options);
+  const topic = buildSlackChannelTopic(record, statusLabel);
+  await updateSlackChannelTopic(context.channelId, topic);
 }
 
 export async function notifySlackCaseStageUpdated(record: CaseRecord, previousStage: string | undefined) {
   if (!isSlackEnabled() || record.tracker.caseStage === previousStage) return;
 
-  const channelId = await getChannelIdForRecord(record);
-  if (!channelId) return;
+  const context = await getSlackContextForRecord(record);
+  if (!context) return;
 
   try {
-    await updateSlackChannelStageTopic(channelId, record.tracker.caseStage);
+    await syncSlackTopicForCase(record, { fromTrackerStage: true });
     await postSlackMessage({
-      channel: channelId,
+      channel: context.channelId,
       text: `Case stage updated to *${record.tracker.caseStage}* for ${record.shared.caseNumber} (${record.shared.clientName}).`,
     });
   } catch (error) {
     console.error("Slack stage notification failed", {
       caseNumber: record.shared.caseNumber,
-      channelId,
+      channelId: context.channelId,
       error: error instanceof Error ? error.message : error,
     });
   }
@@ -54,25 +65,25 @@ export async function notifySlackCaseStageUpdated(record: CaseRecord, previousSt
 export async function notifySlackTrackerSaved(record: CaseRecord, patch: TrackerUpdateInput) {
   if (!isSlackEnabled()) return;
 
-  const channelId = await getChannelIdForRecord(record);
-  if (!channelId) return;
+  const context = await getSlackContextForRecord(record);
+  if (!context) return;
 
   try {
     if ("caseStage" in patch && patch.caseStage) {
-      await updateSlackChannelStageTopic(channelId, record.tracker.caseStage);
+      await syncSlackTopicForCase(record, { fromTrackerStage: true });
     }
 
     if (trackerTouchesSourcesLit(patch)) {
       const appUrl = requireAppUrl();
       await postSlackMessage({
-        channel: channelId,
+        channel: context.channelId,
         text: `Sources & Litigation Detail updated for *${record.shared.caseNumber}* by the case tracker.\n<${appUrl}/cases/${record.shared.id}|View case>`,
       });
     }
   } catch (error) {
     console.error("Slack tracker notification failed", {
       caseNumber: record.shared.caseNumber,
-      channelId,
+      channelId: context.channelId,
       error: error instanceof Error ? error.message : error,
     });
   }
@@ -91,8 +102,8 @@ export async function notifySlackCommentPosted(
   ]);
   if (!slackCommentTypes.has(input.type)) return;
 
-  const channelId = await getChannelIdForRecord(record);
-  if (!channelId) return;
+  const context = await getSlackContextForRecord(record);
+  if (!context) return;
 
   const label =
     input.type === "manager_note"
@@ -105,7 +116,7 @@ export async function notifySlackCommentPosted(
 
   const appUrl = requireAppUrl();
   await postSlackMessage({
-    channel: channelId,
+    channel: context.channelId,
     text: [
       `*${label}* on ${record.shared.caseNumber} — ${input.authorName}`,
       input.body,
@@ -152,8 +163,8 @@ export async function sendSlackCaseReminders(
       continue;
     }
 
-    const channelId = await getChannelIdForRecord(record);
-    if (!channelId) {
+    const context = await getSlackContextForRecord(record);
+    if (!context) {
       skipped += 1;
       continue;
     }
@@ -162,7 +173,7 @@ export async function sendSlackCaseReminders(
       reasons.length > 0
         ? buildSlackReminderMessage(record, reasons, appUrl)
         : buildForcedReminderMessage(record, appUrl);
-    const posted = await postSlackMessage({ channel: channelId, text });
+    const posted = await postSlackMessage({ channel: context.channelId, text });
     if (posted?.ts && record.shared.id) {
       await saveReminderThread(record.shared.id, posted.ts);
     }
