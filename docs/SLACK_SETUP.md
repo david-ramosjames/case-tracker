@@ -92,7 +92,7 @@ Set `NEXT_PUBLIC_SITE_URL=https://YOUR_DOMAIN` on Vercel (then redeploy) so Slac
 
 Response includes `sheetSync: { synced, configured }` and `reminders: { sent, skipped }`.
 
-**Channel topics:** stage changes only update the `Stage: …` portion of the existing topic (or append ` · Stage: …`); the rest of the topic text is left as-is.
+**Channel topics:** stage changes only replace the text inside parentheses `(Lit)`, `(Settled)`, etc., or append ` (stage)` if no parentheses exist. The rest of the topic is left as-is.
 
 Set `CRON_SECRET` in env. Optional: `SLACK_REMINDER_COOLDOWN_DAYS=3` (default) to avoid spamming the same case.
 

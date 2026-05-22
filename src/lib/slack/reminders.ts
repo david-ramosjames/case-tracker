@@ -70,24 +70,42 @@ export function buildSlackReminderMessage(record: CaseRecord, reasons: SlackRemi
   return lines.join("\n");
 }
 
-const STAGE_TOPIC_SUFFIX_RE = / · Stage: [^·\n]*$/;
+const TRAILING_PARENS_RE = /\([^)]*\)\s*$/;
 
-/** Update only the `Stage: …` portion of a channel topic; preserve the rest. */
+/**
+ * Update only the case stage in a Slack channel topic.
+ * Firm convention: stage is the text inside parentheses, e.g. "Client · 153 · (Lit)".
+ */
 export function mergeStageIntoChannelTopic(existingTopic: string, stage: string) {
   const maxLen = 250;
-  const stageSuffix = ` · Stage: ${stage}`;
   const base = existingTopic.trim();
+  const stageInParens = `(${stage})`;
 
-  if (STAGE_TOPIC_SUFFIX_RE.test(base)) {
-    return base.replace(STAGE_TOPIC_SUFFIX_RE, stageSuffix).slice(0, maxLen);
+  if (!base) return stageInParens.slice(0, maxLen);
+
+  if (TRAILING_PARENS_RE.test(base)) {
+    return base.replace(TRAILING_PARENS_RE, stageInParens).slice(0, maxLen);
   }
 
+  const parenMatches = [...base.matchAll(/\([^)]*\)/g)];
+  if (parenMatches.length === 1) {
+    return base.replace(parenMatches[0][0], stageInParens).slice(0, maxLen);
+  }
+  if (parenMatches.length > 1) {
+    const last = parenMatches[parenMatches.length - 1];
+    const start = last.index ?? 0;
+    return `${base.slice(0, start)}${stageInParens}${base.slice(start + last[0].length)}`.slice(0, maxLen);
+  }
+
+  // Older topics that used "Stage: …" from the tracker
+  if (/ · Stage: [^·\n]*$/.test(base)) {
+    return base.replace(/ · Stage: [^·\n]*$/, ` ${stageInParens}`).slice(0, maxLen);
+  }
   if (/Stage:\s*/i.test(base)) {
-    return base.replace(/Stage:\s*[^·\n]+/i, `Stage: ${stage}`).slice(0, maxLen);
+    return base.replace(/Stage:\s*[^·\n]+/i, stageInParens).slice(0, maxLen);
   }
 
-  if (!base) return `Stage: ${stage}`.slice(0, maxLen);
-  return `${base}${stageSuffix}`.slice(0, maxLen);
+  return `${base} ${stageInParens}`.slice(0, maxLen);
 }
 
 export function trackerTouchesSourcesLit(patch: Record<string, unknown>) {
