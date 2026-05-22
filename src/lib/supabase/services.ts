@@ -201,9 +201,11 @@ export async function updateTrackerEntry(
       { changedFields },
     );
     if (existingRecord) {
-      void runSlackTrackerSideEffects(existingRecord, tracker, changeInput, previousStage).catch((error) => {
+      try {
+        await runSlackTrackerSideEffects(existingRecord, tracker, changeInput, previousStage);
+      } catch (error) {
         console.error("Slack tracker notification failed", error);
-      });
+      }
     }
     return { tracker, activity: activity ?? undefined };
   }
@@ -381,11 +383,15 @@ export async function createTrackerComment(
 
   const record = await getCaseById(input.caseId);
   if (record) {
-    void notifySlackCommentPosted(record, {
-      type: input.type,
-      body: input.body,
-      authorName,
-    }).catch((error) => console.error("Slack comment notification failed", error));
+    try {
+      await notifySlackCommentPosted(record, {
+        type: input.type,
+        body: input.body,
+        authorName,
+      });
+    } catch (error) {
+      console.error("Slack comment notification failed", error);
+    }
   }
 
   return {

@@ -143,17 +143,49 @@ export async function loadChannelNameMap(forceRefresh = false) {
   return map;
 }
 
-/** Read topic from conversations.list cache (avoids conversations.info). */
-export async function getSlackChannelTopicFromList(
-  channelId: string,
-  options?: { refresh?: boolean },
-) {
+/** Find one channel's topic via conversations.list (stops at first match; avoids conversations.info). */
+export async function fetchSlackChannelTopic(channelId: string) {
   if (!isSlackEnabled()) return null;
   const normalized = normalizeSlackChannelId(channelId);
   if (!normalized) return null;
 
-  await loadChannelNameMap(options?.refresh ?? false);
-  return channelTopicByIdCache?.get(normalized) ?? null;
+  if (channelTopicByIdCache && Date.now() < channelCacheExpiresAt) {
+    const cached = channelTopicByIdCache.get(normalized);
+    if (cached) return cached;
+  }
+
+  let cursor: string | undefined;
+  let page = 0;
+
+  do {
+    if (page > 0) await sleep(1200);
+    const payload = await slackApi<{
+      ok: boolean;
+      channels?: Array<{ id: string; name: string; topic?: string | { value?: string } }>;
+      response_metadata?: { next_cursor?: string };
+    }>("conversations.list", {
+      types: "public_channel,private_channel",
+      limit: 200,
+      cursor,
+    });
+
+    for (const channel of payload.channels ?? []) {
+      const topic = parseTopicField(channel.topic);
+      if (topic) {
+        if (!channelTopicByIdCache) channelTopicByIdCache = new Map();
+        channelTopicByIdCache.set(channel.id, topic);
+      }
+      if (channel.id === normalized) {
+        channelCacheExpiresAt = Date.now() + 30 * 60 * 1000;
+        return topic || null;
+      }
+    }
+
+    cursor = payload.response_metadata?.next_cursor || undefined;
+    page += 1;
+  } while (cursor);
+
+  return null;
 }
 
 export function normalizeSlackChannelId(value: string) {
