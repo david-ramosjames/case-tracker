@@ -85,7 +85,7 @@ const DEFAULT_SETTINGS: CaseTrackerSettings = {
 };
 
 async function createTrackerClient() {
-  return createSupabaseServerClient();
+  return createSupabaseAdminClient() ?? (await createSupabaseServerClient());
 }
 
 async function createSharedDataClient() {

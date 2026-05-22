@@ -123,7 +123,8 @@ export async function POST(request: Request) {
       });
     }
   } catch (error) {
-    console.error("Slack thread apply failed", error);
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("Slack thread apply failed", detail, error);
     await postSlackMessage({
       channel: event.channel,
       threadTs: event.thread_ts,
