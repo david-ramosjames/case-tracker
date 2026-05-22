@@ -70,51 +70,6 @@ export function buildSlackReminderMessage(record: CaseRecord, reasons: SlackRemi
   return lines.join("\n");
 }
 
-const TRAILING_PARENS_RE = /\([^)]*\)\s*$/;
-
-/** Slack topics: no newlines, max 250 chars. */
-export function sanitizeSlackTopic(topic: string) {
-  const cleaned = topic.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim();
-  if (!cleaned) return "";
-  return cleaned.slice(0, 250);
-}
-
-/**
- * Update only the case stage in a Slack channel topic.
- * Firm convention: stage is the text inside parentheses, e.g. "Client · 153 · (Lit)".
- */
-export function mergeStageIntoChannelTopic(existingTopic: string, stage: string) {
-  const maxLen = 250;
-  const base = existingTopic.trim();
-  const stageInParens = `(${stage})`;
-
-  if (!base) return stageInParens.slice(0, maxLen);
-
-  if (TRAILING_PARENS_RE.test(base)) {
-    return base.replace(TRAILING_PARENS_RE, stageInParens).slice(0, maxLen);
-  }
-
-  const parenMatches = [...base.matchAll(/\([^)]*\)/g)];
-  if (parenMatches.length === 1) {
-    return base.replace(parenMatches[0][0], stageInParens).slice(0, maxLen);
-  }
-  if (parenMatches.length > 1) {
-    const last = parenMatches[parenMatches.length - 1];
-    const start = last.index ?? 0;
-    return `${base.slice(0, start)}${stageInParens}${base.slice(start + last[0].length)}`.slice(0, maxLen);
-  }
-
-  // Older topics that used "Stage: …" from the tracker
-  if (/ · Stage: [^·\n]*$/.test(base)) {
-    return base.replace(/ · Stage: [^·\n]*$/, ` ${stageInParens}`).slice(0, maxLen);
-  }
-  if (/Stage:\s*/i.test(base)) {
-    return base.replace(/Stage:\s*[^·\n]+/i, stageInParens).slice(0, maxLen);
-  }
-
-  return `${base} ${stageInParens}`.slice(0, maxLen);
-}
-
 export function trackerTouchesSourcesLit(patch: Record<string, unknown>) {
   return SOURCES_LIT_FIELDS.some((field) => field in patch && patch[field] !== undefined);
 }

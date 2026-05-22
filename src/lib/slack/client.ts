@@ -1,5 +1,4 @@
 import { getSlackBotToken, isSlackEnabled } from "@/lib/slack/config";
-import { sanitizeSlackTopic } from "@/lib/slack/reminders";
 
 type SlackPostMessageResponse = {
   ok: boolean;
@@ -65,51 +64,16 @@ export async function postSlackMessage(input: {
   return { channel: payload.channel ?? input.channel, ts: payload.ts ?? null };
 }
 
-export async function setSlackChannelTopic(channelId: string, topic: string) {
-  if (!isSlackEnabled()) return false;
-  const sanitized = sanitizeSlackTopic(topic);
-  if (!sanitized) return false;
-  await slackApi("conversations.setTopic", {
-    channel: resolveSlackChannelParam(channelId),
-    topic: sanitized,
-  });
-  return true;
-}
-
-/** Sets the full channel topic (built from case data — no conversations.info). */
-export async function updateSlackChannelTopic(channelId: string, topic: string) {
-  const sanitized = sanitizeSlackTopic(topic);
-  if (!sanitized) return false;
-
-  try {
-    await setSlackChannelTopic(channelId, sanitized);
-    return true;
-  } catch (error) {
-    console.error("Slack topic update skipped", {
-      channelId: channelId.trim(),
-      error: error instanceof Error ? error.message : error,
-    });
-    return false;
-  }
-}
-
 let channelNameCache: Map<string, string> | null = null;
-let channelTopicByIdCache: Map<string, string> | null = null;
 let channelCacheExpiresAt = 0;
 
-function parseTopicField(topic: string | { value?: string } | undefined) {
-  if (typeof topic === "string") return topic.trim();
-  return topic?.value?.trim() ?? "";
-}
-
-/** Load all workspace channels once (cached 30 min). */
+/** Load all workspace channels once (cached 30 min). Used only if resolving by name. */
 export async function loadChannelNameMap(forceRefresh = false) {
-  if (!forceRefresh && channelNameCache && channelTopicByIdCache && Date.now() < channelCacheExpiresAt) {
+  if (!forceRefresh && channelNameCache && Date.now() < channelCacheExpiresAt) {
     return channelNameCache;
   }
 
   const map = new Map<string, string>();
-  const topicsById = new Map<string, string>();
   let cursor: string | undefined;
   let page = 0;
 
@@ -117,7 +81,7 @@ export async function loadChannelNameMap(forceRefresh = false) {
     if (page > 0) await sleep(1200);
     const payload = await slackApi<{
       ok: boolean;
-      channels?: Array<{ id: string; name: string; topic?: string | { value?: string } }>;
+      channels?: Array<{ id: string; name: string }>;
       response_metadata?: { next_cursor?: string };
     }>("conversations.list", {
       types: "public_channel,private_channel",
@@ -129,8 +93,6 @@ export async function loadChannelNameMap(forceRefresh = false) {
       map.set(channel.name.toLowerCase(), channel.id);
       map.set(`#${channel.name}`.toLowerCase(), channel.id);
       map.set(channel.id, channel.id);
-      const topic = parseTopicField(channel.topic);
-      if (topic) topicsById.set(channel.id, topic);
     }
 
     cursor = payload.response_metadata?.next_cursor || undefined;
@@ -138,54 +100,8 @@ export async function loadChannelNameMap(forceRefresh = false) {
   } while (cursor);
 
   channelNameCache = map;
-  channelTopicByIdCache = topicsById;
   channelCacheExpiresAt = Date.now() + 30 * 60 * 1000;
   return map;
-}
-
-/** Find one channel's topic via conversations.list (stops at first match; avoids conversations.info). */
-export async function fetchSlackChannelTopic(channelId: string) {
-  if (!isSlackEnabled()) return null;
-  const normalized = normalizeSlackChannelId(channelId);
-  if (!normalized) return null;
-
-  if (channelTopicByIdCache && Date.now() < channelCacheExpiresAt) {
-    const cached = channelTopicByIdCache.get(normalized);
-    if (cached) return cached;
-  }
-
-  let cursor: string | undefined;
-  let page = 0;
-
-  do {
-    if (page > 0) await sleep(1200);
-    const payload = await slackApi<{
-      ok: boolean;
-      channels?: Array<{ id: string; name: string; topic?: string | { value?: string } }>;
-      response_metadata?: { next_cursor?: string };
-    }>("conversations.list", {
-      types: "public_channel,private_channel",
-      limit: 200,
-      cursor,
-    });
-
-    for (const channel of payload.channels ?? []) {
-      const topic = parseTopicField(channel.topic);
-      if (topic) {
-        if (!channelTopicByIdCache) channelTopicByIdCache = new Map();
-        channelTopicByIdCache.set(channel.id, topic);
-      }
-      if (channel.id === normalized) {
-        channelCacheExpiresAt = Date.now() + 30 * 60 * 1000;
-        return topic || null;
-      }
-    }
-
-    cursor = payload.response_metadata?.next_cursor || undefined;
-    page += 1;
-  } while (cursor);
-
-  return null;
 }
 
 export function normalizeSlackChannelId(value: string) {

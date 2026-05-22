@@ -1,8 +1,7 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
-import { fetchSlackChannelTopic, normalizeSlackChannelId, postSlackMessage, updateSlackChannelTopic } from "@/lib/slack/client";
+import { normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
 import { getSlackChannelForCaseNumber, saveReminderThread } from "@/lib/slack/channels";
 import { SLACK_REMINDER_COOLDOWN_DAYS, isSlackEnabled } from "@/lib/slack/config";
-import { buildTopicFromPrefix, extractTopicPrefix, resolveTopicStatusLabel } from "@/lib/slack/topic";
 import {
   buildSlackReminderMessage,
   getSlackReminderReasons,
@@ -50,28 +49,6 @@ async function getSlackContextForRecord(record: CaseRecord) {
   return { channelId, mapping };
 }
 
-async function syncSlackTopicForCase(record: CaseRecord, options?: { fromTrackerStage?: boolean }) {
-  const context = await getSlackContextForRecord(record);
-  if (!context) return;
-
-  const liveTopic = await fetchSlackChannelTopic(context.channelId);
-  const prefix = liveTopic ? extractTopicPrefix(liveTopic) : "";
-
-  if (!prefix) {
-    console.warn("Slack topic update skipped — could not read channel topic from Slack", {
-      caseNumber: record.shared.caseNumber,
-      channelId: context.channelId,
-    });
-    return;
-  }
-
-  const statusLabel = resolveTopicStatusLabel(record.tracker.caseStage, context.mapping, options);
-  const topic = buildTopicFromPrefix(prefix, statusLabel);
-  if (!topic) return;
-
-  await updateSlackChannelTopic(context.channelId, topic);
-}
-
 export async function notifySlackCaseStageUpdated(record: CaseRecord, previousStage: string | undefined) {
   if (!isSlackEnabled() || record.tracker.caseStage === previousStage) return;
 
@@ -83,14 +60,6 @@ export async function notifySlackCaseStageUpdated(record: CaseRecord, previousSt
       channel: context.channelId,
       text: `Case stage updated to *${record.tracker.caseStage}* for ${record.shared.caseNumber} (${record.shared.clientName}).`,
     });
-    try {
-      await syncSlackTopicForCase(record, { fromTrackerStage: true });
-    } catch (topicError) {
-      console.warn("Slack topic update failed after stage message", {
-        caseNumber: record.shared.caseNumber,
-        error: topicError instanceof Error ? topicError.message : topicError,
-      });
-    }
   } catch (error) {
     console.error("Slack stage notification failed", {
       caseNumber: record.shared.caseNumber,
@@ -106,25 +75,14 @@ export async function notifySlackTrackerSaved(record: CaseRecord, patch: Tracker
   const context = await getSlackContextForRecord(record);
   if (!context) return;
 
-  try {
-    if (trackerTouchesSourcesLit(patch)) {
-      const appUrl = requireAppUrl();
-      await postSlackMessage({
-        channel: context.channelId,
-        text: `Sources & Litigation Detail updated for *${record.shared.caseNumber}* by the case tracker.\n<${appUrl}/cases/${record.shared.id}|View case>`,
-      });
-    }
+  if (!trackerTouchesSourcesLit(patch)) return;
 
-    if ("caseStage" in patch && patch.caseStage) {
-      try {
-        await syncSlackTopicForCase(record, { fromTrackerStage: true });
-      } catch (topicError) {
-        console.warn("Slack topic update failed after tracker save", {
-          caseNumber: record.shared.caseNumber,
-          error: topicError instanceof Error ? topicError.message : topicError,
-        });
-      }
-    }
+  try {
+    const appUrl = requireAppUrl();
+    await postSlackMessage({
+      channel: context.channelId,
+      text: `Sources & Litigation Detail updated for *${record.shared.caseNumber}* by the case tracker.\n<${appUrl}/cases/${record.shared.id}|View case>`,
+    });
   } catch (error) {
     console.error("Slack tracker notification failed", {
       caseNumber: record.shared.caseNumber,
