@@ -7,7 +7,6 @@ type ChannelRow = {
   slack_channel_id: string | null;
   slack_channel_name: string;
   topic_stage: string | null;
-  slack_topic_prefix: string | null;
   synced_at: string;
   updated_at: string;
 };
@@ -18,24 +17,9 @@ function rowToChannel(row: ChannelRow): CaseSlackChannel {
     slackChannelId: row.slack_channel_id,
     slackChannelName: row.slack_channel_name,
     topicStage: row.topic_stage,
-    topicPrefix: row.slack_topic_prefix,
     syncedAt: row.synced_at,
     updatedAt: row.updated_at,
   };
-}
-
-export async function saveSlackTopicPrefix(caseNumber: string, topicPrefix: string) {
-  const admin = createSupabaseAdminClient();
-  if (!admin) return;
-
-  const key = cleanCaseNumber(caseNumber);
-  const trimmed = topicPrefix.trim();
-  if (!key || !trimmed) return;
-
-  await admin
-    .from("case_slack_channels")
-    .update({ slack_topic_prefix: trimmed, updated_at: new Date().toISOString() })
-    .eq("case_number", key);
 }
 
 export async function getSlackChannelForCaseNumber(caseNumber: string): Promise<CaseSlackChannel | null> {
@@ -48,40 +32,26 @@ export async function getSlackChannelForCaseNumber(caseNumber: string): Promise<
   return rowToChannel(data as ChannelRow);
 }
 
-type SlackChannelUpsertRow = {
-  caseNumber: string;
-  slackChannelId: string | null;
-  slackChannelName: string;
-  topicStage: string | null;
-  topicPrefix?: string | null;
-};
-
-export async function upsertSlackChannels(rows: SlackChannelUpsertRow[]) {
+export async function upsertSlackChannels(rows: Array<Omit<CaseSlackChannel, "syncedAt" | "updatedAt">>) {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required to sync Slack channels.");
 
   // Sheet rows can repeat the same Case No; Postgres rejects duplicate keys in one upsert batch.
-  const byCaseNumber = new Map<string, SlackChannelUpsertRow>();
+  const byCaseNumber = new Map<string, Omit<CaseSlackChannel, "syncedAt" | "updatedAt">>();
   for (const row of rows) {
     byCaseNumber.set(cleanCaseNumber(row.caseNumber), row);
   }
   const deduped = [...byCaseNumber.values()];
   const duplicatesRemoved = rows.length - deduped.length;
 
-  const payload = deduped.map((row) => {
-    const base: Record<string, string | null> = {
-      case_number: cleanCaseNumber(row.caseNumber),
-      slack_channel_id: row.slackChannelId,
-      slack_channel_name: row.slackChannelName,
-      topic_stage: row.topicStage,
-      synced_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    if (row.topicPrefix !== undefined) {
-      base.slack_topic_prefix = row.topicPrefix;
-    }
-    return base;
-  });
+  const payload = deduped.map((row) => ({
+    case_number: cleanCaseNumber(row.caseNumber),
+    slack_channel_id: row.slackChannelId,
+    slack_channel_name: row.slackChannelName,
+    topic_stage: row.topicStage,
+    synced_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }));
 
   const { error } = await admin.from("case_slack_channels").upsert(payload, { onConflict: "case_number" });
   if (error) {

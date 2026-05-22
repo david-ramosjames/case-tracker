@@ -93,7 +93,7 @@ Set `NEXT_PUBLIC_SITE_URL=https://YOUR_DOMAIN` on Vercel (then redeploy) so Slac
 
 Response includes `sheetSync: { synced, configured }` and `reminders: { sent, skipped }`.
 
-**Channel topics:** only the trailing `(Status)` is updated. The `Attorney … | Paralegal …` prefix (with Slack `<@USER>` mentions) is read once from the channel topic via `conversations.list`, cached in `case_slack_channels.slack_topic_prefix`, and reused. Run migration `007_slack_topic_prefix.sql`. The app never replaces mention lines with plain `@Display Name` text.
+**Channel topics:** only the trailing `(Status)` is updated. The `Attorney … | Paralegal …` prefix (with Slack `<@USER>` mentions) is read from the live channel topic via `conversations.list` (in-memory cache, ~30 min). The app never replaces mention lines with plain `@Display Name` text. Supabase only stores channel ID (column G), not topic text.
 
 Set `CRON_SECRET` in env. Optional: `SLACK_REMINDER_COOLDOWN_DAYS=3` (default) to avoid spamming the same case.
 

@@ -144,12 +144,15 @@ export async function loadChannelNameMap(forceRefresh = false) {
 }
 
 /** Read topic from conversations.list cache (avoids conversations.info). */
-export async function getSlackChannelTopicFromList(channelId: string) {
+export async function getSlackChannelTopicFromList(
+  channelId: string,
+  options?: { refresh?: boolean },
+) {
   if (!isSlackEnabled()) return null;
   const normalized = normalizeSlackChannelId(channelId);
   if (!normalized) return null;
 
-  await loadChannelNameMap();
+  await loadChannelNameMap(options?.refresh ?? false);
   return channelTopicByIdCache?.get(normalized) ?? null;
 }
 
