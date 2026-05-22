@@ -82,6 +82,29 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
   return { tracker, sharedNotes };
 }
 
+/** User-facing labels for Slack confirmation (matches reminder wording). */
+export function describeSlackThreadAppliedLabels(patch: TrackerUpdateInput): string[] {
+  const labels: string[] = [];
+  if (patch.targetResolutionQuarter != null) labels.push("Expected completion quarter");
+  if (patch.minimumValue != null) labels.push("Minimum value");
+  if (patch.sources != null) labels.push("Sources & litigation detail");
+  if (patch.litEventsNeeded != null) labels.push("Lit events needed");
+  if (patch.litEventsTimeline != null) labels.push("Timeline for lit events");
+  if (patch.injuries != null) labels.push("Injuries");
+  if (patch.caseDescription != null) labels.push("Case description");
+  if (patch.statusNotes != null) labels.push("Status notes");
+  if (patch.caseStage != null) labels.push("Case stage");
+  if (patch.estimatedFeeValue != null) labels.push("Projected firm fee");
+  if (patch.confidenceLevel != null) labels.push("Confidence level");
+  if (patch.policyLimits != null) labels.push("Policy limits");
+  return labels;
+}
+
+export function formatSlackThreadAppliedMessage(labels: string[]) {
+  if (labels.length === 0) return "Thanks — saved your update to the case tracker.";
+  return `Thanks — updated the case tracker: *${labels.join("*, *")}*.`;
+}
+
 export function caseNumberFromSlackText(text: string) {
   const match = text.match(/case\s*#\s*([^\s)]+)/i);
   return match ? cleanCaseNumber(match[1]) : "";

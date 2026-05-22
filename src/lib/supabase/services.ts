@@ -6,7 +6,7 @@ import {
   notifySlackCommentPosted,
   notifySlackTrackerSaved,
 } from "@/lib/slack/notify";
-import { parseSlackThreadUpdate } from "@/lib/slack/thread-update";
+import { describeSlackThreadAppliedLabels, parseSlackThreadUpdate } from "@/lib/slack/thread-update";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildTrackerActivityDescription, describeTrackerChanges } from "@/lib/tracker-changes";
@@ -414,7 +414,7 @@ export async function applySlackThreadUpdate(caseId: string, text: string, actor
     changeInput: parsed.tracker,
   });
 
-  return { applied: true as const, fields: Object.keys(parsed.tracker) };
+  return { applied: true as const, labels: describeSlackThreadAppliedLabels(parsed.tracker) };
 }
 
 export async function getCaseComments(caseId: string): Promise<TrackerComment[]> {

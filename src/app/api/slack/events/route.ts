@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { findCaseForSlackThread } from "@/lib/slack/channels";
 import { getSlackSigningSecret, isSlackEnabled } from "@/lib/slack/config";
 import { postSlackMessage } from "@/lib/slack/client";
+import { formatSlackThreadAppliedMessage } from "@/lib/slack/thread-update";
 import { applySlackThreadUpdate } from "@/lib/supabase/services";
 
 type SlackEventPayload = {
@@ -113,7 +114,7 @@ export async function POST(request: Request) {
       await postSlackMessage({
         channel: event.channel,
         threadTs: event.thread_ts,
-        text: `Thanks — applied tracker update: ${result.fields.join(", ")}.`,
+        text: formatSlackThreadAppliedMessage(result.labels),
       });
     } else {
       await postSlackMessage({
