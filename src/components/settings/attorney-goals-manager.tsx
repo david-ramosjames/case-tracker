@@ -15,12 +15,20 @@ import { formatCurrency } from "@/lib/utils";
 
 type GoalDraft = {
   attorneyId: string;
-  annualFeeGoal: string;
   q1Goal: string;
   q2Goal: string;
   q3Goal: string;
   q4Goal: string;
 };
+
+function parseGoalAmount(value: string) {
+  const numeric = Number(value.replace(/[$,\s]/g, ""));
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function sumQuarterGoals(values: Pick<GoalDraft, "q1Goal" | "q2Goal" | "q3Goal" | "q4Goal">) {
+  return parseGoalAmount(values.q1Goal) + parseGoalAmount(values.q2Goal) + parseGoalAmount(values.q3Goal) + parseGoalAmount(values.q4Goal);
+}
 
 export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals: AttorneyGoal[] }) {
   const router = useRouter();
@@ -32,7 +40,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newAttorneyId, setNewAttorneyId] = useState(attorneys[0]?.id ?? "");
-  const [newGoals, setNewGoals] = useState({ annualFeeGoal: "", q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
+  const [newGoals, setNewGoals] = useState({ q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
   const [drafts, setDrafts] = useState<Record<string, GoalDraft>>({});
 
   const goalsForYear = useMemo(() => goals.filter((goal) => goal.year === selectedYear), [goals, selectedYear]);
@@ -41,11 +49,10 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
     return (
       drafts[goal.id] ?? {
         attorneyId: goal.attorneyId,
-        annualFeeGoal: String(goal.annualFeeGoal),
-        q1Goal: String(goal.q1Goal),
-        q2Goal: String(goal.q2Goal),
-        q3Goal: String(goal.q3Goal),
-        q4Goal: String(goal.q4Goal),
+        q1Goal: String(goal.q1Goal || ""),
+        q2Goal: String(goal.q2Goal || ""),
+        q3Goal: String(goal.q3Goal || ""),
+        q4Goal: String(goal.q4Goal || ""),
       }
     );
   }
@@ -67,11 +74,11 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
         attorneyId,
         attorneyName,
         year: selectedYear,
-        annualFeeGoal: Number(values.annualFeeGoal || 0),
-        q1Goal: Number(values.q1Goal || 0),
-        q2Goal: Number(values.q2Goal || 0),
-        q3Goal: Number(values.q3Goal || 0),
-        q4Goal: Number(values.q4Goal || 0),
+        annualFeeGoal: sumQuarterGoals(values),
+        q1Goal: parseGoalAmount(values.q1Goal),
+        q2Goal: parseGoalAmount(values.q2Goal),
+        q3Goal: parseGoalAmount(values.q3Goal),
+        q4Goal: parseGoalAmount(values.q4Goal),
       }),
     });
     const body = (await response.json()) as { error?: string };
@@ -107,14 +114,13 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
     try {
       await saveGoal(attorney.id, attorney.name, {
         attorneyId: attorney.id,
-        annualFeeGoal: newGoals.annualFeeGoal,
         q1Goal: newGoals.q1Goal,
         q2Goal: newGoals.q2Goal,
         q3Goal: newGoals.q3Goal,
         q4Goal: newGoals.q4Goal,
       });
       setShowAddForm(false);
-      setNewGoals({ annualFeeGoal: "", q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
+      setNewGoals({ q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to add goal.");
@@ -130,7 +136,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
           <div>
             <CardTitle>Attorney Goals</CardTitle>
             <CardDescription>
-              Set fee goals by calendar year. Quarters are labeled Q1–Q4 for that year (not a single static year).
+              Enter quarterly fee goals for each attorney. Annual is calculated automatically as Q1 + Q2 + Q3 + Q4.
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -173,7 +179,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
                   ))}
                 </Select>
               </label>
-              <GoalInput label="Annual" value={newGoals.annualFeeGoal} onChange={(value) => setNewGoals((c) => ({ ...c, annualFeeGoal: value }))} />
+              <AnnualTotal label="Annual (sum)" amount={sumQuarterGoals(newGoals)} />
               <GoalInput label={`Q1 ${selectedYear}`} value={newGoals.q1Goal} onChange={(value) => setNewGoals((c) => ({ ...c, q1Goal: value }))} />
               <GoalInput label={`Q2 ${selectedYear}`} value={newGoals.q2Goal} onChange={(value) => setNewGoals((c) => ({ ...c, q2Goal: value }))} />
               <GoalInput label={`Q3 ${selectedYear}`} value={newGoals.q3Goal} onChange={(value) => setNewGoals((c) => ({ ...c, q3Goal: value }))} />
@@ -214,7 +220,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
                     <TableRow key={goal.id}>
                       <TableCell className="font-semibold">{attorney?.name ?? "Unknown attorney"}</TableCell>
                       <TableCell>
-                        <GoalInput compact value={draft.annualFeeGoal} onChange={(value) => updateDraft(goal.id, { annualFeeGoal: value })} />
+                        <AnnualTotal compact amount={sumQuarterGoals(draft)} />
                       </TableCell>
                       <TableCell>
                         <GoalInput compact value={draft.q1Goal} onChange={(value) => updateDraft(goal.id, { q1Goal: value })} />
@@ -245,11 +251,31 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
         <p className="text-xs text-muted-foreground">
           Saved total for {selectedYear}:{" "}
           <Badge variant="outline">
-            {formatCurrency(goalsForYear.reduce((sum, goal) => sum + goal.annualFeeGoal, 0))} annual
+            {formatCurrency(goalsForYear.reduce((sum, goal) => sum + goal.q1Goal + goal.q2Goal + goal.q3Goal + goal.q4Goal, 0))} annual
+            {" "}
+            (sum of quarters)
           </Badge>
         </p>
       </CardContent>
     </Card>
+  );
+}
+
+function AnnualTotal({ label, amount, compact }: { label?: string; amount: number; compact?: boolean }) {
+  return (
+    <div>
+      {label ? <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span> : null}
+      <div
+        className={
+          compact
+            ? "flex h-9 min-w-[6rem] items-center rounded-md border border-input bg-muted/40 px-2 text-xs font-semibold text-navy-950"
+            : "flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm font-semibold text-navy-950"
+        }
+        title="Sum of Q1–Q4"
+      >
+        {formatCurrency(amount)}
+      </div>
+    </div>
   );
 }
 

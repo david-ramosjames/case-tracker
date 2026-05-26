@@ -542,11 +542,12 @@ export type AttorneyGoalInput = {
 
 export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<AttorneyGoal> {
   const client = await createTrackerClient();
+  const annualFeeGoal = input.q1Goal + input.q2Goal + input.q3Goal + input.q4Goal;
 
   const payload = {
     attorney_name: input.attorneyName,
     year: input.year,
-    annual_fee_goal: input.annualFeeGoal,
+    annual_fee_goal: annualFeeGoal,
     q1_goal: input.q1Goal,
     q2_goal: input.q2Goal,
     q3_goal: input.q3Goal,
@@ -565,7 +566,7 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     id: toString(data.id, "goal"),
     attorneyId: input.attorneyId,
     year: input.year,
-    annualFeeGoal: Number(data.annual_fee_goal ?? 0),
+    annualFeeGoal,
     q1Goal: Number(data.q1_goal ?? 0),
     q2Goal: Number(data.q2_goal ?? 0),
     q3Goal: Number(data.q3_goal ?? 0),
@@ -589,15 +590,20 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
   return ((goalRows ?? []) as UnknownRow[]).map((row) => {
     const attorneyName = toStringOrNull(row.attorney_name);
     const matchedContact = attorneys.find((contact) => contact.name && attorneyName && namesMatch(contact.name, attorneyName));
+    const q1Goal = Number(row.q1_goal ?? 0);
+    const q2Goal = Number(row.q2_goal ?? 0);
+    const q3Goal = Number(row.q3_goal ?? 0);
+    const q4Goal = Number(row.q4_goal ?? 0);
+
     return {
       id: toStringOrNull(row.id) ?? "unknown-goal",
       attorneyId: matchedContact?.id ?? toStringOrNull(row.attorney_user_id) ?? attorneyName ?? "unknown-attorney",
       year: Number(row.year ?? new Date().getFullYear()),
-      annualFeeGoal: Number(row.annual_fee_goal ?? 0),
-      q1Goal: Number(row.q1_goal ?? 0),
-      q2Goal: Number(row.q2_goal ?? 0),
-      q3Goal: Number(row.q3_goal ?? 0),
-      q4Goal: Number(row.q4_goal ?? 0),
+      annualFeeGoal: q1Goal + q2Goal + q3Goal + q4Goal,
+      q1Goal,
+      q2Goal,
+      q3Goal,
+      q4Goal,
     };
   });
 }
