@@ -119,9 +119,55 @@ export async function getCases(): Promise<CaseRecord[]> {
 export async function getCaseById(caseId: string): Promise<CaseRecord | null> {
   const records = await getCases();
   return (
-    records.find((record) => record.shared.id === caseId || record.shared.id === caseId || record.tracker.id === caseId || record.tracker.caseId === caseId) ??
+    records.find((record) => record.shared.id === caseId || record.tracker.id === caseId || record.tracker.caseId === caseId) ??
     null
   );
+}
+
+export function isOrphanTrackerRecord(record: CaseRecord) {
+  return record.shared.id === record.tracker.id;
+}
+
+/** Remove a tracker row and related data. Optionally delete the linked DocketFlow `cases` row. */
+export async function deleteTrackerCase(
+  caseId: string,
+  options?: { deleteDocketflowCase?: boolean },
+): Promise<{ deletedTrackerId: string; deletedDocketflowCase: boolean; wasOrphan: boolean }> {
+  const record = await getCaseById(caseId);
+  if (!record) throw new Error("Case not found.");
+
+  const client = createSupabaseAdminClient();
+  if (!client) throw new Error("Service role is required to delete tracker cases.");
+
+  const trackerEntryId = record.tracker.id;
+  const docketflowCaseId = isOrphanTrackerRecord(record) ? null : record.shared.id;
+  const relatedFilter = docketflowCaseId
+    ? `tracker_entry_id.eq.${trackerEntryId},case_id.eq.${docketflowCaseId}`
+    : `tracker_entry_id.eq.${trackerEntryId}`;
+
+  for (const table of ["case_tracker_activity", "case_tracker_comments", "case_tracker_stage_suggestions"] as const) {
+    const { error } = await client.from(table).delete().or(relatedFilter);
+    if (error) throw error;
+  }
+
+  const { error: resultsError } = await client.from("case_tracker_results").delete().or(relatedFilter);
+  if (resultsError) throw resultsError;
+
+  const { error: entryError } = await client.from("case_tracker_entries").delete().eq("id", trackerEntryId);
+  if (entryError) throw entryError;
+
+  let deletedDocketflowCase = false;
+  if (options?.deleteDocketflowCase && docketflowCaseId) {
+    const { error: caseError } = await client.from("cases").delete().eq("id", docketflowCaseId);
+    if (caseError) throw caseError;
+    deletedDocketflowCase = true;
+  }
+
+  return {
+    deletedTrackerId: trackerEntryId,
+    deletedDocketflowCase,
+    wasOrphan: isOrphanTrackerRecord(record),
+  };
 }
 
 export async function getUsers(): Promise<AppUser[]> {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, ExternalLink, MessageSquarePlus, Pencil, Save, ShieldAlert, Sparkles } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { CheckCircle2, ExternalLink, MessageSquarePlus, Pencil, Save, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,7 +71,13 @@ export function CaseDetailView({
   const [isResultsEditing, setIsResultsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingComment, setIsAddingComment] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteDocketflowCase, setDeleteDocketflowCase] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const router = useRouter();
+
+  const isAdmin = sessionUser.role === "admin" || sessionUser.role === "super_admin";
+  const isOrphanTracker = initialRecord.shared.id === initialRecord.tracker.id;
 
   const quarterOptions = useMemo(() => getTargetPeriodOptions(), []);
   const record = useMemo(() => ({ ...initialRecord, shared, tracker }), [initialRecord, shared, tracker]);
@@ -296,7 +303,38 @@ export function CaseDetailView({
     }
   }
 
+  async function removeFromTracker() {
+    const orphanMessage =
+      "Remove this orphaned tracker record from the case list? This cannot be undone.";
+    const linkedMessage =
+      "Remove this case's tracker data (forecasts, sources, comments, activity)? The DocketFlow case is not deleted unless you check the box below.";
+    if (!window.confirm(isOrphanTracker ? orphanMessage : linkedMessage)) return;
+
+    if (!isOrphanTracker && deleteDocketflowCase) {
+      const confirmed = window.confirm(
+        "Also delete the DocketFlow case record? This removes the case from DocketFlow sync, not just the tracker.",
+      );
+      if (!confirmed) return;
+    }
+
+    setIsDeleting(true);
+    setErrorMessage(null);
+    try {
+      const query = deleteDocketflowCase && !isOrphanTracker ? "?deleteDocketflowCase=true" : "";
+      const response = await fetch(`/api/tracker/${shared.id}${query}`, { method: "DELETE" });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Unable to remove case from tracker.");
+      router.push("/cases");
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to remove case from tracker.");
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   return (
+    <>
     <div className="grid gap-6 xl:grid-cols-[1fr_24rem]">
       <div className="space-y-6">
         <Card>
@@ -336,6 +374,7 @@ export function CaseDetailView({
                 )}
               </div>
               <div className="flex flex-wrap gap-2">
+                {isOrphanTracker ? <Badge variant="warning">Orphaned tracker row</Badge> : null}
                 <StageBadge stage={tracker.caseStage} />
                 <Badge variant="outline">{record.shared.status}</Badge>
                 <ConfidenceBadge level={tracker.confidenceLevel} />
@@ -890,6 +929,37 @@ export function CaseDetailView({
         </Card>
       </aside>
     </div>
+
+    {isAdmin ? (
+      <Card className="border-rose-200 bg-rose-50/40">
+        <CardHeader>
+          <CardTitle className="text-rose-950">Admin: remove from tracker</CardTitle>
+          <CardDescription>
+            {isOrphanTracker
+              ? "This row is an orphaned tracker record (usually left after a DocketFlow case was deleted). Removing it clears the duplicate from the case list."
+              : "Removes tracker data for this case. If the DocketFlow case still exists, the case may reappear with empty tracker fields unless you also delete the DocketFlow case."}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {!isOrphanTracker ? (
+            <label className="flex items-start gap-2 text-sm text-navy-950">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={deleteDocketflowCase}
+                onChange={(event) => setDeleteDocketflowCase(event.target.checked)}
+              />
+              <span>Also delete the DocketFlow case record (cases table)</span>
+            </label>
+          ) : null}
+          <Button variant="outline" className="border-rose-300 text-rose-800 hover:bg-rose-100" onClick={() => void removeFromTracker()} disabled={isDeleting}>
+            <Trash2 className="h-4 w-4" />
+            {isDeleting ? "Removing..." : "Remove from Case Tracker"}
+          </Button>
+        </CardContent>
+      </Card>
+    ) : null}
+    </>
   );
 }
 
