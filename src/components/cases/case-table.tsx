@@ -50,12 +50,11 @@ export function CaseTable({
   const [attorney, setAttorney] = useState("all");
   const [paralegal, setParalegal] = useState("all");
   const [stage, setStage] = useState("all");
-  const [status, setStatus] = useState("all");
+  const [status, setStatus] = useState<"all" | CaseStatus>("Active");
   const [caseType, setCaseType] = useState("all");
   const [expectedLitigation, setExpectedLitigation] = useState("all");
   const [quarter, setQuarter] = useState("all");
   const [quality, setQuality] = useState("all");
-  const [active, setActive] = useState("active");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("caseNumber");
@@ -74,12 +73,10 @@ export function CaseTable({
     attorney !== "all",
     paralegal !== "all",
     stage !== "all",
-    status !== "all",
     caseType !== "all",
     expectedLitigation !== "all",
     quarter !== "all",
     quality !== "all",
-    active !== "active",
     Boolean(dateFrom),
     Boolean(dateTo),
   ].filter(Boolean).length;
@@ -102,8 +99,6 @@ export function CaseTable({
         if (caseType !== "all" && record.shared.caseType !== caseType) return false;
         if (expectedLitigation !== "all" && record.tracker.expectedLitigation !== expectedLitigation) return false;
         if (quarter !== "all" && record.tracker.targetResolutionQuarter !== quarter) return false;
-        if (active === "active" && record.shared.status !== "Active") return false;
-        if (active === "inactive" && record.shared.status !== "Closed") return false;
         if (quality === "missing" && !isMissingInfo(record, settings)) return false;
         if (quality === "stale" && !isStale(record, settings)) return false;
         if (dateFrom && new Date(record.shared.dateSigned) < new Date(`${dateFrom}T00:00:00`)) return false;
@@ -154,7 +149,7 @@ export function CaseTable({
         const cmp = aValue - bValue;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [active, attorney, caseType, dateFrom, dateTo, expectedLitigation, paralegal, quarter, quality, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
+  }, [attorney, caseType, dateFrom, dateTo, expectedLitigation, paralegal, quarter, quality, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
 
   function requestSort(nextKey: SortKey) {
     if (nextKey === sortKey) {
@@ -185,12 +180,11 @@ export function CaseTable({
     setAttorney("all");
     setParalegal("all");
     setStage("all");
-    setStatus("all");
+    setStatus("Active");
     setCaseType("all");
     setExpectedLitigation("all");
     setQuarter("all");
     setQuality("all");
-    setActive("active");
     setDateFrom("");
     setDateTo("");
   }
@@ -274,6 +268,7 @@ export function CaseTable({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
+            <StatusFilter value={status} onChange={setStatus} />
             <div className="flex flex-wrap items-center gap-2">
               <Button
                 variant="outline"
@@ -291,7 +286,16 @@ export function CaseTable({
               ) : null}
             </div>
             <p className="text-sm text-muted-foreground lg:ml-auto">
-              Showing {filteredRecords.length} of {workingRecords.length} cases
+              {status === "all" ? (
+                <>Showing {filteredRecords.length} of {workingRecords.length} cases</>
+              ) : (
+                <>
+                  Showing {filteredRecords.length} {status.toLowerCase()} case{filteredRecords.length === 1 ? "" : "s"}
+                  {filteredRecords.length !== workingRecords.length ? (
+                    <> of {workingRecords.length} total</>
+                  ) : null}
+                </>
+              )}
             </p>
           </div>
           {saveMessage ? <p className="text-sm font-medium text-pink-500">{saveMessage}</p> : null}
@@ -317,14 +321,6 @@ export function CaseTable({
               <Select value={stage} onChange={(event) => setStage(event.target.value)} aria-label="Stage">
                 <option value="all">All stages</option>
                 {CASE_STAGE_OPTIONS.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </Select>
-              <Select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Status">
-                <option value="all">All statuses</option>
-                {CASE_STATUS_OPTIONS.map((item) => (
                   <option key={item} value={item}>
                     {item}
                   </option>
@@ -358,11 +354,6 @@ export function CaseTable({
                     {item}
                   </option>
                 ))}
-              </Select>
-              <Select value={active} onChange={(event) => setActive(event.target.value)} aria-label="Active status">
-                <option value="active">Active cases</option>
-                <option value="inactive">Closed cases</option>
-                <option value="all">Active and closed</option>
               </Select>
               <FilterDateRange
                 label="Date signed"
@@ -524,6 +515,49 @@ export function CaseTable({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function StatusFilter({
+  value,
+  onChange,
+}: {
+  value: "all" | CaseStatus;
+  onChange: (value: "all" | CaseStatus) => void;
+}) {
+  const options: Array<{ value: "all" | CaseStatus; label: string }> = [
+    { value: "Active", label: "Active" },
+    { value: "Closed", label: "Closed" },
+    { value: "all", label: "All" },
+  ];
+
+  return (
+    <div
+      className="inline-flex items-center gap-1 rounded-lg border border-pink-200 bg-pink-50/60 p-1"
+      role="group"
+      aria-label="Case status"
+    >
+      <span className="px-2 text-xs font-semibold uppercase tracking-wide text-pink-700">Status</span>
+      {options.map((option) => {
+        const isSelected = value === option.value;
+        return (
+          <Button
+            key={option.value}
+            type="button"
+            size="sm"
+            variant={isSelected ? "pink" : "ghost"}
+            className={cn(
+              "h-8 px-3",
+              !isSelected && "text-muted-foreground hover:bg-white/80 hover:text-navy-950",
+            )}
+            aria-pressed={isSelected}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </Button>
+        );
+      })}
+    </div>
   );
 }
 
