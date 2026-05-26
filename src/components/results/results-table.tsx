@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Eye } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Eye } from "lucide-react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,6 +27,9 @@ import {
 import { formatCurrency, getCalculatedAttorneyFees } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 
+type SortKey = "caseNumber" | "clientName" | "settlementDate" | "settlementAmount" | "attorneyFees";
+type SortDirection = "asc" | "desc";
+
 export function ResultsTable({ records, users }: { records: CaseRecord[]; users: AppUser[] }) {
   const [workingRecords, setWorkingRecords] = useState(records);
   const [search, setSearch] = useState("");
@@ -36,6 +39,8 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
   const [resultState, setResultState] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("caseNumber");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const attorneys = users.filter((user) => user.role === "attorney");
   const paralegals = users.filter((user) => user.role === "paralegal");
@@ -44,24 +49,75 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
   const filteredRecords = useMemo(() => {
     const normalizedSearch = search.toLowerCase();
 
-    return workingRecords.filter((record) => {
-      const result = record.tracker.result;
-      const matchesSearch =
-        record.shared.caseNumber.toLowerCase().includes(normalizedSearch) ||
-        record.shared.clientName.toLowerCase().includes(normalizedSearch);
+    return workingRecords
+      .filter((record) => {
+        const result = record.tracker.result;
+        const matchesSearch =
+          record.shared.caseNumber.toLowerCase().includes(normalizedSearch) ||
+          record.shared.clientName.toLowerCase().includes(normalizedSearch);
 
-      if (!matchesSearch) return false;
-      if (attorney !== "all" && record.shared.attorneyId !== attorney) return false;
-      if (paralegal !== "all" && record.shared.paralegalId !== paralegal) return false;
-      if (quarter !== "all" && result.resultQuarter !== quarter) return false;
-      if (resultState === "open" && result.checkDisbursedAt) return false;
-      if (resultState === "disbursed" && !result.checkDisbursedAt) return false;
-      if (dateFrom && result.settlementDate && new Date(result.settlementDate) < new Date(`${dateFrom}T00:00:00`)) return false;
-      if (dateTo && result.settlementDate && new Date(result.settlementDate) > new Date(`${dateTo}T23:59:59`)) return false;
+        if (!matchesSearch) return false;
+        if (attorney !== "all" && record.shared.attorneyId !== attorney) return false;
+        if (paralegal !== "all" && record.shared.paralegalId !== paralegal) return false;
+        if (quarter !== "all" && result.resultQuarter !== quarter) return false;
+        if (resultState === "open" && result.checkDisbursedAt) return false;
+        if (resultState === "disbursed" && !result.checkDisbursedAt) return false;
+        if (dateFrom && result.settlementDate && new Date(result.settlementDate) < new Date(`${dateFrom}T00:00:00`)) return false;
+        if (dateTo && result.settlementDate && new Date(result.settlementDate) > new Date(`${dateTo}T23:59:59`)) return false;
 
-      return true;
-    });
-  }, [attorney, dateFrom, dateTo, paralegal, quarter, resultState, search, workingRecords]);
+        return true;
+      })
+      .sort((a, b) => {
+        const dir = sortDirection === "asc" ? 1 : -1;
+        const tieBreak = () => a.shared.caseNumber.localeCompare(b.shared.caseNumber);
+
+        if (sortKey === "caseNumber") {
+          const aNum = Number(a.shared.caseNumber);
+          const bNum = Number(b.shared.caseNumber);
+          if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return dir * (aNum - bNum);
+          return dir * a.shared.caseNumber.localeCompare(b.shared.caseNumber);
+        }
+
+        if (sortKey === "clientName") {
+          const cmp = a.shared.clientName.localeCompare(b.shared.clientName);
+          return cmp !== 0 ? dir * cmp : tieBreak();
+        }
+
+        if (sortKey === "settlementDate") {
+          const aTime = a.tracker.result.settlementDate ? new Date(a.tracker.result.settlementDate).getTime() : 0;
+          const bTime = b.tracker.result.settlementDate ? new Date(b.tracker.result.settlementDate).getTime() : 0;
+          const cmp = aTime - bTime;
+          return cmp !== 0 ? dir * cmp : tieBreak();
+        }
+
+        if (sortKey === "settlementAmount") {
+          const aValue = a.tracker.result.settlementAmount ?? -Infinity;
+          const bValue = b.tracker.result.settlementAmount ?? -Infinity;
+          const cmp = aValue - bValue;
+          return cmp !== 0 ? dir * cmp : tieBreak();
+        }
+
+        const aFees =
+          a.tracker.result.attorneyFees ??
+          getCalculatedAttorneyFees(a.tracker.result.settlementAmount, a.tracker.result.feePercent) ??
+          -Infinity;
+        const bFees =
+          b.tracker.result.attorneyFees ??
+          getCalculatedAttorneyFees(b.tracker.result.settlementAmount, b.tracker.result.feePercent) ??
+          -Infinity;
+        const cmp = aFees - bFees;
+        return cmp !== 0 ? dir * cmp : tieBreak();
+      });
+  }, [attorney, dateFrom, dateTo, paralegal, quarter, resultState, search, sortDirection, sortKey, workingRecords]);
+
+  function requestSort(nextKey: SortKey) {
+    if (nextKey === sortKey) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDirection(nextKey === "clientName" ? "asc" : "desc");
+  }
 
   function updateResult(recordId: string, updater: (result: SettlementResult) => SettlementResult) {
     let nextRecord: CaseRecord | null = null;
@@ -152,18 +208,22 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
           <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} aria-label="Settlement to" />
         </div>
 
+        <p className="text-sm text-muted-foreground">
+          Showing {filteredRecords.length} of {workingRecords.length} results. Click a column header to sort.
+        </p>
+
         <div className="mt-4 overflow-x-auto rounded-lg border bg-white">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Case #</TableHead>
-                <TableHead>Client</TableHead>
+                <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} direction={sortDirection} onSort={requestSort} />
+                <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} />
                 <TableHead>Attorney</TableHead>
                 <TableHead>Paralegal</TableHead>
-                <TableHead>Settlement Date</TableHead>
-                <TableHead>Settlement Amount</TableHead>
+                <SortableHead label="Settlement Date" sortKey="settlementDate" active={sortKey} direction={sortDirection} onSort={requestSort} />
+                <SortableHead label="Settlement Amount" sortKey="settlementAmount" active={sortKey} direction={sortDirection} onSort={requestSort} />
                 <TableHead>Fee Percent</TableHead>
-                <TableHead>RJL Attorney Fees</TableHead>
+                <SortableHead label="RJL Attorney Fees" sortKey="attorneyFees" active={sortKey} direction={sortDirection} onSort={requestSort} />
                 <TableHead>Release</TableHead>
                 <TableHead>Closing</TableHead>
                 <TableHead>Check</TableHead>
@@ -240,6 +300,36 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function SortableHead({
+  label,
+  sortKey,
+  active,
+  direction,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  active: SortKey;
+  direction: SortDirection;
+  onSort: (key: SortKey) => void;
+}) {
+  const isActive = active === sortKey;
+  const Icon = !isActive ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
+
+  return (
+    <TableHead>
+      <button
+        type="button"
+        className="inline-flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground"
+        onClick={() => onSort(sortKey)}
+      >
+        {label}
+        <Icon className={isActive ? "h-3.5 w-3.5 text-pink-500" : "h-3.5 w-3.5"} />
+      </button>
+    </TableHead>
   );
 }
 
