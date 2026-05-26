@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
-import { ArrowUpDown, Eye, SlidersHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Eye, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,6 +32,7 @@ import { cn, formatDate, formatOptionalDate } from "@/lib/utils";
 import { type ReactNode, type RefObject, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type SortKey = "caseNumber" | "clientName" | "dateSigned" | "dol" | "minimumValue" | "policyLimits";
+type SortDirection = "asc" | "desc";
 
 export function CaseTable({
   records,
@@ -58,6 +59,7 @@ export function CaseTable({
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("caseNumber");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
@@ -110,18 +112,58 @@ export function CaseTable({
         return true;
       })
       .sort((a, b) => {
-        if (sortKey === "caseNumber") return a.shared.caseNumber.localeCompare(b.shared.caseNumber);
-        if (sortKey === "clientName") return a.shared.clientName.localeCompare(b.shared.clientName);
-        if (sortKey === "dateSigned") return new Date(a.shared.dateSigned).getTime() - new Date(b.shared.dateSigned).getTime();
+        const dir = sortDirection === "asc" ? 1 : -1;
+
+        const tieBreak = () => a.shared.caseNumber.localeCompare(b.shared.caseNumber);
+
+        if (sortKey === "caseNumber") {
+          const aNum = Number(a.shared.caseNumber);
+          const bNum = Number(b.shared.caseNumber);
+          if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return dir * (aNum - bNum);
+          return dir * a.shared.caseNumber.localeCompare(b.shared.caseNumber);
+        }
+
+        if (sortKey === "clientName") {
+          const cmp = a.shared.clientName.localeCompare(b.shared.clientName);
+          return cmp !== 0 ? dir * cmp : tieBreak();
+        }
+
+        if (sortKey === "dateSigned") {
+          const aTime = new Date(a.shared.dateSigned).getTime();
+          const bTime = new Date(b.shared.dateSigned).getTime();
+          const cmp = aTime - bTime;
+          return cmp !== 0 ? dir * cmp : tieBreak();
+        }
+
         if (sortKey === "dol") {
           const aTime = a.shared.dateOfIncident ? new Date(a.shared.dateOfIncident).getTime() : 0;
           const bTime = b.shared.dateOfIncident ? new Date(b.shared.dateOfIncident).getTime() : 0;
-          return aTime - bTime;
+          const cmp = aTime - bTime;
+          return cmp !== 0 ? dir * cmp : tieBreak();
         }
-        if (sortKey === "minimumValue") return (b.tracker.minimumValue ?? 0) - (a.tracker.minimumValue ?? 0);
-        return (b.tracker.policyLimits ?? 0) - (a.tracker.policyLimits ?? 0);
+
+        if (sortKey === "minimumValue") {
+          const aValue = a.tracker.minimumValue ?? -Infinity;
+          const bValue = b.tracker.minimumValue ?? -Infinity;
+          const cmp = aValue - bValue;
+          return cmp !== 0 ? dir * cmp : tieBreak();
+        }
+
+        const aValue = a.tracker.policyLimits ?? -Infinity;
+        const bValue = b.tracker.policyLimits ?? -Infinity;
+        const cmp = aValue - bValue;
+        return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [active, attorney, caseType, dateFrom, dateTo, expectedLitigation, paralegal, quarter, quality, search, settings, sortKey, stage, status, workingRecords]);
+  }, [active, attorney, caseType, dateFrom, dateTo, expectedLitigation, paralegal, quarter, quality, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
+
+  function requestSort(nextKey: SortKey) {
+    if (nextKey === sortKey) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDirection(nextKey === "clientName" ? "asc" : "desc");
+  }
 
   useEffect(() => {
     function updateScrollWidth() {
@@ -322,8 +364,14 @@ export function CaseTable({
                 <option value="inactive">Closed cases</option>
                 <option value="all">Active and closed</option>
               </Select>
-              <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} aria-label="Date signed from" />
-              <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} aria-label="Date signed to" />
+              <FilterDateRange
+                label="Date signed"
+                from={dateFrom}
+                to={dateTo}
+                onFromChange={setDateFrom}
+                onToChange={setDateTo}
+                className="md:col-span-2 xl:col-span-2"
+              />
             </div>
           ) : null}
         </div>
@@ -348,20 +396,20 @@ export function CaseTable({
           <Table ref={tableRef} className="min-w-[2040px] table-fixed">
             <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
               <TableRow>
-                <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} onSort={setSortKey} className="sticky left-0 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
-                <SortableHead label="Client" sortKey="clientName" active={sortKey} onSort={setSortKey} className="sticky left-28 z-40 w-44 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
+                <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-0 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
+                <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-28 z-40 w-44 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
                 <TableHead className="sticky left-72 z-40 w-40 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]">Attorney</TableHead>
                 <TableHead className="w-36">Paralegal</TableHead>
-                <SortableHead label="Date Signed" sortKey="dateSigned" active={sortKey} onSort={setSortKey} className="w-32" />
-                <SortableHead label="DOL" sortKey="dol" active={sortKey} onSort={setSortKey} className="w-32" />
+                <SortableHead label="Date Signed" sortKey="dateSigned" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-32" />
+                <SortableHead label="DOL" sortKey="dol" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-32" />
                 <TableHead className="w-28">Status</TableHead>
                 <TableHead className="w-36">Type</TableHead>
                 <TableHead className="w-40">Liability</TableHead>
                 <TableHead className="w-28">Quarter</TableHead>
                 <TableHead className="w-32">Case Size</TableHead>
-                <SortableHead label="Minimum Value" sortKey="minimumValue" active={sortKey} onSort={setSortKey} className="w-36" />
+                <SortableHead label="Minimum Value" sortKey="minimumValue" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
                 <TableHead className="w-32">Referral Fee</TableHead>
-                <SortableHead label="Policy Limits" sortKey="policyLimits" active={sortKey} onSort={setSortKey} className="w-36" />
+                <SortableHead label="Policy Limits" sortKey="policyLimits" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
                 <TableHead className="w-36">Stage</TableHead>
                 <TableHead className="w-44">Expected Lit</TableHead>
                 <TableHead className="w-28">Actions</TableHead>
@@ -479,19 +527,62 @@ export function CaseTable({
   );
 }
 
+function FilterDateRange({
+  label,
+  from,
+  to,
+  onFromChange,
+  onToChange,
+  className,
+}: {
+  label: string;
+  from: string;
+  to: string;
+  onFromChange: (value: string) => void;
+  onToChange: (value: string) => void;
+  className?: string;
+}) {
+  const fromId = "case-filter-date-from";
+  const toId = "case-filter-date-to";
+
+  return (
+    <div className={cn("flex flex-col gap-1.5", className)}>
+      <span className="text-xs font-semibold text-navy-950">{label}</span>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="flex flex-col gap-1">
+          <label htmlFor={fromId} className="text-xs text-muted-foreground">
+            From
+          </label>
+          <Input id={fromId} type="date" value={from} onChange={(event) => onFromChange(event.target.value)} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor={toId} className="text-xs text-muted-foreground">
+            To
+          </label>
+          <Input id={toId} type="date" value={to} onChange={(event) => onToChange(event.target.value)} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SortableHead({
   label,
   sortKey,
   active,
+  direction,
   onSort,
   className,
 }: {
   label: string;
   sortKey: SortKey;
   active: SortKey;
+  direction: SortDirection;
   onSort: (key: SortKey) => void;
   className?: string;
 }) {
+  const isActive = active === sortKey;
+  const Icon = !isActive ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
   return (
     <TableHead className={cn("align-middle", className)}>
       <button
@@ -499,7 +590,7 @@ function SortableHead({
         onClick={() => onSort(sortKey)}
       >
         {label}
-        <ArrowUpDown className={active === sortKey ? "h-3.5 w-3.5 text-pink-500" : "h-3.5 w-3.5"} />
+        <Icon className={isActive ? "h-3.5 w-3.5 text-pink-500" : "h-3.5 w-3.5"} />
       </button>
     </TableHead>
   );
