@@ -1,3 +1,4 @@
+import { normalizeTargetQuarter } from "@/lib/case-options";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { type TrackerUpdateInput } from "@/lib/types";
 
@@ -14,7 +15,7 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
   for (const line of lines) {
     const quarterMatch = line.match(/^(?:quarter|expected completion quarter|target quarter)\s*:\s*(.+)$/i);
     if (quarterMatch) {
-      tracker.targetResolutionQuarter = normalizeQuarterInput(quarterMatch[1]);
+      tracker.targetResolutionQuarter = normalizeTargetQuarter(quarterMatch[1]) ?? undefined;
       continue;
     }
 
@@ -108,12 +109,6 @@ export function formatSlackThreadAppliedMessage(labels: string[]) {
 export function caseNumberFromSlackText(text: string) {
   const match = text.match(/case\s*#\s*([^\s)]+)/i);
   return match ? cleanCaseNumber(match[1]) : "";
-}
-
-function normalizeQuarterInput(value: string) {
-  const trimmed = value.trim();
-  if (/^\d{4}$/.test(trimmed)) return `${trimmed} Q4`;
-  return trimmed;
 }
 
 function parseMoney(value: string) {

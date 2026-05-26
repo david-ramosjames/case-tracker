@@ -1,4 +1,4 @@
-import { CASE_TYPE_OPTIONS } from "@/lib/case-options";
+import { CASE_TYPE_OPTIONS, normalizeTargetQuarter } from "@/lib/case-options";
 import { cleanCaseNumber, getCsvCell, hasCsvHeader, parseCsv } from "@/lib/csv/parse";
 import {
   type CaseStage,
@@ -113,7 +113,7 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       if (expectedLit) tracker.expectedLitigation = normalizeExpectedLitigation(expectedLit, tracker.caseStage ?? "Onboarding");
 
       const quarter = getCsvCell(row, headers, "Quarter");
-      if (quarter) tracker.targetResolutionQuarter = normalizeQuarter(quarter);
+      if (quarter) tracker.targetResolutionQuarter = normalizeTargetQuarter(quarter) ?? undefined;
 
       const liability = getCsvCell(row, headers, "Liability");
       if (liability) tracker.liability = liability;
@@ -190,7 +190,7 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       if (disburseDate) result.disburseDate = parseOptionalDate(disburseDate);
 
       const resultQuarter = getCsvCell(row, headers, "Result Quarter");
-      if (resultQuarter) result.resultQuarter = normalizeQuarter(resultQuarter);
+      if (resultQuarter) result.resultQuarter = normalizeTargetQuarter(resultQuarter) ?? undefined;
 
       return { caseNumber, shared, tracker, result };
     })
@@ -225,13 +225,6 @@ function parseOptionalDate(value: string) {
 
   const parsed = new Date(trimmed);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-}
-
-function normalizeQuarter(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  if (/^\d{4}$/.test(trimmed)) return `${trimmed} Q4`;
-  return trimmed;
 }
 
 function normalizeCaseStatus(value: string): CaseStatus {
