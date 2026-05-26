@@ -374,9 +374,10 @@ export async function importCaseBackfillCsv(
 
 export async function updateSharedCaseFields(
   caseId: string,
-  input: { status?: CaseStatus; caseType?: string; dateOfIncident?: string | null },
+  input: { status?: CaseStatus; caseType?: string; dateSigned?: string; dateOfIncident?: string | null },
 ) {
-  const client = await createSharedDataClient();
+  const sharedClient = await createSharedDataClient();
+  const trackerClient = await createTrackerClient();
 
   const payload: { status?: string; case_type?: string; date_of_incident?: string | null } = {};
   if (input.status) payload.status = input.status === "Closed" ? "archived" : "active";
@@ -385,10 +386,19 @@ export async function updateSharedCaseFields(
     payload.date_of_incident = input.dateOfIncident ? toDateOnly(input.dateOfIncident) : null;
   }
 
-  if (Object.keys(payload).length === 0) return;
+  if (Object.keys(payload).length > 0) {
+    const { error } = await sharedClient.from("cases").update(payload).eq("id", caseId);
+    if (error) throw error;
+  }
 
-  const { error } = await client.from("cases").update(payload).eq("id", caseId);
-  if (error) throw error;
+  // Tracker-owned override so we don't mutate DocketFlow created_at.
+  if (input.dateSigned) {
+    const { error } = await trackerClient
+      .from("case_tracker_entries")
+      .update({ date_signed_override: input.dateSigned })
+      .or(`case_id.eq.${caseId},id.eq.${caseId}`);
+    if (error) throw error;
+  }
 }
 
 export async function createTrackerComment(
@@ -534,6 +544,7 @@ export type AttorneyGoalInput = {
   attorneyName: string;
   year: number;
   annualFeeGoal: number;
+  commissionThreshold: number;
   q1Goal: number;
   q2Goal: number;
   q3Goal: number;
@@ -548,6 +559,7 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     attorney_name: input.attorneyName,
     year: input.year,
     annual_fee_goal: annualFeeGoal,
+    commission_threshold: input.commissionThreshold,
     q1_goal: input.q1Goal,
     q2_goal: input.q2Goal,
     q3_goal: input.q3Goal,
@@ -567,6 +579,7 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     attorneyId: input.attorneyId,
     year: input.year,
     annualFeeGoal,
+    commissionThreshold: Number(data.commission_threshold ?? 0),
     q1Goal: Number(data.q1_goal ?? 0),
     q2Goal: Number(data.q2_goal ?? 0),
     q3Goal: Number(data.q3_goal ?? 0),
@@ -590,6 +603,7 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
   return ((goalRows ?? []) as UnknownRow[]).map((row) => {
     const attorneyName = toStringOrNull(row.attorney_name);
     const matchedContact = attorneys.find((contact) => contact.name && attorneyName && namesMatch(contact.name, attorneyName));
+    const commissionThreshold = Number(row.commission_threshold ?? 0);
     const q1Goal = Number(row.q1_goal ?? 0);
     const q2Goal = Number(row.q2_goal ?? 0);
     const q3Goal = Number(row.q3_goal ?? 0);
@@ -600,6 +614,7 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
       attorneyId: matchedContact?.id ?? toStringOrNull(row.attorney_user_id) ?? attorneyName ?? "unknown-attorney",
       year: Number(row.year ?? new Date().getFullYear()),
       annualFeeGoal: q1Goal + q2Goal + q3Goal + q4Goal,
+      commissionThreshold,
       q1Goal,
       q2Goal,
       q3Goal,
@@ -764,7 +779,7 @@ function rowToCaseRecord(
       paralegalId: paralegalContact.id,
       status: normalizeCaseStatus(caseRow?.status),
       caseType: normalizeCaseType(caseRow?.case_type ?? toStringOrNull(trackerRow.case_type)),
-      dateSigned: normalizeDate(caseRow?.created_at),
+      dateSigned: normalizeDate(toStringOrNull(trackerRow.date_signed_override) ?? caseRow?.created_at),
       dateOfIncident: normalizeOptionalDate(caseRow?.date_of_incident),
       createdAt: normalizeDate(caseRow?.created_at),
       updatedAt: normalizeDate(caseRow?.updated_at),

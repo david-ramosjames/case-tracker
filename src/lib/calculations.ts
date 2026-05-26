@@ -182,7 +182,7 @@ export function getFirmOutputMetrics(records: CaseRecord[], goals: AttorneyGoal[
   const grossDisbursed = sum(disbursedRecords.map((record) => record.tracker.result.settlementAmount));
   const feesSettled = sum(settledRecords.map((record) => record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue));
   const feesDisbursed = sum(disbursedRecords.map((record) => record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue));
-  const commissionThreshold = Math.round(annualFeeGoal * 0.5);
+  const commissionThreshold = Math.round(sum(goals.map((goal) => goal.commissionThreshold)));
   const commissionableAmount = Math.max(feesDisbursed - commissionThreshold, 0);
   const completedDisbursementGoal = Math.max(1, Math.ceil(records.length * 0.55));
 

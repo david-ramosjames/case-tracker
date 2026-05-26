@@ -15,6 +15,7 @@ import { formatCurrency } from "@/lib/utils";
 
 type GoalDraft = {
   attorneyId: string;
+  commissionThreshold: string;
   q1Goal: string;
   q2Goal: string;
   q3Goal: string;
@@ -40,7 +41,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newAttorneyId, setNewAttorneyId] = useState(attorneys[0]?.id ?? "");
-  const [newGoals, setNewGoals] = useState({ q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
+  const [newGoals, setNewGoals] = useState({ commissionThreshold: "", q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
   const [drafts, setDrafts] = useState<Record<string, GoalDraft>>({});
 
   const goalsForYear = useMemo(() => goals.filter((goal) => goal.year === selectedYear), [goals, selectedYear]);
@@ -49,6 +50,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
     return (
       drafts[goal.id] ?? {
         attorneyId: goal.attorneyId,
+        commissionThreshold: String(goal.commissionThreshold),
         q1Goal: String(goal.q1Goal || ""),
         q2Goal: String(goal.q2Goal || ""),
         q3Goal: String(goal.q3Goal || ""),
@@ -75,6 +77,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
         attorneyName,
         year: selectedYear,
         annualFeeGoal: sumQuarterGoals(values),
+        commissionThreshold: parseGoalAmount(values.commissionThreshold),
         q1Goal: parseGoalAmount(values.q1Goal),
         q2Goal: parseGoalAmount(values.q2Goal),
         q3Goal: parseGoalAmount(values.q3Goal),
@@ -114,13 +117,14 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
     try {
       await saveGoal(attorney.id, attorney.name, {
         attorneyId: attorney.id,
+        commissionThreshold: newGoals.commissionThreshold,
         q1Goal: newGoals.q1Goal,
         q2Goal: newGoals.q2Goal,
         q3Goal: newGoals.q3Goal,
         q4Goal: newGoals.q4Goal,
       });
       setShowAddForm(false);
-      setNewGoals({ q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
+      setNewGoals({ commissionThreshold: "", q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to add goal.");
@@ -180,6 +184,11 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
                 </Select>
               </label>
               <AnnualTotal label="Annual (sum)" amount={sumQuarterGoals(newGoals)} />
+              <GoalInput
+                label="Commission Threshold"
+                value={newGoals.commissionThreshold}
+                onChange={(value) => setNewGoals((c) => ({ ...c, commissionThreshold: value }))}
+              />
               <GoalInput label={`Q1 ${selectedYear}`} value={newGoals.q1Goal} onChange={(value) => setNewGoals((c) => ({ ...c, q1Goal: value }))} />
               <GoalInput label={`Q2 ${selectedYear}`} value={newGoals.q2Goal} onChange={(value) => setNewGoals((c) => ({ ...c, q2Goal: value }))} />
               <GoalInput label={`Q3 ${selectedYear}`} value={newGoals.q3Goal} onChange={(value) => setNewGoals((c) => ({ ...c, q3Goal: value }))} />
@@ -197,6 +206,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
               <TableRow>
                 <TableHead>Attorney</TableHead>
                 <TableHead>Annual ({selectedYear})</TableHead>
+                <TableHead>Commission Threshold</TableHead>
                 <TableHead>Q1 {selectedYear}</TableHead>
                 <TableHead>Q2 {selectedYear}</TableHead>
                 <TableHead>Q3 {selectedYear}</TableHead>
@@ -207,7 +217,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
             <TableBody>
               {goalsForYear.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-sm text-muted-foreground">
+                  <TableCell colSpan={8} className="text-sm text-muted-foreground">
                     No goals for {selectedYear}. Click <strong>Add goal</strong> or import from the CSV template.
                   </TableCell>
                 </TableRow>
@@ -221,6 +231,13 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
                       <TableCell className="font-semibold">{attorney?.name ?? "Unknown attorney"}</TableCell>
                       <TableCell>
                         <AnnualTotal compact amount={sumQuarterGoals(draft)} />
+                      </TableCell>
+                      <TableCell>
+                        <GoalInput
+                          compact
+                          value={draft.commissionThreshold}
+                          onChange={(value) => updateDraft(goal.id, { commissionThreshold: value })}
+                        />
                       </TableCell>
                       <TableCell>
                         <GoalInput compact value={draft.q1Goal} onChange={(value) => updateDraft(goal.id, { q1Goal: value })} />

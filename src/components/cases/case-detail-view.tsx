@@ -490,6 +490,13 @@ export function CaseDetailView({
                     onChange={(event) => updateShared("dateOfIncident", fromDateInput(event.target.value))}
                   />
                 </Field>
+                <Field label="Date Signed">
+                  <Input
+                    type="date"
+                    value={toDateInput(shared.dateSigned)}
+                    onChange={(event) => updateShared("dateSigned", fromDateInput(event.target.value) ?? shared.dateSigned)}
+                  />
+                </Field>
                 <Field label="Status">
                   <Select value={shared.status} onChange={(event) => updateShared("status", event.target.value as CaseStatus)}>
                     {CASE_STATUS_OPTIONS.map((status) => (

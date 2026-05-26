@@ -203,7 +203,7 @@ export function OutputView({
             <CardDescription>Disbursed fees compared with the commission threshold.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
-            <SummaryCard label="Commission Threshold" value={formatCurrency(results.commissionThreshold)} detail="Based on filtered annual fee goals" />
+            <SummaryCard label="Commission Threshold" value={formatCurrency(results.commissionThreshold)} detail="Sum of attorney commission thresholds" />
             <SummaryCard label="Commissionable Amount" value={formatCurrency(results.commissionableAmount)} detail="Disbursed fees above threshold" />
           </CardContent>
         </Card>
