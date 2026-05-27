@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { findCaseForSlackThread } from "@/lib/slack/channels";
 import { getSlackSigningSecret, isSlackEnabled } from "@/lib/slack/config";
 import { postSlackMessage } from "@/lib/slack/client";
-import { formatSlackThreadAppliedMessage } from "@/lib/slack/thread-update";
+import { formatSlackThreadAppliedMessage, parseSlackThreadUpdate } from "@/lib/slack/thread-update";
 import { applySlackThreadUpdate } from "@/lib/supabase/services";
 
 type SlackEventPayload = {
@@ -91,6 +91,12 @@ export async function POST(request: Request) {
 
   const event = payload.event;
   if (!isUserThreadReply(event)) {
+    return NextResponse.json({ ok: true });
+  }
+
+  const parsedUpdate = parseSlackThreadUpdate(event.text);
+  if (!parsedUpdate) {
+    // Ignore normal chatter in threads. We only respond when the message looks like a case-tracker update.
     return NextResponse.json({ ok: true });
   }
 
