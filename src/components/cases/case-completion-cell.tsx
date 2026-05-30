@@ -32,10 +32,7 @@ export function CaseCompletionCell({
       )}
       title={`${score.completed} of ${score.total} tracker fields complete`}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className={cn("text-xs font-bold tabular-nums", styles.text)}>{score.percent}%</span>
-        {prominent ? <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Complete</span> : null}
-      </div>
+      <span className={cn("text-xs font-bold tabular-nums", styles.text)}>{score.percent}%</span>
       <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
         <div className={cn("h-full rounded-full transition-all", styles.bar)} style={{ width: `${score.percent}%` }} />
       </div>
