@@ -2,18 +2,13 @@ import { Lock } from "lucide-react";
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { dataRepository } from "@/lib/data/repository";
+import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 import { getCurrentQuarter, percent, getQuarterElapsedPercentage } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const [records, goals, settings, users] = await Promise.all([
-    dataRepository.getCases(),
-    dataRepository.getAttorneyGoals(),
-    dataRepository.getSettings(),
-    dataRepository.getUsers(),
-  ]);
+  const { records, goals, settings, users } = await loadViewerCaseBundle();
 
   return (
     <>

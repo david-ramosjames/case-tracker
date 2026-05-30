@@ -1,23 +1,24 @@
 import { notFound } from "next/navigation";
 import { CaseDetailView } from "@/components/cases/case-detail-view";
 import { PageHeader } from "@/components/layout/page-header";
-import { getSessionUser } from "@/lib/auth/session";
+import { canViewerAccessCase } from "@/lib/auth/access";
 import { dataRepository } from "@/lib/data/repository";
+import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
 
 export const dynamic = "force-dynamic";
 
 export default async function CaseDetailPage({ params }: { params: Promise<{ caseId: string }> }) {
   const { caseId } = await params;
-  const [record, comments, activity, settings, sessionUser] = await Promise.all([
+  const { sessionUser, users, goals } = await loadViewerCaseBundle();
+  const [record, comments, activity, settings] = await Promise.all([
     dataRepository.getCaseById(caseId),
     dataRepository.getCaseComments(caseId),
     dataRepository.getCaseActivity(caseId),
     dataRepository.getSettings(),
-    getSessionUser(),
   ]);
 
-  if (!record || !sessionUser) {
+  if (!record || !sessionUser || !canViewerAccessCase(record, sessionUser, users, goals)) {
     notFound();
   }
 

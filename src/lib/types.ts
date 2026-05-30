@@ -174,10 +174,20 @@ export type AttorneyGoal = {
   year: number;
   annualFeeGoal: number;
   commissionThreshold: number;
+  commissionYearStartMonth: number;
   q1Goal: number;
   q2Goal: number;
   q3Goal: number;
   q4Goal: number;
+};
+
+export type CaseCompletionLevel = "complete" | "good" | "attention" | "critical";
+
+export type CaseCompletionScore = {
+  percent: number;
+  level: CaseCompletionLevel;
+  completed: number;
+  total: number;
 };
 
 export type CaseTrackerSettings = {

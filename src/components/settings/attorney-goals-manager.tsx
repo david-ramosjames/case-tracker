@@ -10,12 +10,14 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getGoalYearOptions } from "@/lib/case-options";
+import { COMMISSION_YEAR_MONTH_OPTIONS } from "@/lib/commission-year";
 import { type AppUser, type AttorneyGoal } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 
 type GoalDraft = {
   attorneyId: string;
   commissionThreshold: string;
+  commissionYearStartMonth: string;
   q1Goal: string;
   q2Goal: string;
   q3Goal: string;
@@ -41,7 +43,14 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newAttorneyId, setNewAttorneyId] = useState(attorneys[0]?.id ?? "");
-  const [newGoals, setNewGoals] = useState({ commissionThreshold: "", q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
+  const [newGoals, setNewGoals] = useState({
+    commissionThreshold: "",
+    commissionYearStartMonth: "1",
+    q1Goal: "",
+    q2Goal: "",
+    q3Goal: "",
+    q4Goal: "",
+  });
   const [drafts, setDrafts] = useState<Record<string, GoalDraft>>({});
 
   const goalsForYear = useMemo(() => goals.filter((goal) => goal.year === selectedYear), [goals, selectedYear]);
@@ -51,6 +60,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
       drafts[goal.id] ?? {
         attorneyId: goal.attorneyId,
         commissionThreshold: String(goal.commissionThreshold),
+        commissionYearStartMonth: String(goal.commissionYearStartMonth ?? 1),
         q1Goal: String(goal.q1Goal || ""),
         q2Goal: String(goal.q2Goal || ""),
         q3Goal: String(goal.q3Goal || ""),
@@ -78,6 +88,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
         year: selectedYear,
         annualFeeGoal: sumQuarterGoals(values),
         commissionThreshold: parseGoalAmount(values.commissionThreshold),
+        commissionYearStartMonth: Number(values.commissionYearStartMonth || 1),
         q1Goal: parseGoalAmount(values.q1Goal),
         q2Goal: parseGoalAmount(values.q2Goal),
         q3Goal: parseGoalAmount(values.q3Goal),
@@ -118,13 +129,14 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
       await saveGoal(attorney.id, attorney.name, {
         attorneyId: attorney.id,
         commissionThreshold: newGoals.commissionThreshold,
+        commissionYearStartMonth: newGoals.commissionYearStartMonth,
         q1Goal: newGoals.q1Goal,
         q2Goal: newGoals.q2Goal,
         q3Goal: newGoals.q3Goal,
         q4Goal: newGoals.q4Goal,
       });
       setShowAddForm(false);
-      setNewGoals({ commissionThreshold: "", q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
+      setNewGoals({ commissionThreshold: "", commissionYearStartMonth: "1", q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to add goal.");
@@ -140,7 +152,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
           <div>
             <CardTitle>Attorney Goals</CardTitle>
             <CardDescription>
-              Enter quarterly fee goals for each attorney. Annual is calculated automatically as Q1 + Q2 + Q3 + Q4.
+              Enter quarterly fee goals (Target, top-down) per commission year. Set each attorney&apos;s commission year start month — Plan (bottom-up) rolls up cases forecast to disburse in that year.
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -184,6 +196,19 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
                 </Select>
               </label>
               <AnnualTotal label="Annual (sum)" amount={sumQuarterGoals(newGoals)} />
+              <label>
+                <span className="mb-1 block text-xs font-medium text-muted-foreground">Commission year starts</span>
+                <Select
+                  value={newGoals.commissionYearStartMonth}
+                  onChange={(event) => setNewGoals((c) => ({ ...c, commissionYearStartMonth: event.target.value }))}
+                >
+                  {COMMISSION_YEAR_MONTH_OPTIONS.map((month) => (
+                    <option key={month.value} value={month.value}>
+                      {month.label}
+                    </option>
+                  ))}
+                </Select>
+              </label>
               <GoalInput
                 label="Commission Threshold"
                 value={newGoals.commissionThreshold}
@@ -206,6 +231,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
               <TableRow>
                 <TableHead>Attorney</TableHead>
                 <TableHead>Annual ({selectedYear})</TableHead>
+                <TableHead>Commission year starts</TableHead>
                 <TableHead>Commission Threshold</TableHead>
                 <TableHead>Q1 {selectedYear}</TableHead>
                 <TableHead>Q2 {selectedYear}</TableHead>
@@ -217,7 +243,7 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
             <TableBody>
               {goalsForYear.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-sm text-muted-foreground">
+                  <TableCell colSpan={9} className="text-sm text-muted-foreground">
                     No goals for {selectedYear}. Click <strong>Add goal</strong> or import from the CSV template.
                   </TableCell>
                 </TableRow>
@@ -231,6 +257,19 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
                       <TableCell className="font-semibold">{attorney?.name ?? "Unknown attorney"}</TableCell>
                       <TableCell>
                         <AnnualTotal compact amount={sumQuarterGoals(draft)} />
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          className="h-9 min-w-[8.5rem] text-xs"
+                          value={draft.commissionYearStartMonth}
+                          onChange={(event) => updateDraft(goal.id, { commissionYearStartMonth: event.target.value })}
+                        >
+                          {COMMISSION_YEAR_MONTH_OPTIONS.map((month) => (
+                            <option key={month.value} value={month.value}>
+                              {month.label}
+                            </option>
+                          ))}
+                        </Select>
                       </TableCell>
                       <TableCell>
                         <GoalInput

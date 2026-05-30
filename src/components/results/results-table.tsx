@@ -2,9 +2,13 @@
 
 import Link from "next/link";
 import { ArrowDown, ArrowUp, ArrowUpDown, Eye } from "lucide-react";
+import { CaseCompletionCell } from "@/components/cases/case-completion-cell";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
+import { type ViewerContext } from "@/lib/auth/access";
+import { getCaseCompletionScore } from "@/lib/calculations";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { HeaderFilter } from "@/components/ui/header-filter";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -18,6 +22,7 @@ import {
 import {
   type AppUser,
   type CaseRecord,
+  type CaseTrackerSettings,
   type CheckStatus,
   type ClosingStatus,
   type DisbursedStatus,
@@ -27,24 +32,31 @@ import {
 import { formatCurrency, getCalculatedAttorneyFees } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 
-type SortKey = "caseNumber" | "clientName" | "settlementDate" | "settlementAmount" | "attorneyFees";
+type SortKey = "completion" | "caseNumber" | "clientName" | "settlementDate" | "settlementAmount" | "attorneyFees";
 type SortDirection = "asc" | "desc";
 
-export function ResultsTable({ records, users }: { records: CaseRecord[]; users: AppUser[] }) {
+export function ResultsTable({
+  records,
+  settings,
+}: {
+  records: CaseRecord[];
+  users: AppUser[];
+  settings: CaseTrackerSettings;
+  viewer: ViewerContext;
+}) {
   const [workingRecords, setWorkingRecords] = useState(records);
   const [search, setSearch] = useState("");
-  const [attorney, setAttorney] = useState("all");
-  const [paralegal, setParalegal] = useState("all");
+  const [release, setRelease] = useState("all");
+  const [closing, setClosing] = useState("all");
+  const [check, setCheck] = useState("all");
+  const [disbursed, setDisbursed] = useState("all");
   const [quarter, setQuarter] = useState("all");
-  const [resultState, setResultState] = useState("all");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("caseNumber");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
-  const attorneys = users.filter((user) => user.role === "attorney");
-  const paralegals = users.filter((user) => user.role === "paralegal");
   const quarters = Array.from(new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.result.resultQuarter).filter(Boolean)]));
+
+  const activeFilterCount = [release, closing, check, disbursed, quarter].filter((value) => value !== "all").length;
 
   const filteredRecords = useMemo(() => {
     const normalizedSearch = search.toLowerCase();
@@ -57,19 +69,24 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
           record.shared.clientName.toLowerCase().includes(normalizedSearch);
 
         if (!matchesSearch) return false;
-        if (attorney !== "all" && record.shared.attorneyId !== attorney) return false;
-        if (paralegal !== "all" && record.shared.paralegalId !== paralegal) return false;
+        if (release !== "all" && result.releaseStatus !== release) return false;
+        if (closing !== "all" && result.closingStatus !== closing) return false;
+        if (check !== "all" && result.checkStatus !== check) return false;
+        if (disbursed !== "all" && result.disbursedStatus !== disbursed) return false;
         if (quarter !== "all" && result.resultQuarter !== quarter) return false;
-        if (resultState === "open" && result.checkDisbursedAt) return false;
-        if (resultState === "disbursed" && !result.checkDisbursedAt) return false;
-        if (dateFrom && result.settlementDate && new Date(result.settlementDate) < new Date(`${dateFrom}T00:00:00`)) return false;
-        if (dateTo && result.settlementDate && new Date(result.settlementDate) > new Date(`${dateTo}T23:59:59`)) return false;
 
         return true;
       })
       .sort((a, b) => {
         const dir = sortDirection === "asc" ? 1 : -1;
         const tieBreak = () => a.shared.caseNumber.localeCompare(b.shared.caseNumber);
+
+        if (sortKey === "completion") {
+          const aScore = getCaseCompletionScore(a, settings).percent;
+          const bScore = getCaseCompletionScore(b, settings).percent;
+          const cmp = aScore - bScore;
+          return cmp !== 0 ? dir * cmp : tieBreak();
+        }
 
         if (sortKey === "caseNumber") {
           const aNum = Number(a.shared.caseNumber);
@@ -108,7 +125,15 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
         const cmp = aFees - bFees;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [attorney, dateFrom, dateTo, paralegal, quarter, resultState, search, sortDirection, sortKey, workingRecords]);
+  }, [check, closing, disbursed, quarter, release, search, settings, sortDirection, sortKey, workingRecords]);
+
+  function clearFilters() {
+    setRelease("all");
+    setClosing("all");
+    setCheck("all");
+    setDisbursed("all");
+    setQuarter("all");
+  }
 
   function requestSort(nextKey: SortKey) {
     if (nextKey === sortKey) {
@@ -116,7 +141,7 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
       return;
     }
     setSortKey(nextKey);
-    setSortDirection(nextKey === "clientName" ? "asc" : "desc");
+    setSortDirection(nextKey === "clientName" || nextKey === "completion" ? "asc" : "desc");
   }
 
   function updateResult(recordId: string, updater: (result: SettlementResult) => SettlementResult) {
@@ -173,49 +198,23 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
   return (
     <Card>
       <CardContent className="p-4">
-        <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-7">
-          <Input placeholder="Search results..." value={search} onChange={(event) => setSearch(event.target.value)} />
-          <Select value={attorney} onChange={(event) => setAttorney(event.target.value)} aria-label="Attorney">
-            <option value="all">All attorneys</option>
-            {attorneys.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </Select>
-          <Select value={paralegal} onChange={(event) => setParalegal(event.target.value)} aria-label="Paralegal">
-            <option value="all">All paralegals</option>
-            {paralegals.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.name}
-              </option>
-            ))}
-          </Select>
-          <Select value={quarter} onChange={(event) => setQuarter(event.target.value)} aria-label="Quarter">
-            <option value="all">All quarters</option>
-            {quarters.map((item) => (
-              <option key={item} value={item ?? ""}>
-                {item}
-              </option>
-            ))}
-          </Select>
-          <Select value={resultState} onChange={(event) => setResultState(event.target.value)} aria-label="Result status">
-            <option value="all">All results</option>
-            <option value="open">Not disbursed</option>
-            <option value="disbursed">Disbursed</option>
-          </Select>
-          <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} aria-label="Settlement from" />
-          <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} aria-label="Settlement to" />
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Input className="sm:max-w-md" placeholder="Search results..." value={search} onChange={(event) => setSearch(event.target.value)} />
+          {activeFilterCount > 0 ? (
+            <Button variant="ghost" onClick={clearFilters}>
+              Clear column filters
+            </Button>
+          ) : null}
+          <p className="text-sm text-muted-foreground sm:ml-auto">
+            Showing {filteredRecords.length} of {workingRecords.length} results. Use column headers to filter; click labels to sort.
+          </p>
         </div>
-
-        <p className="text-sm text-muted-foreground">
-          Showing {filteredRecords.length} of {workingRecords.length} results. Click a column header to sort.
-        </p>
 
         <div className="mt-4 overflow-x-auto rounded-lg border bg-white">
           <Table>
             <TableHeader>
               <TableRow>
+                <SortableHead label="% Complete" sortKey="completion" active={sortKey} direction={sortDirection} onSort={requestSort} />
                 <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} direction={sortDirection} onSort={requestSort} />
                 <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} />
                 <TableHead>Attorney</TableHead>
@@ -224,11 +223,61 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
                 <SortableHead label="Settlement Amount" sortKey="settlementAmount" active={sortKey} direction={sortDirection} onSort={requestSort} />
                 <TableHead>Fee Percent</TableHead>
                 <SortableHead label="RJL Attorney Fees" sortKey="attorneyFees" active={sortKey} direction={sortDirection} onSort={requestSort} />
-                <TableHead>Release</TableHead>
-                <TableHead>Closing</TableHead>
-                <TableHead>Check</TableHead>
-                <TableHead>Disbursed</TableHead>
-                <TableHead>Quarter</TableHead>
+                <TableHead className="align-top">
+                  <HeaderFilter
+                    label="Release"
+                    value={release}
+                    onChange={setRelease}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...RELEASE_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="align-top">
+                  <HeaderFilter
+                    label="Closing"
+                    value={closing}
+                    onChange={setClosing}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...CLOSING_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="align-top">
+                  <HeaderFilter
+                    label="Check"
+                    value={check}
+                    onChange={setCheck}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...CHECK_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="align-top">
+                  <HeaderFilter
+                    label="Disbursed"
+                    value={disbursed}
+                    onChange={setDisbursed}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...DISBURSED_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="align-top">
+                  <HeaderFilter
+                    label="Quarter"
+                    value={quarter}
+                    onChange={setQuarter}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...quarters.map((item) => ({ value: item ?? "", label: item ?? "" })),
+                    ]}
+                  />
+                </TableHead>
                 <TableHead>Disburse Date</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -239,6 +288,9 @@ export function ResultsTable({ records, users }: { records: CaseRecord[]; users:
 
                 return (
                   <TableRow key={record.shared.id}>
+                    <TableCell className="w-28">
+                      <CaseCompletionCell record={record} settings={settings} />
+                    </TableCell>
                     <TableCell>
                       <CaseNumberLink caseId={record.shared.id} caseNumber={record.shared.caseNumber} />
                     </TableCell>

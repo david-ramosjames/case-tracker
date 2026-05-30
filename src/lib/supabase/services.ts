@@ -545,6 +545,7 @@ export type AttorneyGoalInput = {
   year: number;
   annualFeeGoal: number;
   commissionThreshold: number;
+  commissionYearStartMonth?: number;
   q1Goal: number;
   q2Goal: number;
   q3Goal: number;
@@ -555,11 +556,14 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
   const client = await createTrackerClient();
   const annualFeeGoal = input.q1Goal + input.q2Goal + input.q3Goal + input.q4Goal;
 
+  const commissionYearStartMonth = Math.min(12, Math.max(1, Number(input.commissionYearStartMonth ?? 1)));
+
   const payload = {
     attorney_name: input.attorneyName,
     year: input.year,
     annual_fee_goal: annualFeeGoal,
     commission_threshold: input.commissionThreshold,
+    commission_year_start_month: commissionYearStartMonth,
     q1_goal: input.q1Goal,
     q2_goal: input.q2Goal,
     q3_goal: input.q3Goal,
@@ -580,6 +584,7 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     year: input.year,
     annualFeeGoal,
     commissionThreshold: Number(data.commission_threshold ?? 0),
+    commissionYearStartMonth: Number(data.commission_year_start_month ?? 1),
     q1Goal: Number(data.q1_goal ?? 0),
     q2Goal: Number(data.q2_goal ?? 0),
     q3Goal: Number(data.q3_goal ?? 0),
@@ -615,6 +620,7 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
       year: Number(row.year ?? new Date().getFullYear()),
       annualFeeGoal: q1Goal + q2Goal + q3Goal + q4Goal,
       commissionThreshold,
+      commissionYearStartMonth: Number(row.commission_year_start_month ?? 1),
       q1Goal,
       q2Goal,
       q3Goal,

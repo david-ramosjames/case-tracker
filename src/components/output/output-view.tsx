@@ -41,7 +41,13 @@ export function OutputView({
     return goals.filter((goal) => attorneyIds.has(goal.attorneyId));
   }, [attorney, filteredRecords, goals]);
 
-  const output = useMemo(() => getFirmOutputMetrics(filteredRecords, filteredGoals), [filteredGoals, filteredRecords]);
+  const goalYear = useMemo(() => {
+    const years = filteredGoals.map((goal) => goal.year);
+    if (years.length === 0) return new Date().getFullYear();
+    return Math.max(...years);
+  }, [filteredGoals]);
+
+  const output = useMemo(() => getFirmOutputMetrics(filteredRecords, filteredGoals, goalYear), [filteredGoals, filteredRecords, goalYear]);
   const { results } = output;
 
   const activeFilterCount = [attorney !== "all", paralegal !== "all"].filter(Boolean).length;
@@ -95,7 +101,9 @@ export function OutputView({
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-4">
+      <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-6">
+        <SummaryCard label="Target (top-down)" value={formatCurrency(results.annualFeeGoal)} detail={`${goalYear} commission year fee goal`} />
+        <SummaryCard label="Plan (bottom-up)" value={formatCurrency(results.planFees)} detail="Forecast fees from active cases in this commission year" />
         <SummaryCard label="Gross Settled" value={formatCurrency(results.grossSettled)} detail="Settlement amounts signed" />
         <SummaryCard label="Gross Disbursed" value={formatCurrency(results.grossDisbursed)} detail="Settlement dollars disbursed" />
         <SummaryCard label="RJL Fees Settled" value={formatCurrency(results.feesSettled)} detail="Attorney fees on settled cases" />

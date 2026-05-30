@@ -2,9 +2,10 @@
 
 import Link from "next/link";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
-import { ArrowDown, ArrowUp, ArrowUpDown, Eye, SlidersHorizontal } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Eye } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { HeaderFilter } from "@/components/ui/header-filter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -18,12 +19,14 @@ import {
   LIABILITY_OPTIONS,
   getTargetPeriodOptions,
 } from "@/lib/case-options";
-import { getDataQualityFlags, isMissingInfo, isStale } from "@/lib/calculations";
+import { CaseCompletionCell } from "@/components/cases/case-completion-cell";
+import { getCaseCompletionScore, getDataQualityFlags } from "@/lib/calculations";
+import { getCasePipelineFilter, type CasePipelineFilter, type ViewerContext } from "@/lib/auth/access";
 import {
   type AppUser,
+  type AttorneyGoal,
   type CaseRecord,
   type CaseStage,
-  type CaseStatus,
   type CaseTrackerSettings,
   type ExpectedLitigationStatus,
   type TrackerEntry,
@@ -31,54 +34,71 @@ import {
 import { cn, formatDate, formatOptionalDate } from "@/lib/utils";
 import { type ReactNode, type RefObject, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
-type SortKey = "caseNumber" | "clientName" | "dateSigned" | "dol" | "minimumValue" | "policyLimits";
+type SortKey = "completion" | "caseNumber" | "clientName" | "dateSigned" | "dol" | "minimumValue" | "policyLimits";
 type SortDirection = "asc" | "desc";
 
 export function CaseTable({
   records,
   users,
   settings,
+  goals,
+  viewer,
 }: {
   records: CaseRecord[];
   users: AppUser[];
   settings: CaseTrackerSettings;
+  goals: AttorneyGoal[];
+  viewer: ViewerContext;
 }) {
   const [workingRecords, setWorkingRecords] = useState(records);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const [attorney, setAttorney] = useState("all");
   const [paralegal, setParalegal] = useState("all");
   const [stage, setStage] = useState("all");
-  const [status, setStatus] = useState<"all" | CaseStatus>("Active");
+  const [status, setStatus] = useState<CasePipelineFilter>("Active");
   const [caseType, setCaseType] = useState("all");
+  const [liability, setLiability] = useState("all");
+  const [caseSize, setCaseSize] = useState("all");
   const [expectedLitigation, setExpectedLitigation] = useState("all");
   const [quarter, setQuarter] = useState("all");
-  const [quality, setQuality] = useState("all");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("caseNumber");
+  const [sortKey, setSortKey] = useState<SortKey>("completion");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
-  const [scrollWidth, setScrollWidth] = useState(2040);
+  const [scrollWidth, setScrollWidth] = useState(2140);
+
+  const needsAttentionCount = useMemo(
+    () => workingRecords.filter((record) => getCaseCompletionScore(record, settings).percent < 85).length,
+    [settings, workingRecords],
+  );
 
   const attorneys = users.filter((user) => user.role === "attorney");
   const paralegals = users.filter((user) => user.role === "paralegal");
   const quarters = Array.from(
     new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.targetResolutionQuarter).filter(Boolean)]),
   );
+  const statusFilterOptions = useMemo(() => {
+    const options: Array<{ value: CasePipelineFilter; label: string }> = [
+      { value: "all", label: "All statuses" },
+      { value: "Active", label: "Active" },
+      { value: "Closed", label: "Closed" },
+    ];
+    if (viewer.canViewHistorical) options.push({ value: "Historical", label: "Historical" });
+    return options;
+  }, [viewer.canViewHistorical]);
+
   const activeFilterCount = [
-    attorney !== "all",
+    viewer.canViewAllCases && attorney !== "all",
     paralegal !== "all",
-    stage !== "all",
+    status !== "Active",
     caseType !== "all",
-    expectedLitigation !== "all",
+    liability !== "all",
     quarter !== "all",
-    quality !== "all",
-    Boolean(dateFrom),
-    Boolean(dateTo),
+    caseSize !== "all",
+    stage !== "all",
+    expectedLitigation !== "all",
   ].filter(Boolean).length;
 
   const filteredRecords = useMemo(() => {
@@ -95,14 +115,13 @@ export function CaseTable({
         if (attorney !== "all" && record.shared.attorneyId !== attorney) return false;
         if (paralegal !== "all" && record.shared.paralegalId !== paralegal) return false;
         if (stage !== "all" && record.tracker.caseStage !== stage) return false;
-        if (status !== "all" && record.shared.status !== status) return false;
+        const pipeline = getCasePipelineFilter(record, goals);
+        if (status !== "all" && pipeline !== status) return false;
         if (caseType !== "all" && record.shared.caseType !== caseType) return false;
+        if (liability !== "all" && record.tracker.liability !== liability) return false;
+        if (caseSize !== "all" && record.tracker.caseSize !== caseSize) return false;
         if (expectedLitigation !== "all" && record.tracker.expectedLitigation !== expectedLitigation) return false;
         if (quarter !== "all" && record.tracker.targetResolutionQuarter !== quarter) return false;
-        if (quality === "missing" && !isMissingInfo(record, settings)) return false;
-        if (quality === "stale" && !isStale(record, settings)) return false;
-        if (dateFrom && new Date(record.shared.dateSigned) < new Date(`${dateFrom}T00:00:00`)) return false;
-        if (dateTo && new Date(record.shared.dateSigned) > new Date(`${dateTo}T23:59:59`)) return false;
 
         return true;
       })
@@ -110,6 +129,13 @@ export function CaseTable({
         const dir = sortDirection === "asc" ? 1 : -1;
 
         const tieBreak = () => a.shared.caseNumber.localeCompare(b.shared.caseNumber);
+
+        if (sortKey === "completion") {
+          const aScore = getCaseCompletionScore(a, settings).percent;
+          const bScore = getCaseCompletionScore(b, settings).percent;
+          const cmp = aScore - bScore;
+          return cmp !== 0 ? dir * cmp : tieBreak();
+        }
 
         if (sortKey === "caseNumber") {
           const aNum = Number(a.shared.caseNumber);
@@ -149,7 +175,7 @@ export function CaseTable({
         const cmp = aValue - bValue;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [attorney, caseType, dateFrom, dateTo, expectedLitigation, paralegal, quarter, quality, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
+  }, [attorney, caseSize, caseType, expectedLitigation, goals, liability, paralegal, quarter, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
 
   function requestSort(nextKey: SortKey) {
     if (nextKey === sortKey) {
@@ -157,7 +183,7 @@ export function CaseTable({
       return;
     }
     setSortKey(nextKey);
-    setSortDirection(nextKey === "clientName" ? "asc" : "desc");
+    setSortDirection(nextKey === "clientName" || nextKey === "completion" ? "asc" : "desc");
   }
 
   useEffect(() => {
@@ -182,11 +208,10 @@ export function CaseTable({
     setStage("all");
     setStatus("Active");
     setCaseType("all");
+    setLiability("all");
+    setCaseSize("all");
     setExpectedLitigation("all");
     setQuarter("all");
-    setQuality("all");
-    setDateFrom("");
-    setDateTo("");
   }
 
   function updateRecord(recordId: string, updater: (record: CaseRecord) => CaseRecord) {
@@ -268,23 +293,11 @@ export function CaseTable({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
-            <StatusFilter value={status} onChange={setStatus} />
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setFiltersOpen((current) => !current)}
-                aria-expanded={filtersOpen}
-              >
-                <SlidersHorizontal className="h-4 w-4" />
-                Filters
-                {activeFilterCount > 0 ? <Badge variant="pink">{activeFilterCount}</Badge> : null}
+            {activeFilterCount > 0 ? (
+              <Button variant="ghost" onClick={clearFilters}>
+                Clear column filters
               </Button>
-              {activeFilterCount > 0 ? (
-                <Button variant="ghost" onClick={clearFilters}>
-                  Clear
-                </Button>
-              ) : null}
-            </div>
+            ) : null}
             <p className="text-sm text-muted-foreground lg:ml-auto">
               {status === "all" ? (
                 <>Showing {filteredRecords.length} of {workingRecords.length} cases</>
@@ -300,71 +313,13 @@ export function CaseTable({
           </div>
           {saveMessage ? <p className="text-sm font-medium text-pink-500">{saveMessage}</p> : null}
 
-          {filtersOpen ? (
-            <div className="grid gap-3 rounded-lg border bg-muted/20 p-3 md:grid-cols-3 xl:grid-cols-5">
-              <Select value={attorney} onChange={(event) => setAttorney(event.target.value)} aria-label="Attorney">
-                <option value="all">All attorneys</option>
-                {attorneys.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </Select>
-              <Select value={paralegal} onChange={(event) => setParalegal(event.target.value)} aria-label="Paralegal">
-                <option value="all">All paralegals</option>
-                {paralegals.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-              </Select>
-              <Select value={stage} onChange={(event) => setStage(event.target.value)} aria-label="Stage">
-                <option value="all">All stages</option>
-                {CASE_STAGE_OPTIONS.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </Select>
-              <Select value={caseType} onChange={(event) => setCaseType(event.target.value)} aria-label="Type">
-                <option value="all">All types</option>
-                {CASE_TYPE_OPTIONS.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </Select>
-              <Select value={quality} onChange={(event) => setQuality(event.target.value)} aria-label="Quality">
-                <option value="all">All quality</option>
-                <option value="missing">Missing fields</option>
-                <option value="stale">Stale cases</option>
-              </Select>
-              <Select value={expectedLitigation} onChange={(event) => setExpectedLitigation(event.target.value)} aria-label="Expected litigation">
-                <option value="all">All litigation status</option>
-                {EXPECTED_LITIGATION_OPTIONS.map((item) => (
-                  <option key={item} value={item}>
-                    {item}
-                  </option>
-                ))}
-              </Select>
-              <Select value={quarter} onChange={(event) => setQuarter(event.target.value)} aria-label="Target quarter">
-                <option value="all">All target quarters</option>
-                {quarters.map((item) => (
-                  <option key={item} value={item ?? ""}>
-                    {item}
-                  </option>
-                ))}
-              </Select>
-              <FilterDateRange
-                label="Date signed"
-                from={dateFrom}
-                to={dateTo}
-                onFromChange={setDateFrom}
-                onToChange={setDateTo}
-                className="md:col-span-2 xl:col-span-2"
-              />
+          {needsAttentionCount > 0 ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+              <span className="font-semibold">{needsAttentionCount} case{needsAttentionCount === 1 ? "" : "s"}</span> below 85% complete — sort by{" "}
+              <strong>% Complete</strong> (lowest first). Use column header dropdowns to filter.
             </div>
           ) : null}
+
         </div>
 
         <div className="mt-4 rounded-lg border bg-white">
@@ -384,25 +339,117 @@ export function CaseTable({
               className="max-h-[calc(100vh-23rem)] min-h-[28rem] overflow-auto"
               onScroll={(event) => syncScroll(event, topScrollRef)}
             >
-          <Table ref={tableRef} className="min-w-[2040px] table-fixed">
+          <Table ref={tableRef} className="min-w-[2140px] table-fixed">
             <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
               <TableRow>
-                <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-0 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
-                <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-28 z-40 w-44 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
-                <TableHead className="sticky left-72 z-40 w-40 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]">Attorney</TableHead>
-                <TableHead className="w-36">Paralegal</TableHead>
+                <SortableHead label="% Complete" sortKey="completion" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-0 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
+                <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-28 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
+                <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-56 z-40 w-44 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
+                <TableHead className="sticky left-[25rem] z-40 w-40 bg-slate-50 align-top shadow-[1px_0_0_0_hsl(var(--border))]">
+                  {viewer.canViewAllCases ? (
+                    <HeaderFilter
+                      label="Attorney"
+                      value={attorney}
+                      onChange={setAttorney}
+                      options={[
+                        { value: "all", label: "All" },
+                        ...attorneys.map((item) => ({ value: item.id, label: item.name })),
+                      ]}
+                    />
+                  ) : (
+                    <span className="text-xs font-semibold uppercase text-muted-foreground">Attorney</span>
+                  )}
+                </TableHead>
+                <TableHead className="w-36 align-top">
+                  <HeaderFilter
+                    label="Paralegal"
+                    value={paralegal}
+                    onChange={setParalegal}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...paralegals.map((item) => ({ value: item.id, label: item.name })),
+                    ]}
+                  />
+                </TableHead>
                 <SortableHead label="Date Signed" sortKey="dateSigned" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-32" />
                 <SortableHead label="DOL" sortKey="dol" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-32" />
-                <TableHead className="w-28">Status</TableHead>
-                <TableHead className="w-36">Type</TableHead>
-                <TableHead className="w-40">Liability</TableHead>
-                <TableHead className="w-28">Quarter</TableHead>
-                <TableHead className="w-32">Case Size</TableHead>
+                <TableHead className="w-32 align-top">
+                  <HeaderFilter
+                    label="Status"
+                    value={status}
+                    onChange={(value) => setStatus(value as CasePipelineFilter)}
+                    options={statusFilterOptions}
+                  />
+                </TableHead>
+                <TableHead className="w-36 align-top">
+                  <HeaderFilter
+                    label="Type"
+                    value={caseType}
+                    onChange={setCaseType}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...CASE_TYPE_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="w-40 align-top">
+                  <HeaderFilter
+                    label="Liability"
+                    value={liability}
+                    onChange={setLiability}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...LIABILITY_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="w-32 align-top">
+                  <HeaderFilter
+                    label="Quarter"
+                    value={quarter}
+                    onChange={setQuarter}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...quarters.map((item) => ({ value: item ?? "", label: item ?? "" })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="w-32 align-top">
+                  <HeaderFilter
+                    label="Case Size"
+                    value={caseSize}
+                    onChange={setCaseSize}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...CASE_SIZE_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
                 <SortableHead label="Minimum Value" sortKey="minimumValue" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
                 <TableHead className="w-32">Referral Fee</TableHead>
                 <SortableHead label="Policy Limits" sortKey="policyLimits" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
-                <TableHead className="w-36">Stage</TableHead>
-                <TableHead className="w-44">Expected Lit</TableHead>
+                <TableHead className="w-36 align-top">
+                  <HeaderFilter
+                    label="Stage"
+                    value={stage}
+                    onChange={setStage}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...CASE_STAGE_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="w-44 align-top">
+                  <HeaderFilter
+                    label="Expected Lit"
+                    value={expectedLitigation}
+                    onChange={setExpectedLitigation}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...EXPECTED_LITIGATION_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
                 <TableHead className="w-28">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -413,10 +460,13 @@ export function CaseTable({
                 return (
                   <TableRow key={record.shared.id}>
                     <TableCell className="sticky left-0 z-10 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
+                      <CaseCompletionCell record={record} settings={settings} prominent />
+                    </TableCell>
+                    <TableCell className="sticky left-28 z-10 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
                       <CaseNumberLink caseId={record.shared.id} caseNumber={record.shared.caseNumber} />
                     </TableCell>
-                    <TableCell className="sticky left-28 z-10 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.shared.clientName}</TableCell>
-                    <TableCell className="sticky left-72 z-10 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.attorney.name}</TableCell>
+                    <TableCell className="sticky left-56 z-10 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.shared.clientName}</TableCell>
+                    <TableCell className="sticky left-[25rem] z-10 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.attorney.name}</TableCell>
                     <TableCell>{record.paralegal.name}</TableCell>
                     <TableCell>{formatDate(record.shared.dateSigned)}</TableCell>
                     <TableCell>{formatOptionalDate(record.shared.dateOfIncident)}</TableCell>
@@ -515,88 +565,6 @@ export function CaseTable({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-function StatusFilter({
-  value,
-  onChange,
-}: {
-  value: "all" | CaseStatus;
-  onChange: (value: "all" | CaseStatus) => void;
-}) {
-  const options: Array<{ value: "all" | CaseStatus; label: string }> = [
-    { value: "Active", label: "Active" },
-    { value: "Closed", label: "Closed" },
-    { value: "all", label: "All" },
-  ];
-
-  return (
-    <div
-      className="inline-flex items-center gap-1 rounded-lg border border-pink-200 bg-pink-50/60 p-1"
-      role="group"
-      aria-label="Case status"
-    >
-      <span className="px-2 text-xs font-semibold uppercase tracking-wide text-pink-700">Status</span>
-      {options.map((option) => {
-        const isSelected = value === option.value;
-        return (
-          <Button
-            key={option.value}
-            type="button"
-            size="sm"
-            variant={isSelected ? "pink" : "ghost"}
-            className={cn(
-              "h-8 px-3",
-              !isSelected && "text-muted-foreground hover:bg-white/80 hover:text-navy-950",
-            )}
-            aria-pressed={isSelected}
-            onClick={() => onChange(option.value)}
-          >
-            {option.label}
-          </Button>
-        );
-      })}
-    </div>
-  );
-}
-
-function FilterDateRange({
-  label,
-  from,
-  to,
-  onFromChange,
-  onToChange,
-  className,
-}: {
-  label: string;
-  from: string;
-  to: string;
-  onFromChange: (value: string) => void;
-  onToChange: (value: string) => void;
-  className?: string;
-}) {
-  const fromId = "case-filter-date-from";
-  const toId = "case-filter-date-to";
-
-  return (
-    <div className={cn("flex flex-col gap-1.5", className)}>
-      <span className="text-xs font-semibold text-navy-950">{label}</span>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="flex flex-col gap-1">
-          <label htmlFor={fromId} className="text-xs text-muted-foreground">
-            From
-          </label>
-          <Input id={fromId} type="date" value={from} onChange={(event) => onFromChange(event.target.value)} />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor={toId} className="text-xs text-muted-foreground">
-            To
-          </label>
-          <Input id={toId} type="date" value={to} onChange={(event) => onToChange(event.target.value)} />
-        </div>
-      </div>
-    </div>
   );
 }
 

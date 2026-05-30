@@ -1,15 +1,11 @@
 import { GoalsView } from "@/components/goals/goals-view";
 import { PageHeader } from "@/components/layout/page-header";
-import { dataRepository } from "@/lib/data/repository";
+import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 
 export const dynamic = "force-dynamic";
 
 export default async function GoalsPage() {
-  const [records, goals, users] = await Promise.all([
-    dataRepository.getCases(),
-    dataRepository.getAttorneyGoals(),
-    dataRepository.getUsers(),
-  ]);
+  const { records, goals, users } = await loadViewerCaseBundle();
 
   return (
     <>

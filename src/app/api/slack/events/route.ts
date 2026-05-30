@@ -94,23 +94,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
-  const parsedUpdate = parseSlackThreadUpdate(event.text);
-  if (!parsedUpdate) {
-    // Ignore normal chatter in threads. We only respond when the message looks like a case-tracker update.
+  const mapping = await findCaseForSlackThread(event.channel, event.thread_ts);
+  if (!mapping?.caseId) {
+    // Only respond in threads that are already linked to a reminder the bot sent.
     return NextResponse.json({ ok: true });
   }
 
-  const mapping = await findCaseForSlackThread(event.channel, event.thread_ts);
-  if (!mapping?.caseId) {
-    console.warn("Slack thread reply: no case linked to thread", {
-      channel: event.channel,
-      threadTs: event.thread_ts,
-    });
-    await postSlackMessage({
-      channel: event.channel,
-      threadTs: event.thread_ts,
-      text: "Could not link this thread to a case reminder. Ask an admin to re-send the reminder from the case tracker.",
-    }).catch(() => undefined);
+  const parsedUpdate = parseSlackThreadUpdate(event.text);
+  if (!parsedUpdate) {
+    // Ignore normal chatter in threads. We only respond when the message looks like a case-tracker update.
     return NextResponse.json({ ok: true });
   }
 

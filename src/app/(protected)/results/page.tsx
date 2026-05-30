@@ -1,20 +1,20 @@
 import { PageHeader } from "@/components/layout/page-header";
 import { ResultsTable } from "@/components/results/results-table";
-import { dataRepository } from "@/lib/data/repository";
+import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 
 export const dynamic = "force-dynamic";
 
 export default async function ResultsPage() {
-  const [records, users] = await Promise.all([dataRepository.getCases(), dataRepository.getUsers()]);
+  const { records, users, settings, viewer } = await loadViewerCaseBundle();
 
   return (
     <>
       <PageHeader
         eyebrow="Results"
         title="Settlement and disbursement tracker"
-        description="Track release signed, closing signed, check deposited, check disbursed, result quarter, and disbursement timing across the firm."
+        description="Track release signed, closing signed, check deposited, check disbursed, result quarter, and disbursement timing."
       />
-      <ResultsTable records={records} users={users} />
+      <ResultsTable records={records} users={users} settings={settings} viewer={viewer} />
     </>
   );
 }
