@@ -10,7 +10,9 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { AttorneyScoreRollupCard } from "@/components/attorney-score/attorney-score-rollup";
 import { MetricCard } from "@/components/dashboard/metric-card";
+import { type ViewerContext } from "@/lib/auth/access";
 import { getAttorneyGoalProgress, getDashboardMetrics, getDataQualityFlags } from "@/lib/calculations";
 import { type AppUser, type AttorneyGoal, type CaseRecord, type CaseTrackerSettings } from "@/lib/types";
 import { formatCurrency, percent } from "@/lib/utils";
@@ -20,11 +22,13 @@ export function DashboardView({
   goals,
   settings,
   users,
+  viewer,
 }: {
   records: CaseRecord[];
   goals: AttorneyGoal[];
   settings: CaseTrackerSettings;
   users: AppUser[];
+  viewer: ViewerContext;
 }) {
   const metrics = getDashboardMetrics(records, settings);
   const goalProgress = getAttorneyGoalProgress(records, goals);
@@ -79,12 +83,34 @@ export function DashboardView({
           detail="Quarter, minimum value, recent activity"
         />
         <MetricCard
+          icon={TimerReset}
+          label="Validation overdue"
+          value={String(metrics.casesWithOutdatedValidation)}
+          detail="Liability, quarter, minimum, or policy limits >90d"
+        />
+        <MetricCard
           icon={Sparkles}
           label="Stage suggestions"
           value={String(metrics.stageSuggestionsOpen)}
           detail="Signals awaiting attorney confirmation"
         />
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Attorney score</CardTitle>
+          <CardDescription>
+            Average case score across active matters — 40% completeness, 60% fields validated within 90 days.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <AttorneyScoreRollupCard
+            records={records}
+            users={users}
+            highlightAttorneyId={viewer.isAttorney ? viewer.contactId : null}
+          />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <Card>

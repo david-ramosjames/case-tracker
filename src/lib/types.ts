@@ -118,6 +118,10 @@ export type TrackerEntry = {
   attorneyNotes: string;
   managerNotes: string;
   lastReviewedAt: string | null;
+  liabilityValidatedAt: string | null;
+  targetResolutionQuarterValidatedAt: string | null;
+  minimumValueValidatedAt: string | null;
+  policyLimitsValidatedAt: string | null;
   isActive: boolean;
   settledAmount: number | null;
   disbursedAmount: number | null;
@@ -139,7 +143,8 @@ export type SlackReminderReason =
   | "missing_quarter"
   | "missing_minimum_value"
   | "sources_lit_stale"
-  | "missing_fields";
+  | "missing_fields"
+  | "validation_stale";
 
 export type CaseRecord = {
   shared: SharedCase;
@@ -266,5 +271,6 @@ export type DashboardMetrics = {
   casesMissingRequiredFields: number;
   casesNotReviewedRecently: number;
   casesNeedingQuarterlyCheckIn: number;
+  casesWithOutdatedValidation: number;
   stageSuggestionsOpen: number;
 };

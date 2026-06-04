@@ -11,22 +11,61 @@ import {
 export const CASE_STATUS_OPTIONS = ["Active", "Closed"] satisfies CaseStatus[];
 
 export const CASE_TYPE_OPTIONS = [
-  "Car",
-  "Premises",
-  "Trucking",
+  "Auto Accident",
+  "Commercial / 18 Wheeler",
+  "Dog Bite",
+  "Pedestrian / Bicycle / Scooter",
+  "Premises Liability",
+  "Sexual Assault / Child Abuse",
   "Work Injury",
   "Wrongful Death",
-  "Dog Bite",
-  "Motorcycle",
-  "Bicycle",
-  "Products",
-  "Assault",
-  "Sexual Assault",
-  "Child Abuse",
-  "Medmal",
-  "Other",
-  "Gun Shot",
+  "Other Injury",
 ] as const;
+
+/** Maps CallRail, DocketFlow, and legacy tracker values to a standard case type. */
+export function normalizeCaseType(value: string | null | undefined): (typeof CASE_TYPE_OPTIONS)[number] | string {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "Other Injury";
+
+  const normalized = trimmed.toLowerCase();
+  const exact = CASE_TYPE_OPTIONS.find((option) => option.toLowerCase() === normalized);
+  if (exact) return exact;
+
+  if (normalized === "car" || normalized === "auto" || normalized.includes("auto accident")) return "Auto Accident";
+  if (normalized.includes("commercial") || normalized.includes("18 wheeler") || normalized.includes("truck")) {
+    return "Commercial / 18 Wheeler";
+  }
+  if (normalized.includes("dog")) return "Dog Bite";
+  if (
+    normalized.includes("pedestrian") ||
+    normalized.includes("bicycle") ||
+    normalized.includes("scooter") ||
+    normalized.includes("motorcycle")
+  ) {
+    return "Pedestrian / Bicycle / Scooter";
+  }
+  if (normalized.includes("premises")) return "Premises Liability";
+  if (normalized.includes("sexual") || normalized.includes("child")) return "Sexual Assault / Child Abuse";
+  if (normalized.includes("work")) return "Work Injury";
+  if (normalized.includes("wrongful")) return "Wrongful Death";
+  if (normalized === "other" || normalized.includes("other injury")) return "Other Injury";
+
+  const legacyMap: Record<string, (typeof CASE_TYPE_OPTIONS)[number]> = {
+    car: "Auto Accident",
+    premises: "Premises Liability",
+    trucking: "Commercial / 18 Wheeler",
+    motorcycle: "Pedestrian / Bicycle / Scooter",
+    bicycle: "Pedestrian / Bicycle / Scooter",
+    products: "Other Injury",
+    assault: "Other Injury",
+    medmal: "Other Injury",
+    "gun shot": "Other Injury",
+    other: "Other Injury",
+  };
+  if (legacyMap[normalized]) return legacyMap[normalized];
+
+  return trimmed;
+}
 
 export const LIABILITY_OPTIONS = ["Accepted 100%", "50/50", "Pending", "Denied - Dispute", "Denied", "N/A"] as const;
 

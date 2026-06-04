@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AttorneyGoalsManager } from "@/components/settings/attorney-goals-manager";
+import { AttorneyScoreExplainer } from "@/components/attorney-score/attorney-score";
 import { BackfillImportCard } from "@/components/settings/backfill-import-card";
 import { SlackSyncCard } from "@/components/settings/slack-sync-card";
 import { type AppUser, type AttorneyGoal, type CaseTrackerSettings } from "@/lib/types";
@@ -25,6 +26,16 @@ export function SettingsView({
         <SlackSyncCard />
 
         <AttorneyGoalsManager users={users} goals={goals} />
+
+        <Card>
+          <CardHeader>
+            <CardTitle>How attorney score is calculated</CardTitle>
+            <CardDescription>Case-level scoring rolled up per attorney on the dashboard.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AttorneyScoreExplainer />
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader>

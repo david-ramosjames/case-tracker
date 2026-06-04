@@ -23,6 +23,8 @@ import {
   RELEASE_STATUS_OPTIONS,
   getTargetPeriodOptions,
 } from "@/lib/case-options";
+import { AttorneyScoreBreakdown } from "@/components/attorney-score/attorney-score";
+import { getCaseAttorneyScore, getValidationFieldLabel } from "@/lib/attorney-score";
 import { getDataQualityFlags, getFeePercent, getOpenStageSuggestions, getProjectedFeeValue, needsQuarterlyCheckIn } from "@/lib/calculations";
 import { type SessionUser } from "@/lib/auth/types";
 import { formatSlackChannelLabel, getSlackChannelArchiveUrl } from "@/lib/slack/links";
@@ -82,6 +84,7 @@ export function CaseDetailView({
   const quarterOptions = useMemo(() => getTargetPeriodOptions(), []);
   const record = useMemo(() => ({ ...initialRecord, shared, tracker }), [initialRecord, shared, tracker]);
   const flags = getDataQualityFlags(record, settings);
+  const attorneyScore = getCaseAttorneyScore(record);
   const openStageSuggestions = getOpenStageSuggestions(record);
   const quarterlyCheckInDue = needsQuarterlyCheckIn(record);
   const slackChannelUrl = slackChannel ? getSlackChannelArchiveUrl(slackChannel) : null;
@@ -422,6 +425,27 @@ export function CaseDetailView({
                     </Button>
                   </div>
                 </div>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {attorneyScore.outdatedValidationFields.length > 0 ? (
+          <Card className="border-red-200 bg-red-50/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-red-900">
+                <ShieldAlert className="h-5 w-5" />
+                Validation overdue
+              </CardTitle>
+              <CardDescription>
+                Liability, quarter, minimum value, and policy limits must be confirmed or updated every 90 days.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="flex flex-wrap gap-2">
+              {attorneyScore.outdatedValidationFields.map((fieldId) => (
+                <Badge key={fieldId} variant="danger">
+                  {getValidationFieldLabel(fieldId)}
+                </Badge>
               ))}
             </CardContent>
           </Card>
@@ -896,6 +920,16 @@ export function CaseDetailView({
             <ResultStep label="Closing" value={tracker.result.closingStatus} complete={tracker.result.closingStatus === "Signed"} />
             <ResultStep label="Check" value={tracker.result.checkStatus} complete={tracker.result.checkStatus === "Deposited"} />
             <ResultStep label="Disbursed" value={tracker.result.disbursedStatus} complete={tracker.result.disbursedStatus === "Yes"} />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Attorney score</CardTitle>
+            <CardDescription>{attorneyScore.percent}% — contributes to your dashboard rollup.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AttorneyScoreBreakdown record={record} />
           </CardContent>
         </Card>
 

@@ -1,4 +1,4 @@
-import { CASE_TYPE_OPTIONS, normalizeTargetQuarter } from "@/lib/case-options";
+import { CASE_TYPE_OPTIONS, normalizeCaseType, normalizeTargetQuarter } from "@/lib/case-options";
 import { cleanCaseNumber, getCsvCell, hasCsvHeader, parseCsv } from "@/lib/csv/parse";
 import {
   type CaseStage,
@@ -251,27 +251,6 @@ function normalizeExpectedLitigation(value: string, stage: CaseStage): ExpectedL
   if (normalized === "lit" || normalized.includes("litigation") || stage === "Lit") return "Lit";
   if (normalized.includes("expected") || normalized === "expect") return "Expect";
   return "Pre";
-}
-
-function normalizeCaseType(value: string) {
-  const normalized = value.trim().toLowerCase();
-  const matched = CASE_TYPE_OPTIONS.find((option) => option.toLowerCase() === normalized);
-  if (matched) return matched;
-  if (normalized === "auto" || normalized.includes("car")) return "Car";
-  if (normalized.includes("premises")) return "Premises";
-  if (normalized.includes("truck")) return "Trucking";
-  if (normalized.includes("work")) return "Work Injury";
-  if (normalized.includes("wrongful")) return "Wrongful Death";
-  if (normalized.includes("dog")) return "Dog Bite";
-  if (normalized.includes("motorcycle")) return "Motorcycle";
-  if (normalized.includes("bicycle")) return "Bicycle";
-  if (normalized.includes("product")) return "Products";
-  if (normalized.includes("sexual")) return "Sexual Assault";
-  if (normalized.includes("child")) return "Child Abuse";
-  if (normalized.includes("med")) return "Medmal";
-  if (normalized.includes("gun")) return "Gun Shot";
-  if (normalized.includes("assault")) return "Assault";
-  return "Other";
 }
 
 function normalizeCaseSize(value: string) {

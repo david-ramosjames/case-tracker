@@ -8,7 +8,7 @@ import { getCurrentQuarter, percent, getQuarterElapsedPercentage } from "@/lib/u
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
-  const { records, goals, settings, users } = await loadViewerCaseBundle();
+  const { records, goals, settings, users, viewer } = await loadViewerCaseBundle();
 
   return (
     <>
@@ -25,7 +25,7 @@ export default async function DashboardPage() {
           </>
         }
       />
-      <DashboardView records={records} goals={goals} settings={settings} users={users} />
+      <DashboardView records={records} goals={goals} settings={settings} users={users} viewer={viewer} />
     </>
   );
 }

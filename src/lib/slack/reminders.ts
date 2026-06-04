@@ -1,3 +1,4 @@
+import { getOutdatedValidationFields, getValidationFieldLabel } from "@/lib/attorney-score";
 import { getDataQualityFlags, sourcesLitNeedsReview } from "@/lib/calculations";
 import { QUARTERLY_REVIEW_DAYS } from "@/lib/slack/config";
 import { type CaseRecord, type CaseTrackerSettings, type SlackReminderReason } from "@/lib/types";
@@ -15,6 +16,11 @@ export function getSlackReminderReasons(
   if (!tracker.targetResolutionQuarter) reasons.push("missing_quarter");
   if (!tracker.minimumValue) reasons.push("missing_minimum_value");
   if (sourcesLitNeedsReview(record)) reasons.push("sources_lit_stale");
+
+  const outdatedValidation = getOutdatedValidationFields(record);
+  if (outdatedValidation.length > 0) {
+    reasons.push("validation_stale");
+  }
 
   const quarterlyStale = daysSince(tracker.lastQuarterlyCheckInAt) >= QUARTERLY_REVIEW_DAYS;
   if (quarterlyStale && (reasons.includes("missing_quarter") || reasons.includes("missing_minimum_value") || reasons.includes("sources_lit_stale"))) {
@@ -38,6 +44,15 @@ export function buildSlackReminderMessage(record: CaseRecord, reasons: SlackRemi
     `<${caseLink}|Open in Case Tracker>`,
     "",
   ];
+
+  if (reasons.includes("validation_stale")) {
+    const outdated = getOutdatedValidationFields(record);
+    lines.push("*90-day validation overdue* — confirm or update in the tracker:");
+    for (const fieldId of outdated) {
+      lines.push(`• *${getValidationFieldLabel(fieldId)}*`);
+    }
+    lines.push("");
+  }
 
   if (reasons.includes("quarterly_review") || reasons.includes("missing_quarter") || reasons.includes("missing_minimum_value") || reasons.includes("sources_lit_stale")) {
     lines.push("*90-day review* — please confirm or update:");

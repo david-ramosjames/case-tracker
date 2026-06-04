@@ -1,3 +1,4 @@
+import { getOutdatedValidationFields, getValidationFieldLabel } from "@/lib/attorney-score";
 import {
   getCommissionYearEndDate,
   getCommissionYearStartDate,
@@ -76,6 +77,14 @@ export function getDataQualityFlags(
 
   if (needsQuarterlyCheckIn(record)) {
     flags.push({ id: "quarterly-check-in", label: "Quarterly check-in due", severity: "danger" });
+  }
+
+  for (const fieldId of getOutdatedValidationFields(record)) {
+    flags.push({
+      id: `validation-stale-${fieldId}`,
+      label: `${getValidationFieldLabel(fieldId)} needs validation (90d)`,
+      severity: "danger",
+    });
   }
 
   if (getOpenStageSuggestions(record).length > 0) {
@@ -182,6 +191,7 @@ export function getDashboardMetrics(
     casesMissingRequiredFields: records.filter((record) => isMissingInfo(record, settings)).length,
     casesNotReviewedRecently: records.filter((record) => isStale(record, settings)).length,
     casesNeedingQuarterlyCheckIn: records.filter(needsQuarterlyCheckIn).length,
+    casesWithOutdatedValidation: records.filter((record) => getOutdatedValidationFields(record).length > 0).length,
     stageSuggestionsOpen: records.reduce((total, record) => total + getOpenStageSuggestions(record).length, 0),
   };
 }

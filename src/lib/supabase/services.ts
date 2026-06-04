@@ -1,3 +1,4 @@
+import { buildFieldValidationRowPatch } from "@/lib/attorney-score";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { parseCaseBackfillCsv, type ParsedCaseBackfillRow } from "@/lib/csv/case-backfill";
 import { trackerTouchesSourcesLit } from "@/lib/slack/reminders";
@@ -10,7 +11,7 @@ import { describeSlackThreadAppliedLabels, parseSlackThreadUpdate } from "@/lib/
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildTrackerActivityDescription, describeTrackerChanges } from "@/lib/tracker-changes";
-import { CASE_STAGE_OPTIONS, EXPECTED_LITIGATION_OPTIONS } from "@/lib/case-options";
+import { CASE_STAGE_OPTIONS, EXPECTED_LITIGATION_OPTIONS, normalizeCaseType } from "@/lib/case-options";
 import {
   type ActivityLogEntry,
   type AppUser,
@@ -225,7 +226,14 @@ export async function updateTrackerEntry(
     ? { ...input, lastSourcesLitUpdatedAt: input.lastSourcesLitUpdatedAt ?? now }
     : input;
 
-  const payload = trackerUpdateToRow(inputWithSourcesLit, markReviewed);
+  const validationPatch = buildFieldValidationRowPatch(
+    changeInput as Record<string, unknown>,
+    existingTracker,
+    inputWithSourcesLit as Record<string, unknown>,
+    now,
+  );
+
+  const payload = { ...trackerUpdateToRow(inputWithSourcesLit, markReviewed), ...validationPatch };
   const requestedResult = input.result;
   const previousStage = existingTracker?.caseStage;
   const { data, error } = await client
@@ -833,6 +841,10 @@ function rowToTrackerEntry(row: TrackerEntryRow, resultRow: ResultRow | null, su
     attorneyNotes: toString(row.attorney_notes, ""),
     managerNotes: toString(row.manager_notes, ""),
     lastReviewedAt: toStringOrNull(row.last_reviewed_at),
+    liabilityValidatedAt: toStringOrNull(row.liability_validated_at),
+    targetResolutionQuarterValidatedAt: toStringOrNull(row.target_resolution_quarter_validated_at),
+    minimumValueValidatedAt: toStringOrNull(row.minimum_value_validated_at),
+    policyLimitsValidatedAt: toStringOrNull(row.policy_limits_validated_at),
     isActive: toBoolean(row.is_active, true),
     settledAmount: toNumber(resultRow?.settlement_amount),
     disbursedAmount: resultRow?.check_disbursed_at ? toNumber(resultRow?.settlement_amount) : null,
@@ -1131,26 +1143,6 @@ function toDatabaseExpectedLitigation(value: ExpectedLitigationStatus | null | u
     Expect: "Expected litigation",
   };
   return map[value];
-}
-
-function normalizeCaseType(value: string | null | undefined) {
-  const normalized = value?.trim().toLowerCase();
-  if (!normalized) return "Other";
-  if (normalized === "auto" || normalized === "car" || normalized === "auto accident") return "Car";
-  if (normalized.includes("premises")) return "Premises";
-  if (normalized.includes("truck")) return "Trucking";
-  if (normalized.includes("work")) return "Work Injury";
-  if (normalized.includes("wrongful")) return "Wrongful Death";
-  if (normalized.includes("dog")) return "Dog Bite";
-  if (normalized.includes("motorcycle")) return "Motorcycle";
-  if (normalized.includes("bicycle")) return "Bicycle";
-  if (normalized.includes("product")) return "Products";
-  if (normalized === "assault") return "Assault";
-  if (normalized.includes("sexual")) return "Sexual Assault";
-  if (normalized.includes("child")) return "Child Abuse";
-  if (normalized.includes("med")) return "Medmal";
-  if (normalized.includes("gun")) return "Gun Shot";
-  return value ?? "Other";
 }
 
 function normalizeCommentType(value: string | null | undefined): CommentType {

@@ -19,7 +19,8 @@ import {
   LIABILITY_OPTIONS,
   getTargetPeriodOptions,
 } from "@/lib/case-options";
-import { CaseCompletionCell } from "@/components/cases/case-completion-cell";
+import { CaseAttorneyScoreCell } from "@/components/attorney-score/attorney-score";
+import { getCaseAttorneyScore } from "@/lib/attorney-score";
 import { getCaseCompletionScore, getDataQualityFlags } from "@/lib/calculations";
 import { getCasePipelineFilter, type CasePipelineFilter, type ViewerContext } from "@/lib/auth/access";
 import {
@@ -34,7 +35,7 @@ import {
 import { cn, formatDate, formatOptionalDate } from "@/lib/utils";
 import { type ReactNode, type RefObject, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
-type SortKey = "completion" | "caseNumber" | "clientName" | "dateSigned" | "dol" | "minimumValue" | "policyLimits";
+type SortKey = "completion" | "attorneyScore" | "caseNumber" | "clientName" | "dateSigned" | "dol" | "minimumValue" | "policyLimits";
 type SortDirection = "asc" | "desc";
 
 export function CaseTable({
@@ -62,7 +63,7 @@ export function CaseTable({
   const [caseSize, setCaseSize] = useState("all");
   const [expectedLitigation, setExpectedLitigation] = useState("all");
   const [quarter, setQuarter] = useState("all");
-  const [sortKey, setSortKey] = useState<SortKey>("completion");
+  const [sortKey, setSortKey] = useState<SortKey>("attorneyScore");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
@@ -130,6 +131,13 @@ export function CaseTable({
 
         const tieBreak = () => a.shared.caseNumber.localeCompare(b.shared.caseNumber);
 
+        if (sortKey === "attorneyScore") {
+          const aScore = getCaseAttorneyScore(a).percent;
+          const bScore = getCaseAttorneyScore(b).percent;
+          const cmp = aScore - bScore;
+          return cmp !== 0 ? dir * cmp : tieBreak();
+        }
+
         if (sortKey === "completion") {
           const aScore = getCaseCompletionScore(a, settings).percent;
           const bScore = getCaseCompletionScore(b, settings).percent;
@@ -183,7 +191,7 @@ export function CaseTable({
       return;
     }
     setSortKey(nextKey);
-    setSortDirection(nextKey === "clientName" || nextKey === "completion" ? "asc" : "desc");
+    setSortDirection(nextKey === "clientName" || nextKey === "attorneyScore" || nextKey === "completion" ? "asc" : "desc");
   }
 
   useEffect(() => {
@@ -342,7 +350,7 @@ export function CaseTable({
           <Table ref={tableRef} className="min-w-[2140px] table-fixed">
             <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
               <TableRow>
-                <SortableHead label="% Complete" sortKey="completion" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-0 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
+                <SortableHead label="Score" sortKey="attorneyScore" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-0 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
                 <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-28 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
                 <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-56 z-40 w-44 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
                 <TableHead className="sticky left-[25rem] z-40 w-40 bg-slate-50 align-top shadow-[1px_0_0_0_hsl(var(--border))]">
@@ -460,7 +468,7 @@ export function CaseTable({
                 return (
                   <TableRow key={record.shared.id}>
                     <TableCell className="sticky left-0 z-10 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
-                      <CaseCompletionCell record={record} settings={settings} prominent />
+                      <CaseAttorneyScoreCell record={record} prominent />
                     </TableCell>
                     <TableCell className="sticky left-28 z-10 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
                       <CaseNumberLink caseId={record.shared.id} caseNumber={record.shared.caseNumber} />
