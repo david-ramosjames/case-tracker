@@ -11,7 +11,9 @@ import { describeSlackThreadAppliedLabels, parseSlackThreadUpdate } from "@/lib/
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildTrackerActivityDescription, describeTrackerChanges } from "@/lib/tracker-changes";
-import { CASE_STAGE_OPTIONS, EXPECTED_LITIGATION_OPTIONS, normalizeCaseType } from "@/lib/case-options";
+import { CASE_STAGE_OPTIONS, EXPECTED_LITIGATION_OPTIONS, caseTypeFromCasesTable, normalizeCaseType } from "@/lib/case-options";
+import { deriveCaseStatusFromTracker } from "@/lib/case-status";
+import { pickNextScheduledEvents } from "@/lib/docketflow/case-events";
 import {
   type ActivityLogEntry,
   type AppUser,
@@ -22,6 +24,7 @@ import {
   type CaseStatus,
   type CaseTrackerSettings,
   type CaseTrackerSnapshot,
+  type DocketFlowScheduledEvent,
   type CheckStatus,
   type ClosingStatus,
   type CommentType,
@@ -184,6 +187,25 @@ export async function getTrackerEntryByCaseId(caseId: string): Promise<TrackerEn
   return record?.tracker ?? null;
 }
 
+/** Next upcoming DocketFlow calendar rows for a linked case (`case_events`). */
+export async function getNextScheduledDocketFlowEvents(
+  caseId: string,
+  limit = 3,
+): Promise<DocketFlowScheduledEvent[]> {
+  const client = await createSharedDataClient();
+  const { data, error } = await client
+    .from("case_events")
+    .select(
+      "id, case_id, title, date, deadline_end_date, start_date_time, end_date_time, category, event_kind, schedule_kind, included, completed, calendar_origin",
+    )
+    .eq("case_id", caseId)
+    .order("date", { ascending: true })
+    .order("id", { ascending: true });
+
+  if (error) throw error;
+  return pickNextScheduledEvents(data ?? [], limit);
+}
+
 export type TrackerActor = {
   userId?: string;
   userName: string;
@@ -255,6 +277,7 @@ export async function updateTrackerEntry(
       { changedFields },
     );
     if (existingRecord) {
+      await syncDerivedSharedCaseStatus(caseId, tracker);
       try {
         await runSlackTrackerSideEffects(existingRecord, tracker, changeInput, previousStage);
       } catch (error) {
@@ -276,6 +299,7 @@ export async function updateTrackerEntry(
   if (insertError) throw insertError;
   const resultRow = requestedResult ? await upsertResultRow(caseId, toString(inserted.id, ""), requestedResult) : null;
   const tracker = rowToTrackerEntry(inserted as TrackerEntryRow, resultRow, []);
+  await syncDerivedSharedCaseStatus(caseId, tracker);
   const activity = await createActivityEntry(
     caseId,
     "Tracker created",
@@ -383,13 +407,25 @@ export async function importCaseBackfillCsv(
 export async function updateSharedCaseFields(
   caseId: string,
   input: { status?: CaseStatus; caseType?: string; dateSigned?: string; dateOfIncident?: string | null },
+  options?: { explicitStatus?: CaseStatus },
 ) {
   const sharedClient = await createSharedDataClient();
   const trackerClient = await createTrackerClient();
 
-  const payload: { status?: string; case_type?: string; date_of_incident?: string | null } = {};
-  if (input.status) payload.status = input.status === "Closed" ? "archived" : "active";
-  if (input.caseType) payload.case_type = input.caseType;
+  const payload: { status?: string; case_type?: string | null; date_of_incident?: string | null } = {};
+
+  let statusToWrite = options?.explicitStatus;
+  if (!statusToWrite) {
+    const record = await getCaseById(caseId);
+    statusToWrite = record
+      ? deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result.disbursedStatus)
+      : input.status;
+  }
+  if (statusToWrite) payload.status = statusToWrite === "Closed" ? "archived" : "active";
+  if (input.caseType !== undefined) {
+    const trimmed = input.caseType.trim();
+    payload.case_type = trimmed ? normalizeCaseType(trimmed) : null;
+  }
   if (input.dateOfIncident !== undefined) {
     payload.date_of_incident = input.dateOfIncident ? toDateOnly(input.dateOfIncident) : null;
   }
@@ -783,6 +819,7 @@ function rowToCaseRecord(
     assignedContacts.find((contact) => contact.role === "paralegal") ??
     makeTemporaryContact("unassigned-paralegal", toString(trackerRow.paralegal_name, "Unassigned Paralegal"), "paralegal");
   const sharedId = caseRow?.id ?? toString(trackerRow.id, "unlinked-case");
+  const tracker = rowToTrackerEntry(trackerRow, resultRow, suggestionRows);
 
   return {
     shared: {
@@ -791,14 +828,16 @@ function rowToCaseRecord(
       clientName: caseRow?.client_name ?? caseRow?.name ?? toString(trackerRow.client_name_snapshot, "Unknown client"),
       attorneyId: attorneyContact.id,
       paralegalId: paralegalContact.id,
-      status: normalizeCaseStatus(caseRow?.status),
-      caseType: normalizeCaseType(caseRow?.case_type ?? toStringOrNull(trackerRow.case_type)),
+      status: deriveCaseStatusFromTracker(tracker.caseStage, tracker.result.disbursedStatus),
+      caseType: caseTypeFromCasesTable(
+        caseRow ? caseRow.case_type : toStringOrNull(trackerRow.case_type),
+      ),
       dateSigned: normalizeDate(toStringOrNull(trackerRow.date_signed_override) ?? caseRow?.created_at),
       dateOfIncident: normalizeOptionalDate(caseRow?.date_of_incident),
       createdAt: normalizeDate(caseRow?.created_at),
       updatedAt: normalizeDate(caseRow?.updated_at),
     },
-    tracker: rowToTrackerEntry(trackerRow, resultRow, suggestionRows),
+    tracker,
     attorney: contactToUser(attorneyContact),
     paralegal: contactToUser(paralegalContact),
   };
@@ -918,8 +957,6 @@ function mergeTrackerImport(existing: TrackerEntry, patch: TrackerUpdateInput): 
     policyInfoSource: patch.policyInfoSource ?? existing.policyInfoSource,
     expectedLitigation: patch.expectedLitigation ?? existing.expectedLitigation,
     sources: patch.sources ?? existing.sources,
-    litEventsNeeded: patch.litEventsNeeded ?? existing.litEventsNeeded,
-    litEventsTimeline: patch.litEventsTimeline ?? existing.litEventsTimeline,
     injuries: patch.injuries ?? existing.injuries,
     caseDescription: patch.caseDescription ?? existing.caseDescription,
     statusNotes: patch.statusNotes ?? existing.statusNotes,
@@ -959,8 +996,6 @@ function trackerUpdateToRow(input: TrackerUpdateInput, markReviewed = true) {
     policy_info_source: input.policyInfoSource,
     expected_litigation: toDatabaseExpectedLitigation(input.expectedLitigation),
     sources: input.sources,
-    lit_events_needed: input.litEventsNeeded,
-    lit_events_timeline: input.litEventsTimeline,
     injuries: input.injuries,
     case_description: input.caseDescription,
     status_notes: input.statusNotes,
@@ -1073,12 +1108,17 @@ function normalizeCaseStatus(value: string | null | undefined): CaseStatus {
   return normalized === "closed" || normalized === "inactive" || normalized === "disengaged" || normalized === "archived" ? "Closed" : "Active";
 }
 
+async function syncDerivedSharedCaseStatus(caseId: string, tracker: TrackerEntry) {
+  const status = deriveCaseStatusFromTracker(tracker.caseStage, tracker.result.disbursedStatus);
+  await updateSharedCaseFields(caseId, {}, { explicitStatus: status });
+}
+
 function normalizeStage(value: string | null | undefined): CaseStage {
   const normalized = value?.toLowerCase();
   if (normalized === "lit" || normalized === "litigation" || normalized === "litigated") return "Lit";
   if (normalized === "txt" || normalized === "treatment") return "Txt";
   if (normalized === "dmd" || normalized === "demand") return "Dmd";
-  if (normalized === "settled" || normalized === "settlement" || normalized === "set" || normalized === "disbursement") return "Settled";
+  if (normalized === "settled" || normalized === "settlement" || normalized === "set") return "Settled";
   if (normalized === "disengaged" || normalized === "disengaging") return "Disengaged";
   if (normalized === "referred") return "Referred";
   if (normalized === "terminated" || normalized === "closed") return "Terminated";

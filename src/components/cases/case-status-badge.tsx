@@ -1,5 +1,15 @@
 import { Badge } from "@/components/ui/badge";
-import { type CaseStage, type ConfidenceLevel } from "@/lib/types";
+import { deriveCaseStatusFromTracker } from "@/lib/case-status";
+import { type CaseRecord, type CaseStage, type CaseStatus, type ConfidenceLevel } from "@/lib/types";
+
+export function CaseStatusBadge({ status }: { status: CaseStatus }) {
+  return <Badge variant={status === "Active" ? "success" : "secondary"}>{status}</Badge>;
+}
+
+export function DerivedCaseStatusBadge({ record }: { record: Pick<CaseRecord, "tracker"> }) {
+  const status = deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result.disbursedStatus);
+  return <CaseStatusBadge status={status} />;
+}
 
 export function StageBadge({ stage }: { stage: CaseStage }) {
   const variant =

@@ -36,20 +36,6 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
       continue;
     }
 
-    const litNeededMatch = line.match(/^(?:lit events needed|litigation events)\s*:\s*(.+)$/i);
-    if (litNeededMatch) {
-      tracker.litEventsNeeded = litNeededMatch[1];
-      tracker.lastSourcesLitUpdatedAt = new Date().toISOString();
-      continue;
-    }
-
-    const litTimelineMatch = line.match(/^(?:timeline|lit timeline|lit events timeline)\s*:\s*(.+)$/i);
-    if (litTimelineMatch) {
-      tracker.litEventsTimeline = litTimelineMatch[1];
-      tracker.lastSourcesLitUpdatedAt = new Date().toISOString();
-      continue;
-    }
-
     const injuriesMatch = line.match(/^injuries\s*:\s*(.+)$/i);
     if (injuriesMatch) {
       tracker.injuries = injuriesMatch[1];
@@ -89,8 +75,6 @@ export function describeSlackThreadAppliedLabels(patch: TrackerUpdateInput): str
   if (patch.targetResolutionQuarter != null) labels.push("Expected completion quarter");
   if (patch.minimumValue != null) labels.push("Minimum value");
   if (patch.sources != null) labels.push("Sources & litigation detail");
-  if (patch.litEventsNeeded != null) labels.push("Lit events needed");
-  if (patch.litEventsTimeline != null) labels.push("Timeline for lit events");
   if (patch.injuries != null) labels.push("Injuries");
   if (patch.caseDescription != null) labels.push("Case description");
   if (patch.statusNotes != null) labels.push("Status notes");

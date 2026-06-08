@@ -4,7 +4,9 @@ import { PageHeader } from "@/components/layout/page-header";
 import { canViewerAccessCase } from "@/lib/auth/access";
 import { dataRepository } from "@/lib/data/repository";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
+import { getDocketFlowCaseUrl } from "@/lib/docketflow/links";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
+import { isOrphanTrackerRecord } from "@/lib/supabase/services";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,12 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ cas
     dataRepository.getCaseActivity(caseId),
     dataRepository.getSettings(),
   ]);
+
+  const upcomingDocketFlowEvents =
+    record && !isOrphanTrackerRecord(record)
+      ? await dataRepository.getNextScheduledDocketFlowEvents(record.shared.id)
+      : [];
+  const docketFlowCaseUrl = record && !isOrphanTrackerRecord(record) ? getDocketFlowCaseUrl(record.shared.id) : null;
 
   if (!record || !sessionUser || !canViewerAccessCase(record, sessionUser, users, goals)) {
     notFound();
@@ -39,6 +47,8 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ cas
         settings={settings}
         sessionUser={sessionUser}
         slackChannel={slackChannel}
+        upcomingDocketFlowEvents={upcomingDocketFlowEvents}
+        docketFlowCaseUrl={docketFlowCaseUrl}
       />
     </>
   );

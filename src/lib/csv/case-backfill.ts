@@ -2,7 +2,6 @@ import { CASE_TYPE_OPTIONS, normalizeCaseType, normalizeTargetQuarter } from "@/
 import { cleanCaseNumber, getCsvCell, hasCsvHeader, parseCsv } from "@/lib/csv/parse";
 import {
   type CaseStage,
-  type CaseStatus,
   type CheckStatus,
   type ClosingStatus,
   type DisbursedStatus,
@@ -21,7 +20,7 @@ export const CASE_BACKFILL_HEADER_GROUPS = [
   },
   {
     label: "Optional DocketFlow fields (only filled cells update)",
-    headers: ["DOL", "Case Status", "Type"],
+    headers: ["DOL", "Type"],
   },
   {
     label: "Tracker fields",
@@ -35,8 +34,6 @@ export const CASE_BACKFILL_HEADER_GROUPS = [
       "Stage",
       "Expected Lit",
       "Sources",
-      "Lit Events Needed",
-      "Timeline for Lit Events",
       "Injuries",
       "Description",
       "Status Notes",
@@ -67,7 +64,6 @@ export const CASE_BACKFILL_ALL_HEADERS = CASE_BACKFILL_HEADER_GROUPS.flatMap((gr
 export type ParsedCaseBackfillRow = {
   caseNumber: string;
   shared: {
-    status?: CaseStatus;
     caseType?: string;
     dateOfIncident?: string | null;
   };
@@ -89,11 +85,9 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       if (!caseNumber) return null;
 
       const shared: ParsedCaseBackfillRow["shared"] = {};
-      const caseStatus = getCsvCell(row, headers, "Case Status");
       const caseType = getCsvCell(row, headers, "Type");
       const dol = getCsvCell(row, headers, "DOL");
 
-      if (caseStatus) shared.status = normalizeCaseStatus(caseStatus);
       if (caseType) shared.caseType = normalizeCaseType(caseType);
       if (dol) shared.dateOfIncident = parseOptionalDate(dol);
 
@@ -136,12 +130,6 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
         tracker.policyInfoSource = sources;
         tracker.sourceOfEstimate = sources;
       }
-
-      const litEventsNeeded = getCsvCell(row, headers, "Lit Events Needed");
-      if (litEventsNeeded) tracker.litEventsNeeded = litEventsNeeded;
-
-      const litTimeline = getCsvCell(row, headers, "Timeline for Lit Events");
-      if (litTimeline) tracker.litEventsTimeline = litTimeline;
 
       const injuries = getCsvCell(row, headers, "Injuries");
       if (injuries) tracker.injuries = injuries;
@@ -225,13 +213,6 @@ function parseOptionalDate(value: string) {
 
   const parsed = new Date(trimmed);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
-}
-
-function normalizeCaseStatus(value: string): CaseStatus {
-  const normalized = value.trim().toLowerCase();
-  return normalized === "closed" || normalized === "inactive" || normalized === "disengaged" || normalized === "terminated"
-    ? "Closed"
-    : "Active";
 }
 
 function normalizeStage(value: string): CaseStage {

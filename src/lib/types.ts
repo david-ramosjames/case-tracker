@@ -244,8 +244,6 @@ export type TrackerUpdateInput = Partial<
     | "policyInfoSource"
     | "expectedLitigation"
     | "sources"
-    | "litEventsNeeded"
-    | "litEventsTimeline"
     | "injuries"
     | "caseDescription"
     | "statusNotes"
@@ -256,6 +254,23 @@ export type TrackerUpdateInput = Partial<
     | "forecastNotes"
   >
 >;
+
+/** Upcoming row from shared DocketFlow `case_events` (read-only in the tracker). */
+export type DocketFlowScheduledEvent = {
+  id: string;
+  caseId: string;
+  title: string;
+  date: string;
+  deadlineEndDate: string | null;
+  startDateTime: string | null;
+  endDateTime: string | null;
+  category: string | null;
+  eventKind: string | null;
+  scheduleKind: "deadline" | "meeting";
+  included: boolean;
+  completed: boolean;
+  calendarOrigin: "docketflow" | "google_ics_mirror";
+};
 
 export type DataQualityFlag = {
   id: string;

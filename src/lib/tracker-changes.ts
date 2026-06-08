@@ -17,8 +17,6 @@ const TRACKER_FIELD_LABELS: Record<string, string> = {
   policyInfoSource: "Source of policy information",
   expectedLitigation: "Expected litigation",
   sources: "Sources",
-  litEventsNeeded: "Lit events needed",
-  litEventsTimeline: "Timeline for lit events",
   injuries: "Injuries",
   caseDescription: "Description",
   statusNotes: "Status",

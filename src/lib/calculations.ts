@@ -19,7 +19,7 @@ import { daysSince, getCurrentQuarter, getQuarterElapsedPercentage, getYearElaps
 import { QUARTERLY_REVIEW_DAYS, SOURCES_LIT_REVIEW_DAYS } from "@/lib/slack/config";
 
 const QUARTERLY_CHECK_IN_FIELDS = ["targetResolutionQuarter", "minimumValue"] as const;
-const SOURCES_LIT_FIELDS = ["sources", "litEventsNeeded", "litEventsTimeline", "injuries", "caseDescription"] as const;
+const SOURCES_LIT_FIELDS = ["sources", "injuries", "caseDescription"] as const;
 
 export function sourcesLitNeedsReview(record: CaseRecord) {
   const { tracker } = record;

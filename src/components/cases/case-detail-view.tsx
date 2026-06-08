@@ -9,12 +9,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { ConfidenceBadge, StageBadge } from "@/components/cases/case-status-badge";
+import { ConfidenceBadge, DerivedCaseStatusBadge, StageBadge } from "@/components/cases/case-status-badge";
+import { NextScheduledEventsCard } from "@/components/cases/next-scheduled-events-card";
+import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import {
   CASE_SIZE_OPTIONS,
   CASE_STAGE_OPTIONS,
-  CASE_STATUS_OPTIONS,
-  CASE_TYPE_OPTIONS,
+  caseTypeSelectOptions,
   CHECK_STATUS_OPTIONS,
   CLOSING_STATUS_OPTIONS,
   DISBURSED_STATUS_OPTIONS,
@@ -32,8 +33,8 @@ import {
   type ActivityLogEntry,
   type CaseRecord,
   type CaseSlackChannel,
-  type CaseStatus,
   type CaseTrackerSettings,
+  type DocketFlowScheduledEvent,
   type CheckStatus,
   type ClosingStatus,
   type CommentType,
@@ -53,6 +54,8 @@ export function CaseDetailView({
   settings,
   sessionUser,
   slackChannel,
+  upcomingDocketFlowEvents,
+  docketFlowCaseUrl,
 }: {
   initialRecord: CaseRecord;
   initialComments: TrackerComment[];
@@ -60,6 +63,8 @@ export function CaseDetailView({
   settings: CaseTrackerSettings;
   sessionUser: SessionUser;
   slackChannel: CaseSlackChannel | null;
+  upcomingDocketFlowEvents: DocketFlowScheduledEvent[];
+  docketFlowCaseUrl: string | null;
 }) {
   const [shared, setShared] = useState(initialRecord.shared);
   const [tracker, setTracker] = useState(initialRecord.tracker);
@@ -91,7 +96,16 @@ export function CaseDetailView({
   const slackChannelLabel = slackChannel ? formatSlackChannelLabel(slackChannel.slackChannelName) : null;
 
   function updateField<K extends keyof TrackerEntry>(key: K, value: TrackerEntry[K]) {
-    setTracker((current) => ({ ...current, [key]: value }));
+    setTracker((current) => {
+      const next = { ...current, [key]: value };
+      if (key === "caseStage") {
+        setShared((s) => ({
+          ...s,
+          status: deriveCaseStatusFromTracker(next.caseStage, next.result.disbursedStatus),
+        }));
+      }
+      return next;
+    });
   }
 
   function updateShared<K extends keyof typeof shared>(key: K, value: (typeof shared)[K]) {
@@ -121,14 +135,20 @@ export function CaseDetailView({
       if (key === "checkStatus") result.checkDepositedAt = value === "Deposited" ? (result.checkDepositedAt ?? now) : null;
       if (key === "disbursedStatus") result.checkDisbursedAt = value === "Yes" ? (result.checkDisbursedAt ?? now) : null;
 
-      return { ...current, result };
+      const next = { ...current, result };
+      if (key === "disbursedStatus") {
+        setShared((s) => ({
+          ...s,
+          status: deriveCaseStatusFromTracker(next.caseStage, next.result.disbursedStatus),
+        }));
+      }
+      return next;
     });
   }
 
   async function persistTracker(nextTracker: TrackerEntry, options?: { markReviewed?: boolean }) {
     const payload = {
       shared: {
-        status: shared.status,
         caseType: shared.caseType,
         dateOfIncident: shared.dateOfIncident,
       },
@@ -149,8 +169,6 @@ export function CaseDetailView({
         policyInfoSource: nextTracker.policyInfoSource,
         expectedLitigation: nextTracker.expectedLitigation,
         sources: nextTracker.sources,
-        litEventsNeeded: nextTracker.litEventsNeeded,
-        litEventsTimeline: nextTracker.litEventsTimeline,
         injuries: nextTracker.injuries,
         caseDescription: nextTracker.caseDescription,
         statusNotes: nextTracker.statusNotes,
@@ -197,6 +215,10 @@ export function CaseDetailView({
         ...savedTracker,
         result: savedTracker.result ?? current.result,
         detectedStageSignals: current.detectedStageSignals,
+      }));
+      setShared((current) => ({
+        ...current,
+        status: deriveCaseStatusFromTracker(savedTracker.caseStage, savedTracker.result.disbursedStatus),
       }));
       if (savedActivity) {
         setActivity((current) => [savedActivity, ...current]);
@@ -394,6 +416,10 @@ export function CaseDetailView({
           </CardContent>
         </Card>
 
+        {!isOrphanTracker ? (
+          <NextScheduledEventsCard events={upcomingDocketFlowEvents} docketFlowCaseUrl={docketFlowCaseUrl} />
+        ) : null}
+
         {openStageSuggestions.length > 0 ? (
           <Card className="border-pink-500/40 bg-pink-100/35">
             <CardHeader>
@@ -491,9 +517,15 @@ export function CaseDetailView({
                 <Info label="Client" value={record.shared.clientName} />
                 <Info label="Paralegal" value={record.paralegal.name} />
                 <Info label="Date Signed" value={formatDate(record.shared.dateSigned)} />
-                <Info label="DOL" value={formatOptionalDate(record.shared.dateOfIncident)} />
-                <Info label="Status" value={record.shared.status} />
-                <Info label="Type" value={record.shared.caseType} />
+                <Info label="DOL" value={formatOptionalDate(record.shared.dateOfIncident) || "Not set — edit to add"} />
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</div>
+                  <div className="mt-1">
+                    <DerivedCaseStatusBadge record={{ tracker }} />
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground">Set automatically from stage and disbursement.</p>
+                </div>
+                <Info label="Type" value={record.shared.caseType || "Not set — edit to add"} />
                 <Info label="Liability" value={tracker.liability ?? "Not set"} />
                 <Info label="Quarter" value={tracker.targetResolutionQuarter ?? "Not set"} />
                 <Info label="Case Size" value={tracker.caseSize ?? "Not set"} />
@@ -521,18 +553,15 @@ export function CaseDetailView({
                     onChange={(event) => updateShared("dateSigned", fromDateInput(event.target.value) ?? shared.dateSigned)}
                   />
                 </Field>
-                <Field label="Status">
-                  <Select value={shared.status} onChange={(event) => updateShared("status", event.target.value as CaseStatus)}>
-                    {CASE_STATUS_OPTIONS.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </Select>
+                <Field label="Status (auto)">
+                  <div className="flex min-h-10 items-center">
+                    <DerivedCaseStatusBadge record={{ tracker }} />
+                  </div>
                 </Field>
                 <Field label="Type">
                   <Select value={shared.caseType} onChange={(event) => updateShared("caseType", event.target.value)}>
-                    {CASE_TYPE_OPTIONS.map((type) => (
+                    <option value="">Select type</option>
+                    {caseTypeSelectOptions(shared.caseType).map((type) => (
                       <option key={type} value={type}>
                         {type}
                       </option>
@@ -673,8 +702,6 @@ export function CaseDetailView({
             {!isSourcesEditing ? (
               <>
                 <LongInfo label="Sources" value={tracker.sources} />
-                <LongInfo label="Lit Events Needed" value={tracker.litEventsNeeded} />
-                <LongInfo label="Timeline for Lit Events" value={tracker.litEventsTimeline} />
                 <LongInfo label="Injuries" value={tracker.injuries} />
                 <LongInfo className="md:col-span-2" label="Description" value={tracker.caseDescription} />
                 <LongInfo className="md:col-span-2" label="Status" value={tracker.statusNotes} />
@@ -683,12 +710,6 @@ export function CaseDetailView({
               <>
                 <Field label="Sources">
                   <Textarea value={tracker.sources} onChange={(event) => updateField("sources", event.target.value)} />
-                </Field>
-                <Field label="Lit Events Needed">
-                  <Textarea value={tracker.litEventsNeeded} onChange={(event) => updateField("litEventsNeeded", event.target.value)} />
-                </Field>
-                <Field label="Timeline for Lit Events">
-                  <Textarea value={tracker.litEventsTimeline} onChange={(event) => updateField("litEventsTimeline", event.target.value)} />
                 </Field>
                 <Field label="Injuries">
                   <Textarea value={tracker.injuries} onChange={(event) => updateField("injuries", event.target.value)} />

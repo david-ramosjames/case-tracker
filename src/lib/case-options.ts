@@ -67,6 +67,22 @@ export function normalizeCaseType(value: string | null | undefined): (typeof CAS
   return trimmed;
 }
 
+/** Read case type from shared `cases.case_type`; empty when unset (no default). */
+export function caseTypeFromCasesTable(value: string | null | undefined): string {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return "";
+  return normalizeCaseType(trimmed);
+}
+
+/** Dropdown options for case type, including the current value when it is not in the standard list. */
+export function caseTypeSelectOptions(currentValue?: string | null): string[] {
+  const normalized = currentValue?.trim() ? normalizeCaseType(currentValue) : "";
+  if (!normalized || CASE_TYPE_OPTIONS.includes(normalized as (typeof CASE_TYPE_OPTIONS)[number])) {
+    return [...CASE_TYPE_OPTIONS];
+  }
+  return [normalized, ...CASE_TYPE_OPTIONS];
+}
+
 export const LIABILITY_OPTIONS = ["Accepted 100%", "50/50", "Pending", "Denied - Dispute", "Denied", "N/A"] as const;
 
 export const CASE_SIZE_OPTIONS = ["$0-30k", "$30k-$100k", ">$100k", "N/A"] as const;

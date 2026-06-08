@@ -174,8 +174,9 @@ export function BackfillImportCard() {
             <li>Leave a cell blank to keep the existing value (no overwrite).</li>
             <li>Do not include client, attorney, or paralegal — those stay in DocketFlow.</li>
             <li>
-              Use <span className="font-medium text-navy-950">Case Status</span> for Active/Closed and{" "}
-              <span className="font-medium text-navy-950">Status Notes</span> for narrative status on the case detail page.
+              Overall <span className="font-medium text-navy-950">Active / Closed</span> is set automatically from{" "}
+              <span className="font-medium text-navy-950">Stage</span> and <span className="font-medium text-navy-950">Disbursed</span>.
+              Use <span className="font-medium text-navy-950">Status Notes</span> for narrative notes on the case detail page.
             </li>
           </ul>
         </div>

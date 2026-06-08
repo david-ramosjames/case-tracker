@@ -10,10 +10,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DerivedCaseStatusBadge } from "@/components/cases/case-status-badge";
+import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import {
   CASE_STAGE_OPTIONS,
-  CASE_STATUS_OPTIONS,
   CASE_TYPE_OPTIONS,
+  caseTypeSelectOptions,
   CASE_SIZE_OPTIONS,
   EXPECTED_LITIGATION_OPTIONS,
   LIABILITY_OPTIONS,
@@ -243,7 +245,6 @@ export function CaseTable({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         shared: {
-          status: record.shared.status,
           caseType: record.shared.caseType,
         },
         tracker: {
@@ -265,14 +266,13 @@ export function CaseTable({
     }
   }
 
-  function updateSharedField(recordId: string, key: "status" | "caseType", value: string) {
+  function updateSharedField(recordId: string, key: "caseType", value: string) {
     updateRecord(recordId, (record) => ({
       ...record,
       shared: {
         ...record.shared,
         [key]: value,
       },
-      tracker: key === "status" ? { ...record.tracker, isActive: value === "Active" } : record.tracker,
     }));
   }
 
@@ -281,13 +281,20 @@ export function CaseTable({
     key: K,
     value: TrackerEntry[K],
   ) {
-    updateRecord(recordId, (record) => ({
-      ...record,
-      tracker: {
+    updateRecord(recordId, (record) => {
+      const tracker = {
         ...record.tracker,
         [key]: value,
-      },
-    }));
+      };
+      return {
+        ...record,
+        tracker,
+        shared: {
+          ...record.shared,
+          status: deriveCaseStatusFromTracker(tracker.caseStage, tracker.result.disbursedStatus),
+        },
+      };
+    });
   }
 
   return (
@@ -479,15 +486,12 @@ export function CaseTable({
                     <TableCell>{formatDate(record.shared.dateSigned)}</TableCell>
                     <TableCell>{formatOptionalDate(record.shared.dateOfIncident)}</TableCell>
                     <TableCell>
-                      <InlineSelect value={record.shared.status} onChange={(value) => updateSharedField(record.shared.id, "status", value)}>
-                        {CASE_STATUS_OPTIONS.map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                      </InlineSelect>
+                      <DerivedCaseStatusBadge record={record} />
                     </TableCell>
                     <TableCell>
                       <InlineSelect value={record.shared.caseType} onChange={(value) => updateSharedField(record.shared.id, "caseType", value)}>
-                        {CASE_TYPE_OPTIONS.map((option) => (
+                        <option value="">Not set</option>
+                        {caseTypeSelectOptions(record.shared.caseType).map((option) => (
                           <option key={option} value={option}>{option}</option>
                         ))}
                       </InlineSelect>
