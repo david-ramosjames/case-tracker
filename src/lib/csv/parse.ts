@@ -71,3 +71,21 @@ export function cleanCaseNumber(value: string) {
   if (Number.isFinite(numeric)) return String(Math.trunc(numeric));
   return trimmed;
 }
+
+/** Numeric sort key for firm case numbers (strips non-digits). */
+export function caseNumberSortKey(value: string): number | null {
+  const digitsOnly = value.trim().replace(/\D+/g, "");
+  if (!digitsOnly) return null;
+  const parsed = Number.parseInt(digitsOnly, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Compare case numbers numerically; falls back to string compare when not parseable. */
+export function compareCaseNumbers(a: string, b: string): number {
+  const aNum = caseNumberSortKey(a);
+  const bNum = caseNumberSortKey(b);
+  if (aNum !== null && bNum !== null) return aNum - bNum;
+  if (aNum !== null) return -1;
+  if (bNum !== null) return 1;
+  return a.localeCompare(b);
+}

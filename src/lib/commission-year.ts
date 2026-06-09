@@ -43,6 +43,17 @@ export function isDateInCommissionYear(dateValue: string | null | undefined, com
   return getCommissionYearLabel(date, startMonth) === commissionYear;
 }
 
+/** Hide from attorney UI when disburse date is set and falls outside the current commission year. */
+export function isDisbursementOutsideCurrentCommissionYear(
+  disburseDate: string | null | undefined,
+  startMonth: number,
+  refDate = new Date(),
+): boolean {
+  if (!disburseDate?.trim()) return false;
+  const currentCommissionYear = getCurrentCommissionYear(startMonth, refDate);
+  return !isDateInCommissionYear(disburseDate, currentCommissionYear, startMonth);
+}
+
 export function parseTargetQuarterYear(quarter: string | null | undefined) {
   if (!quarter) return null;
   const twoDigit = quarter.match(/(?:Q[1-4]|[12]H)-(\d{2})/i)?.[1];

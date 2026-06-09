@@ -1,4 +1,4 @@
-import { isCaseHistoricalForAttorney } from "@/lib/commission-year";
+import { isCaseHistoricalForAttorney, isDisbursementOutsideCurrentCommissionYear } from "@/lib/commission-year";
 import { type SessionUser } from "@/lib/auth/types";
 import { type AppUser, type AttorneyGoal, type CaseRecord, type UserRole } from "@/lib/types";
 
@@ -47,6 +47,13 @@ export function isRecordHistoricalForViewer(record: CaseRecord, goals: AttorneyG
   return isCaseHistoricalForAttorney(record.shared.dateSigned, startMonth);
 }
 
+function isRecordHiddenFromAttorney(record: CaseRecord, attorneyId: string, goals: AttorneyGoal[]) {
+  const startMonth = getAttorneyCommissionStartMonth(goals, attorneyId);
+  if (isCaseHistoricalForAttorney(record.shared.dateSigned, startMonth)) return true;
+  if (isDisbursementOutsideCurrentCommissionYear(record.tracker.result.disburseDate, startMonth)) return true;
+  return false;
+}
+
 export function getCasePipelineFilter(record: CaseRecord, goals: AttorneyGoal[]): CasePipelineFilter {
   if (isRecordHistoricalForViewer(record, goals)) return "Historical";
   return record.shared.status;
@@ -63,10 +70,9 @@ export function filterRecordsForViewer(
   if (viewer.isAdmin) return records;
 
   if (viewer.isAttorney && viewer.contactId) {
-    const startMonth = getAttorneyCommissionStartMonth(goals, viewer.contactId);
     return records.filter((record) => {
       if (record.shared.attorneyId !== viewer.contactId) return false;
-      return !isCaseHistoricalForAttorney(record.shared.dateSigned, startMonth);
+      return !isRecordHiddenFromAttorney(record, viewer.contactId, goals);
     });
   }
 
@@ -83,8 +89,7 @@ export function canViewerAccessCase(
   if (viewer.isAdmin) return true;
   if (viewer.isAttorney && viewer.contactId) {
     if (record.shared.attorneyId !== viewer.contactId) return false;
-    const startMonth = getAttorneyCommissionStartMonth(goals, viewer.contactId);
-    return !isCaseHistoricalForAttorney(record.shared.dateSigned, startMonth);
+    return !isRecordHiddenFromAttorney(record, viewer.contactId, goals);
   }
   return true;
 }

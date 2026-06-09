@@ -6,6 +6,7 @@ import { CaseCompletionCell } from "@/components/cases/case-completion-cell";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { type ViewerContext } from "@/lib/auth/access";
 import { getCaseCompletionScore } from "@/lib/calculations";
+import { compareCaseNumbers } from "@/lib/csv/parse";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { HeaderFilter } from "@/components/ui/header-filter";
@@ -13,9 +14,11 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  applyDerivedResultQuarter,
   CHECK_STATUS_OPTIONS,
   CLOSING_STATUS_OPTIONS,
   DISBURSED_STATUS_OPTIONS,
+  REDUCTIONS_STATUS_OPTIONS,
   RELEASE_STATUS_OPTIONS,
   getTargetPeriodOptions,
 } from "@/lib/case-options";
@@ -26,6 +29,7 @@ import {
   type CheckStatus,
   type ClosingStatus,
   type DisbursedStatus,
+  type ReductionsStatus,
   type ReleaseStatus,
   type SettlementResult,
 } from "@/lib/types";
@@ -34,6 +38,10 @@ import { useEffect, useMemo, useState } from "react";
 
 type SortKey = "completion" | "caseNumber" | "clientName" | "settlementDate" | "settlementAmount" | "attorneyFees";
 type SortDirection = "asc" | "desc";
+
+function hasSettlementDate(record: CaseRecord) {
+  return Boolean(record.tracker.result.settlementDate);
+}
 
 export function ResultsTable({
   records,
@@ -44,24 +52,26 @@ export function ResultsTable({
   settings: CaseTrackerSettings;
   viewer: ViewerContext;
 }) {
-  const [workingRecords, setWorkingRecords] = useState(records);
+  const [workingRecords, setWorkingRecords] = useState(() => records.filter(hasSettlementDate));
   const [search, setSearch] = useState("");
   const [release, setRelease] = useState("all");
   const [closing, setClosing] = useState("all");
   const [check, setCheck] = useState("all");
   const [disbursed, setDisbursed] = useState("all");
+  const [reductions, setReductions] = useState("all");
   const [quarter, setQuarter] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("caseNumber");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const quarters = Array.from(new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.result.resultQuarter).filter(Boolean)]));
 
-  const activeFilterCount = [release, closing, check, disbursed, quarter].filter((value) => value !== "all").length;
+  const activeFilterCount = [release, closing, check, disbursed, reductions, quarter].filter((value) => value !== "all").length;
 
   const filteredRecords = useMemo(() => {
     const normalizedSearch = search.toLowerCase();
 
     return workingRecords
+      .filter(hasSettlementDate)
       .filter((record) => {
         const result = record.tracker.result;
         const matchesSearch =
@@ -73,13 +83,14 @@ export function ResultsTable({
         if (closing !== "all" && result.closingStatus !== closing) return false;
         if (check !== "all" && result.checkStatus !== check) return false;
         if (disbursed !== "all" && result.disbursedStatus !== disbursed) return false;
+        if (reductions !== "all" && result.reductionsStatus !== reductions) return false;
         if (quarter !== "all" && result.resultQuarter !== quarter) return false;
 
         return true;
       })
       .sort((a, b) => {
         const dir = sortDirection === "asc" ? 1 : -1;
-        const tieBreak = () => a.shared.caseNumber.localeCompare(b.shared.caseNumber);
+        const tieBreak = () => compareCaseNumbers(a.shared.caseNumber, b.shared.caseNumber);
 
         if (sortKey === "completion") {
           const aScore = getCaseCompletionScore(a, settings).percent;
@@ -89,10 +100,7 @@ export function ResultsTable({
         }
 
         if (sortKey === "caseNumber") {
-          const aNum = Number(a.shared.caseNumber);
-          const bNum = Number(b.shared.caseNumber);
-          if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return dir * (aNum - bNum);
-          return dir * a.shared.caseNumber.localeCompare(b.shared.caseNumber);
+          return dir * compareCaseNumbers(a.shared.caseNumber, b.shared.caseNumber);
         }
 
         if (sortKey === "clientName") {
@@ -125,13 +133,14 @@ export function ResultsTable({
         const cmp = aFees - bFees;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [check, closing, disbursed, quarter, release, search, settings, sortDirection, sortKey, workingRecords]);
+  }, [check, closing, disbursed, quarter, reductions, release, search, settings, sortDirection, sortKey, workingRecords]);
 
   function clearFilters() {
     setRelease("all");
     setClosing("all");
     setCheck("all");
     setDisbursed("all");
+    setReductions("all");
     setQuarter("all");
   }
 
@@ -147,9 +156,10 @@ export function ResultsTable({
   function updateResult(recordId: string, updater: (result: SettlementResult) => SettlementResult) {
     let nextRecord: CaseRecord | null = null;
     setWorkingRecords((current) =>
-      current.map((record) => {
-        if (record.shared.id !== recordId) return record;
-        const result = updater(record.tracker.result);
+      current.flatMap((record) => {
+        if (record.shared.id !== recordId) return [record];
+        const result = applyDerivedResultQuarter(updater(record.tracker.result));
+        if (!result.settlementDate) return [];
         nextRecord = {
           ...record,
           tracker: {
@@ -160,7 +170,7 @@ export function ResultsTable({
             },
           },
         };
-        return nextRecord;
+        return [nextRecord];
       }),
     );
 
@@ -206,7 +216,7 @@ export function ResultsTable({
             </Button>
           ) : null}
           <p className="text-sm text-muted-foreground sm:ml-auto">
-            Showing {filteredRecords.length} of {workingRecords.length} results. Use column headers to filter; click labels to sort.
+            Showing {filteredRecords.length} of {workingRecords.length} settled cases. Use column headers to filter; click labels to sort.
           </p>
         </div>
 
@@ -264,6 +274,17 @@ export function ResultsTable({
                     options={[
                       { value: "all", label: "All" },
                       ...DISBURSED_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="align-top">
+                  <HeaderFilter
+                    label="Reductions"
+                    value={reductions}
+                    onChange={setReductions}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...REDUCTIONS_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
                     ]}
                   />
                 </TableHead>
@@ -328,10 +349,19 @@ export function ResultsTable({
                       </InlineSelect>
                     </TableCell>
                     <TableCell>
-                      <InlineSelect value={result.resultQuarter ?? ""} onChange={(value) => updateResult(record.shared.id, (current) => ({ ...current, resultQuarter: value || null }))}>
-                        <option value="">Not set</option>
-                        {quarters.map((option) => <option key={option} value={option ?? ""}>{option}</option>)}
+                      <InlineSelect
+                        value={result.reductionsStatus}
+                        onChange={(value) => updateResult(record.shared.id, (current) => ({ ...current, reductionsStatus: value as ReductionsStatus }))}
+                      >
+                        {REDUCTIONS_STATUS_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
                       </InlineSelect>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {result.resultQuarter ?? "—"}
                     </TableCell>
                     <TableCell>
                       <Input className="h-9 min-w-32 text-xs" type="date" value={toDateInput(result.disburseDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, disburseDate: fromDateInput(event.target.value) }))} />

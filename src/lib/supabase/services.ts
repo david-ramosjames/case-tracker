@@ -11,7 +11,14 @@ import { describeSlackThreadAppliedLabels, parseSlackThreadUpdate } from "@/lib/
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildTrackerActivityDescription, describeTrackerChanges } from "@/lib/tracker-changes";
-import { CASE_STAGE_OPTIONS, EXPECTED_LITIGATION_OPTIONS, caseTypeFromCasesTable, normalizeCaseType } from "@/lib/case-options";
+import {
+  CASE_STAGE_OPTIONS,
+  EXPECTED_LITIGATION_OPTIONS,
+  caseTypeFromCasesTable,
+  applyDerivedResultQuarter,
+  deriveCaseSizeFromMinimumValue,
+  normalizeCaseType,
+} from "@/lib/case-options";
 import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import { pickNextScheduledEvents } from "@/lib/docketflow/case-events";
 import {
@@ -31,6 +38,7 @@ import {
   type ConfidenceLevel,
   type DisbursedStatus,
   type ExpectedLitigationStatus,
+  type ReductionsStatus,
   type ReleaseStatus,
   type SettlementResult,
   type StageSignalSource,
@@ -244,9 +252,13 @@ export async function updateTrackerEntry(
     : [];
 
   const now = new Date().toISOString();
+  const inputWithDerivedCaseSize =
+    input.minimumValue !== undefined
+      ? { ...input, caseSize: deriveCaseSizeFromMinimumValue(input.minimumValue) }
+      : input;
   const inputWithSourcesLit = trackerTouchesSourcesLit(changeInput)
-    ? { ...input, lastSourcesLitUpdatedAt: input.lastSourcesLitUpdatedAt ?? now }
-    : input;
+    ? { ...inputWithDerivedCaseSize, lastSourcesLitUpdatedAt: inputWithDerivedCaseSize.lastSourcesLitUpdatedAt ?? now }
+    : inputWithDerivedCaseSize;
 
   const validationPatch = buildFieldValidationRowPatch(
     changeInput as Record<string, unknown>,
@@ -717,6 +729,7 @@ async function createActivityEntry(
 
 async function upsertResultRow(caseId: string, trackerEntryId: string, result: SettlementResult): Promise<ResultRow | null> {
   const client = await createTrackerClient();
+  const normalized = applyDerivedResultQuarter(result);
 
   const payload = {
     case_id: caseId,
@@ -729,12 +742,13 @@ async function upsertResultRow(caseId: string, trackerEntryId: string, result: S
     closing_status: result.closingStatus,
     check_status: result.checkStatus,
     disbursed_status: result.disbursedStatus,
+    reductions_status: result.reductionsStatus,
     release_signed_at: result.releaseSignedAt,
     closing_signed_at: result.closingSignedAt,
     check_deposited_at: result.checkDepositedAt,
     check_disbursed_at: result.checkDisbursedAt,
-    disburse_date: result.disburseDate,
-    result_quarter: result.resultQuarter,
+    disburse_date: normalized.disburseDate,
+    result_quarter: normalized.resultQuarter,
   };
 
   const { data: existing, error: updateError } = await client
@@ -844,18 +858,19 @@ function rowToCaseRecord(
 }
 
 function rowToTrackerEntry(row: TrackerEntryRow, resultRow: ResultRow | null, suggestionRows: SuggestionRow[]): TrackerEntry {
+  const minimumValue = toNumber(row.minimum_value);
   return {
     id: toString(row.id, "pending-tracker-entry"),
     caseId: toString(row.case_id, toString(row.id, "pending-tracker-entry")),
     caseStage: normalizeStage(toStringOrNull(row.case_stage)),
-    estimatedSettlementValue: toNumber(row.minimum_value),
+    estimatedSettlementValue: minimumValue,
     estimatedFeeValue: toNumber(row.estimated_fee_value),
     targetResolutionQuarter: toStringOrNull(row.target_resolution_quarter),
     confidenceLevel: normalizeConfidence(toStringOrNull(row.confidence_level)),
     sourceOfEstimate: toStringOrNull(row.source_of_estimate),
     liability: toStringOrNull(row.liability),
-    caseSize: toStringOrNull(row.case_size),
-    minimumValue: toNumber(row.minimum_value),
+    caseSize: deriveCaseSizeFromMinimumValue(minimumValue),
+    minimumValue,
     referralFee: toNumber(row.referral_fee),
     referralFeeArrangement: toStringOrNull(row.referral_fee_arrangement),
     balanceCtaInfo: toStringOrNull(row.balance_cta_info),
@@ -893,7 +908,7 @@ function rowToTrackerEntry(row: TrackerEntryRow, resultRow: ResultRow | null, su
 }
 
 function rowToResult(row: ResultRow | null): SettlementResult {
-  return {
+  return applyDerivedResultQuarter({
     settlementDate: toStringOrNull(row?.settlement_date),
     settlementAmount: toNumber(row?.settlement_amount),
     feePercent: toNumber(row?.fee_percent),
@@ -902,13 +917,14 @@ function rowToResult(row: ResultRow | null): SettlementResult {
     closingStatus: normalizeClosingStatus(toStringOrNull(row?.closing_status), toStringOrNull(row?.closing_signed_at)),
     checkStatus: normalizeCheckStatus(toStringOrNull(row?.check_status), toStringOrNull(row?.check_deposited_at)),
     disbursedStatus: normalizeDisbursedStatus(toStringOrNull(row?.disbursed_status), toStringOrNull(row?.check_disbursed_at)),
+    reductionsStatus: normalizeReductionsStatus(toStringOrNull(row?.reductions_status)),
     releaseSignedAt: toStringOrNull(row?.release_signed_at),
     closingSignedAt: toStringOrNull(row?.closing_signed_at),
     checkDepositedAt: toStringOrNull(row?.check_deposited_at),
     checkDisbursedAt: toStringOrNull(row?.check_disbursed_at),
     disburseDate: toStringOrNull(row?.disburse_date),
     resultQuarter: toStringOrNull(row?.result_quarter),
-  };
+  });
 }
 
 function makeEmptyTrackerRow(caseRow: DocketFlowCaseRow): TrackerEntryRow {
@@ -1153,6 +1169,11 @@ function normalizeCheckStatus(value: string | null | undefined, depositedAt: str
 
 function normalizeDisbursedStatus(value: string | null | undefined, disbursedAt: string | null): DisbursedStatus {
   return value === "Yes" || disbursedAt ? "Yes" : "No";
+}
+
+function normalizeReductionsStatus(value: string | null | undefined): ReductionsStatus {
+  if (value === "Sent" || value === "Approved" || value === "N/A") return value;
+  return "Not Complete";
 }
 
 function calculateAttorneyFees(settlementAmount: number | null, feePercent: number | null) {

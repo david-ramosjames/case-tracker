@@ -9,16 +9,21 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { AttorneyFieldLabel, AttorneyFieldLegend, attorneyFieldShellClass } from "@/components/cases/attorney-field-hint";
+import { AttorneyFieldsChecklist } from "@/components/cases/attorney-fields-checklist";
 import { ConfidenceBadge, DerivedCaseStatusBadge, StageBadge } from "@/components/cases/case-status-badge";
 import { NextScheduledEventsCard } from "@/components/cases/next-scheduled-events-card";
+import type { AttorneySourcedFieldId } from "@/lib/attorney-sourced-fields";
 import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import {
-  CASE_SIZE_OPTIONS,
+  applyDerivedResultQuarter,
+  deriveCaseSizeFromMinimumValue,
   CASE_STAGE_OPTIONS,
   caseTypeSelectOptions,
   CHECK_STATUS_OPTIONS,
   CLOSING_STATUS_OPTIONS,
   DISBURSED_STATUS_OPTIONS,
+  REDUCTIONS_STATUS_OPTIONS,
   EXPECTED_LITIGATION_OPTIONS,
   LIABILITY_OPTIONS,
   RELEASE_STATUS_OPTIONS,
@@ -39,6 +44,7 @@ import {
   type ClosingStatus,
   type CommentType,
   type DisbursedStatus,
+  type ReductionsStatus,
   type ReleaseStatus,
   type SettlementResult,
   type TrackerUpdateInput,
@@ -115,10 +121,10 @@ export function CaseDetailView({
   function updateResult<K extends keyof SettlementResult>(key: K, value: SettlementResult[K]) {
     setTracker((current) => ({
       ...current,
-      result: {
+      result: applyDerivedResultQuarter({
         ...current.result,
         [key]: value,
-      },
+      }),
     }));
   }
 
@@ -464,7 +470,7 @@ export function CaseDetailView({
                 Validation overdue
               </CardTitle>
               <CardDescription>
-                Liability, quarter, minimum value, and policy limits must be confirmed or updated every 90 days.
+                Your-input fields (liability, quarter, minimum value, policy limits) must be confirmed or updated every 90 days.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">
@@ -482,7 +488,7 @@ export function CaseDetailView({
             <CardHeader>
               <CardTitle>Quarterly Check-In Required</CardTitle>
               <CardDescription>
-                Confirm or update expected completion quarter, minimum case value, and Sources & Litigation Detail every 90 days. You can also reply in the case Slack channel thread when reminded.
+                Confirm or update quarter, minimum value, sources, injuries, and description every 90 days — even when nothing changed. You can also reply in the case Slack channel thread when reminded.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-wrap items-center gap-3">
@@ -502,7 +508,9 @@ export function CaseDetailView({
             <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
               <div>
                 <CardTitle>Case View</CardTitle>
-                <CardDescription>Primary case fields follow the quarterly sheet exactly, with editing available in place.</CardDescription>
+                <CardDescription>
+                  Amber fields are your responsibility as attorney. Gray fields sync from DocketFlow or are calculated by the tracker.
+                </CardDescription>
               </div>
               <Button variant={isOverviewEditing ? "pink" : "outline"} size="sm" onClick={() => setIsOverviewEditing((current) => !current)}>
                 <Pencil className="h-4 w-4" />
@@ -510,164 +518,184 @@ export function CaseDetailView({
               </Button>
             </div>
           </CardHeader>
-          <CardContent className={isOverviewEditing ? "grid gap-4 md:grid-cols-2" : "grid gap-4 md:grid-cols-3"}>
+          <CardContent className="space-y-6">
+            <AttorneyFieldLegend />
+
             {!isOverviewEditing ? (
               <>
-                <Info label="Case #" value={record.shared.caseNumber} />
-                <Info label="Client" value={record.shared.clientName} />
-                <Info label="Paralegal" value={record.paralegal.name} />
-                <Info label="Date Signed" value={formatDate(record.shared.dateSigned)} />
-                <Info label="DOL" value={formatOptionalDate(record.shared.dateOfIncident) || "Not set — edit to add"} />
                 <div>
-                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</div>
-                  <div className="mt-1">
-                    <DerivedCaseStatusBadge record={{ tracker }} />
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">From DocketFlow / system</h3>
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <Info label="Case #" value={record.shared.caseNumber} />
+                    <Info label="Client" value={record.shared.clientName} />
+                    <Info label="Paralegal" value={record.paralegal.name} />
+                    <Info label="Date Signed" value={formatDate(record.shared.dateSigned)} />
+                    <Info label="DOL" value={formatOptionalDate(record.shared.dateOfIncident) || "Not set — edit to add"} />
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</div>
+                      <div className="mt-1">
+                        <DerivedCaseStatusBadge record={{ tracker }} />
+                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">Set automatically from stage and disbursement.</p>
+                    </div>
+                    <Info label="Type" value={record.shared.caseType || "Not set — edit to add"} />
+                    <Info label="Stage" value={tracker.caseStage} />
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Case Size</div>
+                      <p className="mt-1 text-sm font-medium text-navy-950">{tracker.caseSize ?? "Not set"}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Calculated from minimum value.</p>
+                    </div>
+                    <Info label="Expected Lit" value={tracker.expectedLitigation ?? "Not set"} />
+                    <Info label="Policy Source" value={tracker.policyInfoSource ?? "Not set"} />
+                    <Info label="Projected firm fee" value={formatCurrency(tracker.estimatedFeeValue)} />
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">Set automatically from stage and disbursement.</p>
                 </div>
-                <Info label="Type" value={record.shared.caseType || "Not set — edit to add"} />
-                <Info label="Liability" value={tracker.liability ?? "Not set"} />
-                <Info label="Quarter" value={tracker.targetResolutionQuarter ?? "Not set"} />
-                <Info label="Case Size" value={tracker.caseSize ?? "Not set"} />
-                <Info label="Minimum Value" value={formatCurrency(tracker.minimumValue)} />
-                <Info label="Referral Fee" value={formatPercentValue(tracker.referralFee)} />
-                <Info label="Policy Limits" value={formatCurrency(tracker.policyLimits)} />
-                <Info label="Policy Source" value={tracker.policyInfoSource ?? "Not set"} />
-                <Info label="Stage" value={tracker.caseStage} />
-                <Info label="Expected Lit" value={tracker.expectedLitigation ?? "Not set"} />
-                <Info label="Projected firm fee" value={formatCurrency(tracker.estimatedFeeValue)} />
+
+                <div>
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-amber-800">Your input</h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <AttorneyInfo fieldId="liability" record={record} value={tracker.liability ?? "Not set"} />
+                    <AttorneyInfo fieldId="targetResolutionQuarter" record={record} value={tracker.targetResolutionQuarter ?? "Not set"} />
+                    <AttorneyInfo fieldId="minimumValue" record={record} value={formatCurrency(tracker.minimumValue)} />
+                    <AttorneyInfo fieldId="referralFee" record={record} value={formatPercentValue(tracker.referralFee)} />
+                    <AttorneyInfo fieldId="policyLimits" record={record} value={formatCurrency(tracker.policyLimits)} />
+                  </div>
+                </div>
               </>
             ) : (
-              <>
-                <Field label="DOL">
-                  <Input
-                    type="date"
-                    value={toDateInput(shared.dateOfIncident)}
-                    onChange={(event) => updateShared("dateOfIncident", fromDateInput(event.target.value))}
-                  />
-                </Field>
-                <Field label="Date Signed">
-                  <Input
-                    type="date"
-                    value={toDateInput(shared.dateSigned)}
-                    onChange={(event) => updateShared("dateSigned", fromDateInput(event.target.value) ?? shared.dateSigned)}
-                  />
-                </Field>
-                <Field label="Status (auto)">
-                  <div className="flex min-h-10 items-center">
-                    <DerivedCaseStatusBadge record={{ tracker }} />
+              <div className="grid gap-6">
+                <div>
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">From DocketFlow / system</h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <Field label="DOL">
+                      <Input
+                        type="date"
+                        value={toDateInput(shared.dateOfIncident)}
+                        onChange={(event) => updateShared("dateOfIncident", fromDateInput(event.target.value))}
+                      />
+                    </Field>
+                    <Field label="Date Signed">
+                      <Input
+                        type="date"
+                        value={toDateInput(shared.dateSigned)}
+                        onChange={(event) => updateShared("dateSigned", fromDateInput(event.target.value) ?? shared.dateSigned)}
+                      />
+                    </Field>
+                    <Field label="Status (auto)">
+                      <div className="flex min-h-10 items-center">
+                        <DerivedCaseStatusBadge record={{ tracker }} />
+                      </div>
+                    </Field>
+                    <Field label="Type">
+                      <Select value={shared.caseType} onChange={(event) => updateShared("caseType", event.target.value)}>
+                        <option value="">Select type</option>
+                        {caseTypeSelectOptions(shared.caseType).map((type) => (
+                          <option key={type} value={type}>
+                            {type}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Stage">
+                      <Select value={tracker.caseStage} onChange={(event) => updateField("caseStage", event.target.value as TrackerEntry["caseStage"])}>
+                        {CASE_STAGE_OPTIONS.map((stage) => (
+                          <option key={stage} value={stage}>
+                            {stage}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Expected Lit">
+                      <Select
+                        value={tracker.expectedLitigation ?? ""}
+                        onChange={(event) => {
+                          const expectedLitigation = event.target.value as TrackerEntry["expectedLitigation"];
+                          updateField("expectedLitigation", expectedLitigation || null);
+                          if (tracker.minimumValue) {
+                            updateField("estimatedFeeValue", Math.round(tracker.minimumValue * (expectedLitigation === "Pre" ? 0.3 : 0.4)));
+                          }
+                        }}
+                      >
+                        <option value="">Select expected litigation</option>
+                        {EXPECTED_LITIGATION_OPTIONS.map((status) => (
+                          <option key={status} value={status}>
+                            {status}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Source of Policy Information">
+                      <Input value={tracker.policyInfoSource ?? ""} placeholder="Declarations page, carrier email, adjuster call..." onChange={(event) => updateField("policyInfoSource", event.target.value || null)} />
+                    </Field>
+                    <Field label="Referral Fee Arrangement">
+                      <Input value={tracker.referralFeeArrangement ?? ""} placeholder="No referral fee, percentage split, flat fee..." onChange={(event) => updateField("referralFeeArrangement", event.target.value || null)} />
+                    </Field>
+                    <Field label="Balance / CTA Info">
+                      <Input value={tracker.balanceCtaInfo ?? ""} placeholder="CTA balance, balance reviewed, or setup note" onChange={(event) => updateField("balanceCtaInfo", event.target.value || null)} />
+                    </Field>
+                    <Field label="Confidence level">
+                      <Select value={tracker.confidenceLevel ?? ""} onChange={(event) => updateField("confidenceLevel", (event.target.value || null) as TrackerEntry["confidenceLevel"])}>
+                        <option value="">Select confidence</option>
+                        {settings.confidenceLevels.map((level) => (
+                          <option key={level} value={level}>
+                            {level}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                    <Field label="Projected firm fee">
+                      <FormattedNumberInput prefix="$" value={tracker.estimatedFeeValue} onValueChange={(value) => updateField("estimatedFeeValue", value)} />
+                    </Field>
+                    <Field className="md:col-span-2" label="Forecast notes">
+                      <Textarea value={tracker.forecastNotes} onChange={(event) => updateField("forecastNotes", event.target.value)} />
+                    </Field>
                   </div>
-                </Field>
-                <Field label="Type">
-                  <Select value={shared.caseType} onChange={(event) => updateShared("caseType", event.target.value)}>
-                    <option value="">Select type</option>
-                    {caseTypeSelectOptions(shared.caseType).map((type) => (
-                      <option key={type} value={type}>
-                        {type}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Quarter">
-                  <Select value={tracker.targetResolutionQuarter ?? ""} onChange={(event) => updateField("targetResolutionQuarter", event.target.value || null)}>
-                    <option value="">Select quarter</option>
-                    {quarterOptions.map((quarter) => (
-                      <option key={quarter} value={quarter}>
-                        {quarter}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Case Size">
-                  <Select value={tracker.caseSize ?? ""} onChange={(event) => updateField("caseSize", event.target.value || null)}>
-                    <option value="">Select case size</option>
-                    {CASE_SIZE_OPTIONS.map((size) => (
-                      <option key={size} value={size}>
-                        {size}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Minimum Value">
-                  <FormattedNumberInput
-                    prefix="$"
-                    value={tracker.minimumValue}
-                    onValueChange={(value) => {
-                      updateField("minimumValue", value);
-                      updateField("estimatedFeeValue", value ? Math.round(value * getFeePercent(record)) : null);
-                    }}
-                  />
-                </Field>
-                <Field label="Referral Fee">
-                  <FormattedNumberInput suffix="%" value={tracker.referralFee} onValueChange={(value) => updateField("referralFee", value)} />
-                </Field>
-                <Field label="Referral Fee Arrangement">
-                  <Input value={tracker.referralFeeArrangement ?? ""} placeholder="No referral fee, percentage split, flat fee..." onChange={(event) => updateField("referralFeeArrangement", event.target.value || null)} />
-                </Field>
-                <Field label="Balance / CTA Info">
-                  <Input value={tracker.balanceCtaInfo ?? ""} placeholder="CTA balance, balance reviewed, or setup note" onChange={(event) => updateField("balanceCtaInfo", event.target.value || null)} />
-                </Field>
-                <Field label="Policy Limits">
-                  <FormattedNumberInput prefix="$" value={tracker.policyLimits} onValueChange={(value) => updateField("policyLimits", value)} />
-                </Field>
-                <Field label="Source of Policy Information">
-                  <Input value={tracker.policyInfoSource ?? ""} placeholder="Declarations page, carrier email, adjuster call..." onChange={(event) => updateField("policyInfoSource", event.target.value || null)} />
-                </Field>
-                <Field label="Stage">
-                  <Select value={tracker.caseStage} onChange={(event) => updateField("caseStage", event.target.value as TrackerEntry["caseStage"])}>
-                    {CASE_STAGE_OPTIONS.map((stage) => (
-                      <option key={stage} value={stage}>
-                        {stage}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Liability">
-                  <Select value={tracker.liability ?? ""} onChange={(event) => updateField("liability", event.target.value || null)}>
-                    <option value="">Select liability</option>
-                    {LIABILITY_OPTIONS.map((liability) => (
-                      <option key={liability} value={liability}>
-                        {liability}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Expected Lit">
-                  <Select
-                    value={tracker.expectedLitigation ?? ""}
-                    onChange={(event) => {
-                      const expectedLitigation = event.target.value as TrackerEntry["expectedLitigation"];
-                      updateField("expectedLitigation", expectedLitigation || null);
-                      if (tracker.minimumValue) {
-                        updateField("estimatedFeeValue", Math.round(tracker.minimumValue * (expectedLitigation === "Pre" ? 0.3 : 0.4)));
-                      }
-                    }}
-                  >
-                    <option value="">Select expected litigation</option>
-                    {EXPECTED_LITIGATION_OPTIONS.map((status) => (
-                      <option key={status} value={status}>
-                        {status}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Confidence level">
-                  <Select value={tracker.confidenceLevel ?? ""} onChange={(event) => updateField("confidenceLevel", (event.target.value || null) as TrackerEntry["confidenceLevel"])}>
-                    <option value="">Select confidence</option>
-                    {settings.confidenceLevels.map((level) => (
-                      <option key={level} value={level}>
-                        {level}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Projected firm fee">
-                  <FormattedNumberInput prefix="$" value={tracker.estimatedFeeValue} onValueChange={(value) => updateField("estimatedFeeValue", value)} />
-                </Field>
-                <Field className="md:col-span-2" label="Forecast notes">
-                  <Textarea value={tracker.forecastNotes} onChange={(event) => updateField("forecastNotes", event.target.value)} />
-                </Field>
-                <div className="md:col-span-2 flex flex-wrap items-center gap-3">
+                </div>
+
+                <div>
+                  <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-amber-800">Your input</h3>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <AttorneyField fieldId="liability" record={record}>
+                      <Select value={tracker.liability ?? ""} onChange={(event) => updateField("liability", event.target.value || null)}>
+                        <option value="">Select liability</option>
+                        {LIABILITY_OPTIONS.map((liability) => (
+                          <option key={liability} value={liability}>
+                            {liability}
+                          </option>
+                        ))}
+                      </Select>
+                    </AttorneyField>
+                    <AttorneyField fieldId="targetResolutionQuarter" record={record}>
+                      <Select value={tracker.targetResolutionQuarter ?? ""} onChange={(event) => updateField("targetResolutionQuarter", event.target.value || null)}>
+                        <option value="">Select quarter</option>
+                        {quarterOptions.map((quarter) => (
+                          <option key={quarter} value={quarter}>
+                            {quarter}
+                          </option>
+                        ))}
+                      </Select>
+                    </AttorneyField>
+                    <AttorneyField fieldId="minimumValue" record={record}>
+                      <FormattedNumberInput
+                        prefix="$"
+                        value={tracker.minimumValue}
+                        onValueChange={(value) => {
+                          updateField("minimumValue", value);
+                          updateField("caseSize", deriveCaseSizeFromMinimumValue(value));
+                          updateField("estimatedFeeValue", value ? Math.round(value * getFeePercent(record)) : null);
+                        }}
+                      />
+                    </AttorneyField>
+                    <AttorneyField fieldId="referralFee" record={record}>
+                      <FormattedNumberInput suffix="%" value={tracker.referralFee} onValueChange={(value) => updateField("referralFee", value)} />
+                    </AttorneyField>
+                    <AttorneyField fieldId="policyLimits" record={record}>
+                      <FormattedNumberInput prefix="$" value={tracker.policyLimits} onValueChange={(value) => updateField("policyLimits", value)} />
+                    </AttorneyField>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
                   <Button onClick={() => saveTracker()} disabled={isSaving}>
                     <Save className="h-4 w-4" />
                     {isSaving ? "Saving..." : "Save and mark reviewed"}
@@ -680,17 +708,19 @@ export function CaseDetailView({
                   ) : null}
                   {errorMessage ? <span className="text-sm text-destructive">{errorMessage}</span> : null}
                 </div>
-              </>
+              </div>
             )}
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-amber-200/80">
           <CardHeader>
             <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
               <div>
                 <CardTitle>Sources and Litigation Detail</CardTitle>
-                <CardDescription>Long-form fields from the sheet live here instead of crowding the case list.</CardDescription>
+                <CardDescription>
+                  Your input — sources, injuries, and description must be confirmed or updated at least every 90 days.
+                </CardDescription>
               </div>
               <Button variant={isSourcesEditing ? "pink" : "outline"} size="sm" onClick={() => setIsSourcesEditing((current) => !current)}>
                 <Pencil className="h-4 w-4" />
@@ -701,23 +731,23 @@ export function CaseDetailView({
           <CardContent className="grid gap-4 md:grid-cols-2">
             {!isSourcesEditing ? (
               <>
-                <LongInfo label="Sources" value={tracker.sources} />
-                <LongInfo label="Injuries" value={tracker.injuries} />
-                <LongInfo className="md:col-span-2" label="Description" value={tracker.caseDescription} />
-                <LongInfo className="md:col-span-2" label="Status" value={tracker.statusNotes} />
+                <AttorneyLongInfo fieldId="sources" record={record} value={tracker.sources} />
+                <AttorneyLongInfo fieldId="injuries" record={record} value={tracker.injuries} />
+                <AttorneyLongInfo className="md:col-span-2" fieldId="caseDescription" record={record} value={tracker.caseDescription} />
+                <LongInfo className="md:col-span-2" label="Status notes" value={tracker.statusNotes} />
               </>
             ) : (
               <>
-                <Field label="Sources">
+                <AttorneyField fieldId="sources" record={record}>
                   <Textarea value={tracker.sources} onChange={(event) => updateField("sources", event.target.value)} />
-                </Field>
-                <Field label="Injuries">
+                </AttorneyField>
+                <AttorneyField fieldId="injuries" record={record}>
                   <Textarea value={tracker.injuries} onChange={(event) => updateField("injuries", event.target.value)} />
-                </Field>
-                <Field className="md:col-span-2" label="Description">
+                </AttorneyField>
+                <AttorneyField className="md:col-span-2" fieldId="caseDescription" record={record}>
                   <Textarea value={tracker.caseDescription} onChange={(event) => updateField("caseDescription", event.target.value)} />
-                </Field>
-                <Field className="md:col-span-2" label="Status">
+                </AttorneyField>
+                <Field className="md:col-span-2" label="Status notes">
                   <Textarea value={tracker.statusNotes} onChange={(event) => updateField("statusNotes", event.target.value)} />
                 </Field>
                 <SaveActions
@@ -763,11 +793,13 @@ export function CaseDetailView({
                 <Info label="Closing" value={tracker.result.closingStatus} />
                 <Info label="Check" value={tracker.result.checkStatus} />
                 <Info label="Disbursed" value={tracker.result.disbursedStatus} />
+                <Info label="Reductions" value={tracker.result.reductionsStatus} />
                 <Info label="Release Signed" value={formatDate(tracker.result.releaseSignedAt)} />
                 <Info label="Closing Signed" value={formatDate(tracker.result.closingSignedAt)} />
                 <Info label="Check Deposited" value={formatDate(tracker.result.checkDepositedAt)} />
                 <Info label="Check Disbursed" value={formatDate(tracker.result.checkDisbursedAt)} />
                 <Info label="Disburse Date" value={formatDate(tracker.result.disburseDate)} />
+                <Info label="Result Quarter" value={tracker.result.resultQuarter ?? "Not set"} />
               </>
             ) : (
               <>
@@ -823,6 +855,18 @@ export function CaseDetailView({
                     ))}
                   </Select>
                 </Field>
+                <Field label="Reductions">
+                  <Select
+                    value={tracker.result.reductionsStatus}
+                    onChange={(event) => updateResult("reductionsStatus", event.target.value as ReductionsStatus)}
+                  >
+                    {REDUCTIONS_STATUS_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
                 <Field label="Release Signed">
                   <Input type="date" value={toDateInput(tracker.result.releaseSignedAt)} onChange={(event) => updateResult("releaseSignedAt", fromDateInput(event.target.value))} />
                 </Field>
@@ -837,6 +881,9 @@ export function CaseDetailView({
                 </Field>
                 <Field label="Disburse Date">
                   <Input type="date" value={toDateInput(tracker.result.disburseDate)} onChange={(event) => updateResult("disburseDate", fromDateInput(event.target.value))} />
+                </Field>
+                <Field label="Result Quarter">
+                  <Input value={tracker.result.resultQuarter ?? ""} readOnly placeholder="Set disburse date" />
                 </Field>
                 <SaveActions
                   className="md:col-span-3"
@@ -901,6 +948,8 @@ export function CaseDetailView({
       </div>
 
       <aside className="space-y-6">
+        <AttorneyFieldsChecklist record={record} />
+
         <Card>
           <CardHeader>
             <CardTitle>Living Forecast</CardTitle>
@@ -941,6 +990,11 @@ export function CaseDetailView({
             <ResultStep label="Closing" value={tracker.result.closingStatus} complete={tracker.result.closingStatus === "Signed"} />
             <ResultStep label="Check" value={tracker.result.checkStatus} complete={tracker.result.checkStatus === "Deposited"} />
             <ResultStep label="Disbursed" value={tracker.result.disbursedStatus} complete={tracker.result.disbursedStatus === "Yes"} />
+            <ResultStep
+              label="Reductions"
+              value={tracker.result.reductionsStatus}
+              complete={tracker.result.reductionsStatus === "Approved" || tracker.result.reductionsStatus === "N/A"}
+            />
           </CardContent>
         </Card>
 
@@ -1031,6 +1085,61 @@ function Info({ label, value }: { label: string; value: string }) {
       <p className="text-xs font-semibold uppercase text-muted-foreground">{label}</p>
       <p className="mt-1 text-sm font-medium text-navy-950">{value}</p>
     </div>
+  );
+}
+
+function AttorneyInfo({
+  fieldId,
+  record,
+  value,
+}: {
+  fieldId: AttorneySourcedFieldId;
+  record: CaseRecord;
+  value: string;
+}) {
+  return (
+    <div className={attorneyFieldShellClass(fieldId, record)}>
+      <AttorneyFieldLabel fieldId={fieldId} record={record} />
+      <p className="text-sm font-medium text-navy-950">{value}</p>
+    </div>
+  );
+}
+
+function AttorneyLongInfo({
+  fieldId,
+  record,
+  value,
+  className,
+}: {
+  fieldId: AttorneySourcedFieldId;
+  record: CaseRecord;
+  value: string;
+  className?: string;
+}) {
+  return (
+    <div className={`${attorneyFieldShellClass(fieldId, record)} ${className ?? ""}`}>
+      <AttorneyFieldLabel fieldId={fieldId} record={record} />
+      <p className="whitespace-pre-wrap text-sm leading-6 text-navy-950">{value.trim() ? value : "Not set"}</p>
+    </div>
+  );
+}
+
+function AttorneyField({
+  fieldId,
+  record,
+  children,
+  className,
+}: {
+  fieldId: AttorneySourcedFieldId;
+  record: CaseRecord;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <label className={`${attorneyFieldShellClass(fieldId, record)} block ${className ?? ""}`}>
+      <AttorneyFieldLabel fieldId={fieldId} record={record} />
+      {children}
+    </label>
   );
 }
 

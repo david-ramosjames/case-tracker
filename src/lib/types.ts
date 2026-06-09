@@ -22,6 +22,7 @@ export type ReleaseStatus = "No" | "Signed";
 export type ClosingStatus = "No" | "Drafted" | "Approved" | "Signed";
 export type CheckStatus = "Deposited" | "No" | "Sent";
 export type DisbursedStatus = "No" | "Yes";
+export type ReductionsStatus = "Not Complete" | "Sent" | "Approved" | "N/A";
 
 export type StageSuggestion = {
   id: string;
@@ -74,6 +75,7 @@ export type SettlementResult = {
   closingStatus: ClosingStatus;
   checkStatus: CheckStatus;
   disbursedStatus: DisbursedStatus;
+  reductionsStatus: ReductionsStatus;
   releaseSignedAt: string | null;
   closingSignedAt: string | null;
   checkDepositedAt: string | null;

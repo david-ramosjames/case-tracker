@@ -34,6 +34,7 @@ const RESULT_FIELD_LABELS: Record<keyof SettlementResult, string> = {
   closingStatus: "Closing",
   checkStatus: "Check",
   disbursedStatus: "Disbursed",
+  reductionsStatus: "Reductions",
   releaseSignedAt: "Release signed",
   closingSignedAt: "Closing signed",
   checkDepositedAt: "Check deposited",

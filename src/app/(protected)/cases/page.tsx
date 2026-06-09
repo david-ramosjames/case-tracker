@@ -14,7 +14,7 @@ export default async function CasesPage() {
         title={viewer.isAttorney ? "Your case pipeline" : "Active case pipeline"}
         description={
           viewer.isAttorney
-            ? "Your assigned cases only. Complete % highlights what still needs updating. Cases older than three months into a new commission year are archived from your view."
+            ? "Your assigned cases only. Complete % highlights what still needs updating. Cases archive when date signed is old, or when disburse date falls outside your current commission year."
             : "Sort and filter shared case records with tracker-specific forecasts, review freshness, missing info flags, and quick access to case detail."
         }
       />

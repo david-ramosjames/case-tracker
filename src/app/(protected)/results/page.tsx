@@ -6,15 +6,16 @@ export const dynamic = "force-dynamic";
 
 export default async function ResultsPage() {
   const { records, users, settings, viewer } = await loadViewerCaseBundle();
+  const resultsRecords = records.filter((record) => record.tracker.result.settlementDate);
 
   return (
     <>
       <PageHeader
         eyebrow="Results"
         title="Settlement and disbursement tracker"
-        description="Track release signed, closing signed, check deposited, check disbursed, result quarter, and disbursement timing."
+        description="Cases with a settlement date only. Track release, closing, check deposited, disbursed, result quarter, and disbursement timing."
       />
-      <ResultsTable records={records} users={users} settings={settings} viewer={viewer} />
+      <ResultsTable records={resultsRecords} users={users} settings={settings} viewer={viewer} />
     </>
   );
 }

@@ -17,6 +17,7 @@ import {
   CASE_TYPE_OPTIONS,
   caseTypeSelectOptions,
   CASE_SIZE_OPTIONS,
+  deriveCaseSizeFromMinimumValue,
   EXPECTED_LITIGATION_OPTIONS,
   LIABILITY_OPTIONS,
   getTargetPeriodOptions,
@@ -35,6 +36,7 @@ import {
   type TrackerEntry,
 } from "@/lib/types";
 import { cn, formatDate, formatOptionalDate } from "@/lib/utils";
+import { compareCaseNumbers } from "@/lib/csv/parse";
 import { type ReactNode, type RefObject, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type SortKey = "completion" | "attorneyScore" | "caseNumber" | "clientName" | "dateSigned" | "dol" | "minimumValue" | "policyLimits";
@@ -131,7 +133,7 @@ export function CaseTable({
       .sort((a, b) => {
         const dir = sortDirection === "asc" ? 1 : -1;
 
-        const tieBreak = () => a.shared.caseNumber.localeCompare(b.shared.caseNumber);
+        const tieBreak = () => compareCaseNumbers(a.shared.caseNumber, b.shared.caseNumber);
 
         if (sortKey === "attorneyScore") {
           const aScore = getCaseAttorneyScore(a).percent;
@@ -148,10 +150,7 @@ export function CaseTable({
         }
 
         if (sortKey === "caseNumber") {
-          const aNum = Number(a.shared.caseNumber);
-          const bNum = Number(b.shared.caseNumber);
-          if (Number.isFinite(aNum) && Number.isFinite(bNum) && aNum !== bNum) return dir * (aNum - bNum);
-          return dir * a.shared.caseNumber.localeCompare(b.shared.caseNumber);
+          return dir * compareCaseNumbers(a.shared.caseNumber, b.shared.caseNumber);
         }
 
         if (sortKey === "clientName") {
@@ -276,7 +275,7 @@ export function CaseTable({
     }));
   }
 
-  function updateTrackerField<K extends "caseStage" | "targetResolutionQuarter" | "liability" | "caseSize" | "minimumValue" | "referralFee" | "policyLimits" | "expectedLitigation">(
+  function updateTrackerField<K extends "caseStage" | "targetResolutionQuarter" | "liability" | "minimumValue" | "referralFee" | "policyLimits" | "expectedLitigation">(
     recordId: string,
     key: K,
     value: TrackerEntry[K],
@@ -285,6 +284,9 @@ export function CaseTable({
       const tracker = {
         ...record.tracker,
         [key]: value,
+        ...(key === "minimumValue"
+          ? { caseSize: deriveCaseSizeFromMinimumValue(value as number | null) }
+          : {}),
       };
       return {
         ...record,
@@ -512,13 +514,8 @@ export function CaseTable({
                         ))}
                       </InlineSelect>
                     </TableCell>
-                    <TableCell>
-                      <InlineSelect value={record.tracker.caseSize ?? ""} onChange={(value) => updateTrackerField(record.shared.id, "caseSize", value || null)}>
-                        <option value="">Not set</option>
-                        {CASE_SIZE_OPTIONS.map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                      </InlineSelect>
+                    <TableCell className="text-sm text-navy-950">
+                      {record.tracker.caseSize ?? "—"}
                     </TableCell>
                     <TableCell>
                       <InlineNumberInput
