@@ -66,6 +66,21 @@ export type SharedCase = {
   updatedAt: string;
 };
 
+/** One disbursement party within a case (e.g. minor on a parent case). Shares case # and tracker fields; settlement/disburse differ. */
+export type CaseDisbursement = {
+  id: string;
+  /** Party on the disbursing sheet (column D) — may differ from the firm primary client. */
+  partyLabel: string | null;
+  disburseDate: string | null;
+  settlementDate: string | null;
+  settlementAmount: number | null;
+  attorneyFees: number | null;
+  weight: number;
+  /** From sheet column B: non-blank while still waiting to disburse. */
+  pendingRemaining: boolean;
+  syncedAt: string | null;
+};
+
 export type SettlementResult = {
   settlementDate: string | null;
   settlementAmount: number | null;
@@ -111,6 +126,10 @@ export type TrackerEntry = {
   gvNotes: string;
   lrjNotes: string;
   result: SettlementResult;
+  /** Opt-in: most cases stay single-disbursement (default false). */
+  multipleDisbursementsEnabled: boolean;
+  expectedDisbursementCount: number;
+  disbursements: CaseDisbursement[];
   lastQuarterlyCheckInAt: string | null;
   lastSourcesLitUpdatedAt: string | null;
   lastSlackReminderAt: string | null;
@@ -254,6 +273,8 @@ export type TrackerUpdateInput = Partial<
     | "lastQuarterlyCheckInAt"
     | "lastSourcesLitUpdatedAt"
     | "forecastNotes"
+    | "expectedDisbursementCount"
+    | "multipleDisbursementsEnabled"
   >
 >;
 

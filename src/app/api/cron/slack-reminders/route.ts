@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cleanCaseNumber } from "@/lib/csv/parse";
+import { syncSettlementsFromGoogleSheetIfConfigured } from "@/lib/google/settlements-sync";
 import { syncSlackChannelsFromGoogleSheetIfConfigured } from "@/lib/google/sheets-sync";
 import { getCronSecret } from "@/lib/slack/config";
 import { sendSlackCaseReminders } from "@/lib/slack/notify";
@@ -23,8 +24,11 @@ export async function GET(request: Request) {
     const skipSheetSync = searchParams.get("syncSheet") === "false";
 
     const sheetSync = skipSheetSync
-      ? { synced: 0, configured: false }
+      ? { synced: 0, configured: false, dateSignedUpdated: 0 }
       : await syncSlackChannelsFromGoogleSheetIfConfigured();
+    const settlementSync = skipSheetSync
+      ? { configured: false, casesProcessed: 0, disbursementsSynced: 0, settlementsUpdated: 0, skippedNoTracker: 0 }
+      : await syncSettlementsFromGoogleSheetIfConfigured();
 
     let records = await getCases();
     const settings = await getSettings();
@@ -42,6 +46,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       sheetSync,
+      settlementSync,
       reminders,
       filter: caseNumberParam ? { caseNumber: caseNumberParam, force } : null,
     });

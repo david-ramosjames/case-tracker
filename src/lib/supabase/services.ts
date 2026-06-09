@@ -1,5 +1,6 @@
 import { buildFieldValidationRowPatch } from "@/lib/attorney-score";
 import { cleanCaseNumber } from "@/lib/csv/parse";
+import { disbursementWeight } from "@/lib/disbursements";
 import { parseCaseBackfillCsv, type ParsedCaseBackfillRow } from "@/lib/csv/case-backfill";
 import { trackerTouchesSourcesLit } from "@/lib/slack/reminders";
 import {
@@ -18,6 +19,7 @@ import {
   applyDerivedResultFields,
   applyDerivedSettlementResult,
   deriveCaseSizeFromMinimumValue,
+  deriveResultQuarterFromDisburseDate,
   normalizeCaseType,
 } from "@/lib/case-options";
 import { deriveCaseStatusFromTracker } from "@/lib/case-status";
@@ -26,6 +28,7 @@ import {
   type ActivityLogEntry,
   type AppUser,
   type AttorneyGoal,
+  type CaseDisbursement,
   type CaseRecord,
   type CaseStage,
   type CaseBackfillImportResult,
@@ -73,6 +76,7 @@ type DatabaseValue = string | number | boolean | string[] | Record<string, unkno
 type UnknownRow = Record<string, DatabaseValue | undefined>;
 type TrackerEntryRow = UnknownRow;
 type ResultRow = UnknownRow;
+type DisbursementRow = UnknownRow;
 type SuggestionRow = UnknownRow;
 
 const DEFAULT_SETTINGS: CaseTrackerSettings = {
@@ -108,22 +112,30 @@ async function createSharedDataClient() {
 export async function getCases(): Promise<CaseRecord[]> {
   const [sharedClient, trackerClient] = await Promise.all([createSharedDataClient(), createTrackerClient()]);
 
-  const [{ data: caseRows }, { data: trackerRows }, { data: resultRows }, { data: contactRows }, { data: suggestionRows }] =
-    await Promise.all([
-      sharedClient
-        .from("cases")
-        .select("id,case_number,client_name,name,status,case_type,date_of_incident,assigned_contact_ids,created_at,updated_at")
-        .order("created_at", { ascending: false }),
-      trackerClient.from("case_tracker_entries").select("*").order("created_at", { ascending: false }),
-      trackerClient.from("case_tracker_results").select("*"),
-      sharedClient.from("contacts").select("id,name,email,role"),
-      trackerClient.from("case_tracker_stage_suggestions").select("*"),
-    ]);
+  const [
+    { data: caseRows },
+    { data: trackerRows },
+    { data: resultRows },
+    { data: disbursementRows },
+    { data: contactRows },
+    { data: suggestionRows },
+  ] = await Promise.all([
+    sharedClient
+      .from("cases")
+      .select("id,case_number,client_name,name,status,case_type,date_of_incident,assigned_contact_ids,created_at,updated_at")
+      .order("created_at", { ascending: false }),
+    trackerClient.from("case_tracker_entries").select("*").order("created_at", { ascending: false }),
+    trackerClient.from("case_tracker_results").select("*"),
+    trackerClient.from("case_tracker_disbursements").select("*").order("created_at", { ascending: true }),
+    sharedClient.from("contacts").select("id,name,email,role"),
+    trackerClient.from("case_tracker_stage_suggestions").select("*"),
+  ]);
 
   return mapRecords({
     cases: (caseRows ?? []) as DocketFlowCaseRow[],
     trackers: (trackerRows ?? []) as TrackerEntryRow[],
     results: (resultRows ?? []) as ResultRow[],
+    disbursements: (disbursementRows ?? []) as DisbursementRow[],
     contacts: (contactRows ?? []) as ContactRow[],
     suggestions: (suggestionRows ?? []) as SuggestionRow[],
   });
@@ -299,7 +311,8 @@ export async function updateTrackerEntry(
         console.error("Slack tracker notification failed", error);
       }
     }
-    return { tracker, activity: activity ?? undefined };
+    const refreshed = await getCaseById(caseId);
+    return { tracker: refreshed?.tracker ?? tracker, activity: activity ?? undefined };
   }
 
   const { data: inserted, error: insertError } = await client
@@ -323,7 +336,8 @@ export async function updateTrackerEntry(
     "Tracker row was created from live DocketFlow case data.",
     options.actor,
   );
-  return { tracker, activity: activity ?? undefined };
+  const refreshed = await getCaseById(caseId);
+  return { tracker: refreshed?.tracker ?? tracker, activity: activity ?? undefined };
 }
 
 export async function importCaseBackfillCsv(
@@ -460,6 +474,158 @@ export async function updateSharedCaseFields(
       .or(`case_id.eq.${caseId},id.eq.${caseId}`);
     if (error) throw error;
   }
+}
+
+/** Apply Date Signed from Client Contact Status column H to matching tracker rows. */
+export async function syncDateSignedFromSheet(entries: Array<{ caseNumber: string; dateSigned: string }>) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) throw new Error("Service role required to sync date signed from sheet.");
+
+  const byCaseNumber = new Map<string, string>();
+  for (const entry of entries) {
+    const key = cleanCaseNumber(entry.caseNumber);
+    if (key && entry.dateSigned) byCaseNumber.set(key, entry.dateSigned);
+  }
+
+  let updated = 0;
+  for (const [caseNumber, dateSigned] of byCaseNumber) {
+    const { data, error } = await admin
+      .from("case_tracker_entries")
+      .update({ date_signed_override: dateSigned })
+      .eq("case_number", caseNumber)
+      .select("id");
+    if (error) throw new Error(error.message);
+    updated += data?.length ?? 0;
+  }
+
+  return { updated };
+}
+
+type SettlementSheetCasePayload = {
+  caseNumber: string;
+  sheetRowCount: number;
+  settlementDate: string | null;
+  totalSettlementAmount: number | null;
+  totalAttorneyFees: number | null;
+  latestDisburseDate: string | null;
+  allDisbursed: boolean;
+  pendingDisbursementCount?: number;
+  completedDisbursementCount?: number;
+  disbursements: Array<{
+    sheetRowKey: string;
+    partyLabel: string | null;
+    disburseDate: string | null;
+    settlementDate: string | null;
+    settlementAmount: number | null;
+    attorneyFees: number | null;
+    pendingRemaining?: boolean;
+  }>;
+};
+
+/** Apply settlement/disbursement rows from the settlements Google Sheet. */
+export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload[]) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) throw new Error("Service role required to sync settlements from sheet.");
+
+  let casesProcessed = 0;
+  let disbursementsSynced = 0;
+  let settlementsUpdated = 0;
+  let skippedNoTracker = 0;
+  const syncedAt = new Date().toISOString();
+
+  for (const item of cases) {
+    const caseNumber = cleanCaseNumber(item.caseNumber);
+    if (!caseNumber) continue;
+
+    const { data: trackerRows, error: trackerError } = await admin
+      .from("case_tracker_entries")
+      .select("id,case_id,case_number,expected_disbursement_count")
+      .eq("case_number", caseNumber);
+
+    if (trackerError) throw new Error(trackerError.message);
+    const trackerRow = trackerRows?.[0];
+    if (!trackerRow) {
+      skippedNoTracker += 1;
+      continue;
+    }
+
+    const trackerEntryId = toString(trackerRow.id, "");
+    const caseId = toStringOrNull(trackerRow.case_id) ?? trackerEntryId;
+
+    const attorneyExpected = Math.max(1, toNumber(trackerRow.expected_disbursement_count) ?? 1);
+    const totalSlots = Math.max(attorneyExpected, item.sheetRowCount);
+    const weight = disbursementWeight(totalSlots);
+
+    const { error: trackerUpdateError } = await admin
+      .from("case_tracker_entries")
+      .update({
+        expected_disbursement_count: totalSlots,
+        multiple_disbursements_enabled: totalSlots > 1,
+      })
+      .eq("id", trackerEntryId);
+    if (trackerUpdateError) throw new Error(trackerUpdateError.message);
+
+    const { error: pruneError } = await admin
+      .from("case_tracker_disbursements")
+      .delete()
+      .eq("case_number", caseNumber)
+      .not("sheet_row_key", "is", null);
+    if (pruneError) throw new Error(pruneError.message);
+
+    for (const disbursement of item.disbursements) {
+      const payload = {
+        tracker_entry_id: trackerEntryId,
+        case_id: isUuid(caseId) ? caseId : null,
+        case_number: caseNumber,
+        label: disbursement.partyLabel,
+        disburse_date: disbursement.disburseDate ? toDateOnly(disbursement.disburseDate) : null,
+        settlement_date: disbursement.settlementDate ? toDateOnly(disbursement.settlementDate) : null,
+        settlement_amount: disbursement.settlementAmount,
+        attorney_fees: disbursement.attorneyFees,
+        weight,
+        pending_remaining: disbursement.pendingRemaining ?? false,
+        sheet_row_key: disbursement.sheetRowKey,
+        synced_at: syncedAt,
+      };
+      const { error } = await admin.from("case_tracker_disbursements").upsert(payload, { onConflict: "sheet_row_key" });
+      if (error) throw new Error(error.message);
+      disbursementsSynced += 1;
+    }
+
+    const { data: existingResult } = await admin
+      .from("case_tracker_results")
+      .select("*")
+      .or(`tracker_entry_id.eq.${trackerEntryId},case_id.eq.${caseId}`)
+      .maybeSingle();
+
+    const settlementDate = item.settlementDate ? toDateOnly(item.settlementDate) : null;
+    const disburseDate = item.latestDisburseDate ? toDateOnly(item.latestDisburseDate) : null;
+    const resultPayload = {
+      case_id: isUuid(caseId) ? caseId : null,
+      tracker_entry_id: trackerEntryId,
+      settlement_date: settlementDate ?? existingResult?.settlement_date ?? null,
+      settlement_amount: item.totalSettlementAmount ?? existingResult?.settlement_amount ?? null,
+      attorney_fees: item.totalAttorneyFees ?? existingResult?.attorney_fees ?? null,
+      disburse_date: disburseDate,
+      check_disbursed_at: disburseDate ? new Date(disburseDate).toISOString() : existingResult?.check_disbursed_at ?? null,
+      disbursed_status: item.allDisbursed ? "Yes" : disburseDate ? existingResult?.disbursed_status ?? "No" : "No",
+      result_quarter: disburseDate ? deriveResultQuarterFromDisburseDate(disburseDate) : existingResult?.result_quarter ?? null,
+      reductions_status: disburseDate ? "Deposited" : existingResult?.reductions_status ?? "Not Complete",
+    };
+
+    if (existingResult) {
+      const { error } = await admin.from("case_tracker_results").update(resultPayload).eq("id", existingResult.id);
+      if (error) throw new Error(error.message);
+    } else {
+      const { error } = await admin.from("case_tracker_results").insert(resultPayload);
+      if (error) throw new Error(error.message);
+    }
+
+    casesProcessed += 1;
+    if (settlementDate || disburseDate) settlementsUpdated += 1;
+  }
+
+  return { casesProcessed, disbursementsSynced, settlementsUpdated, skippedNoTracker };
 }
 
 export async function createTrackerComment(
@@ -780,12 +946,14 @@ function mapRecords({
   cases,
   trackers,
   results,
+  disbursements,
   contacts,
   suggestions,
 }: {
   cases: DocketFlowCaseRow[];
   trackers: TrackerEntryRow[];
   results: ResultRow[];
+  disbursements: DisbursementRow[];
   contacts: ContactRow[];
   suggestions: SuggestionRow[];
 }): CaseRecord[] {
@@ -797,14 +965,20 @@ function mapRecords({
   );
   const suggestionsByTrackerId = groupBy(suggestions, "tracker_entry_id");
   const suggestionsByCaseId = groupBy(suggestions, "case_id");
+  const disbursementsByTrackerId = groupBy(disbursements, "tracker_entry_id");
+  const disbursementsByCaseNumber = groupBy(disbursements, "case_number");
 
   const recordsFromCases = cases.map((caseRow) => {
     const trackerRow = trackerByCaseId.get(caseRow.id) ?? makeEmptyTrackerRow(caseRow);
     const trackerId = toString(trackerRow.id, "");
     const resultRow = resultsByTrackerId.get(trackerId) ?? resultsByCaseId.get(caseRow.id) ?? null;
+    const caseNumber = cleanCaseNumber(caseRow.case_number ?? "");
     return rowToCaseRecord(caseRow, trackerRow, resultRow, contacts, [
       ...(suggestionsByTrackerId.get(trackerId) ?? []),
       ...(suggestionsByCaseId.get(caseRow.id) ?? []),
+    ], [
+      ...(disbursementsByTrackerId.get(trackerId) ?? []),
+      ...(disbursementsByCaseNumber.get(caseNumber) ?? []),
     ]);
   });
 
@@ -813,15 +987,21 @@ function mapRecords({
       const caseId = toStringOrNull(trackerRow.case_id);
       return !caseId || !caseById.has(caseId);
     })
-    .map((trackerRow) =>
-      rowToCaseRecord(
+    .map((trackerRow) => {
+      const trackerId = toString(trackerRow.id, "");
+      const caseNumber = cleanCaseNumber(toString(trackerRow.case_number, ""));
+      return rowToCaseRecord(
         null,
         trackerRow,
-        resultsByTrackerId.get(toString(trackerRow.id, "")) ?? null,
+        resultsByTrackerId.get(trackerId) ?? null,
         contacts,
-        suggestionsByTrackerId.get(toString(trackerRow.id, "")) ?? [],
-      ),
-    );
+        suggestionsByTrackerId.get(trackerId) ?? [],
+        [
+          ...(disbursementsByTrackerId.get(trackerId) ?? []),
+          ...(disbursementsByCaseNumber.get(caseNumber) ?? []),
+        ],
+      );
+    });
 
   return [...recordsFromCases, ...orphanTrackerRecords];
 }
@@ -832,6 +1012,7 @@ function rowToCaseRecord(
   resultRow: ResultRow | null,
   contacts: ContactRow[],
   suggestionRows: SuggestionRow[],
+  disbursementRows: DisbursementRow[] = [],
 ): CaseRecord {
   const assignedContacts = contacts.filter((contact) => caseRow?.assigned_contact_ids?.includes(contact.id));
   const attorneyContact =
@@ -843,7 +1024,7 @@ function rowToCaseRecord(
     assignedContacts.find((contact) => contact.role === "paralegal") ??
     makeTemporaryContact("unassigned-paralegal", toString(trackerRow.paralegal_name, "Unassigned Paralegal"), "paralegal");
   const sharedId = caseRow?.id ?? toString(trackerRow.id, "unlinked-case");
-  const tracker = rowToTrackerEntry(trackerRow, resultRow, suggestionRows);
+  const tracker = rowToTrackerEntry(trackerRow, resultRow, suggestionRows, disbursementRows);
 
   return {
     shared: {
@@ -875,7 +1056,35 @@ function trackerFieldsFromRow(row: TrackerEntryRow) {
   };
 }
 
-function rowToTrackerEntry(row: TrackerEntryRow, resultRow: ResultRow | null, suggestionRows: SuggestionRow[]): TrackerEntry {
+function disbursementRowToDisbursement(row: DisbursementRow): CaseDisbursement {
+  return {
+    id: toString(row.id, "disbursement"),
+    partyLabel: toStringOrNull(row.label),
+    disburseDate: toStringOrNull(row.disburse_date),
+    settlementDate: toStringOrNull(row.settlement_date),
+    settlementAmount: toNumber(row.settlement_amount),
+    attorneyFees: toNumber(row.attorney_fees),
+    weight: toNumber(row.weight) ?? 1,
+    pendingRemaining: toBoolean(row.pending_remaining, false),
+    syncedAt: toStringOrNull(row.synced_at),
+  };
+}
+
+function uniqueDisbursements(rows: DisbursementRow[]) {
+  const byId = new Map<string, CaseDisbursement>();
+  for (const row of rows) {
+    const mapped = disbursementRowToDisbursement(row);
+    byId.set(mapped.id, mapped);
+  }
+  return [...byId.values()];
+}
+
+function rowToTrackerEntry(
+  row: TrackerEntryRow,
+  resultRow: ResultRow | null,
+  suggestionRows: SuggestionRow[],
+  disbursementRows: DisbursementRow[] = [],
+): TrackerEntry {
   const minimumValue = toNumber(row.minimum_value);
   const entry: TrackerEntry = {
     id: toString(row.id, "pending-tracker-entry"),
@@ -904,6 +1113,9 @@ function rowToTrackerEntry(row: TrackerEntryRow, resultRow: ResultRow | null, su
     gvNotes: toString(row.gv_notes, ""),
     lrjNotes: toString(row.lrj_notes, ""),
     result: rowToResult(resultRow),
+    multipleDisbursementsEnabled: toBoolean(row.multiple_disbursements_enabled, false),
+    expectedDisbursementCount: Math.max(1, toNumber(row.expected_disbursement_count) ?? 1),
+    disbursements: uniqueDisbursements(disbursementRows),
     lastQuarterlyCheckInAt: toStringOrNull(row.last_quarterly_check_in_at),
     lastSourcesLitUpdatedAt: toStringOrNull(row.last_sources_lit_updated_at),
     lastSlackReminderAt: toStringOrNull(row.last_slack_reminder_at),
@@ -1042,6 +1254,12 @@ function trackerUpdateToRow(input: TrackerUpdateInput, markReviewed = true) {
     last_quarterly_check_in_at: input.lastQuarterlyCheckInAt,
     last_sources_lit_updated_at: input.lastSourcesLitUpdatedAt,
     forecast_notes: input.forecastNotes,
+    ...(input.multipleDisbursementsEnabled !== undefined
+      ? { multiple_disbursements_enabled: input.multipleDisbursementsEnabled }
+      : {}),
+    ...(input.expectedDisbursementCount !== undefined
+      ? { expected_disbursement_count: Math.max(1, Math.trunc(input.expectedDisbursementCount)) }
+      : {}),
     ...(markReviewed ? { last_reviewed_at: new Date().toISOString() } : {}),
   };
 }

@@ -16,19 +16,37 @@ export function getCronSecret() {
   return process.env.CRON_SECRET?.trim() ?? "";
 }
 
-export function getGoogleSheetsConfig() {
-  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID?.trim();
+export function getGoogleSheetsCredentials() {
   const clientEmail = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim();
   const privateKey = process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
-  if (!spreadsheetId || !clientEmail || !privateKey) return null;
-  return { spreadsheetId, clientEmail, privateKey };
+  if (!clientEmail || !privateKey) return null;
+  return { clientEmail, privateKey };
+}
+
+export function getGoogleSheetsConfig() {
+  const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID?.trim();
+  const credentials = getGoogleSheetsCredentials();
+  if (!spreadsheetId || !credentials) return null;
+  return { spreadsheetId, ...credentials };
 }
 
 export function isGoogleSheetsSyncConfigured() {
   return getGoogleSheetsConfig() !== null;
 }
 
-/** Client Contact Status tab: A Slack Channel, B Case No, … F Status, G Slack Channel ID (Sheet1!A:H) */
+export function getGoogleSheetsSettlementConfig() {
+  const spreadsheetId = process.env.GOOGLE_SHEETS_SETTLEMENT_SPREADSHEET_ID?.trim();
+  const range = process.env.GOOGLE_SHEETS_SETTLEMENT_RANGE?.trim();
+  const credentials = getGoogleSheetsCredentials();
+  if (!spreadsheetId || !range || !credentials) return null;
+  return { spreadsheetId, range, ...credentials };
+}
+
+export function isGoogleSheetsSettlementSyncConfigured() {
+  return getGoogleSheetsSettlementConfig() !== null;
+}
+
+/** Client Contact Status tab: A Slack Channel, B Case No, … F Status, G Slack Channel ID, H Date Created (Sheet1!A:H) */
 export function getGoogleSheetsRange() {
   return process.env.GOOGLE_SHEETS_CHANNEL_RANGE?.trim() || "Sheet1!A:H";
 }

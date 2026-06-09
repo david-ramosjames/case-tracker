@@ -38,15 +38,15 @@ Sources: Updated treatment plan...
 
 ## 4. Case channel mapping (Google Sheet only — no manual entry)
 
-**You never type Slack channels into the case tracker.** The app reads your existing Google Sheet and stores Case # → channel name, Slack channel ID, and optional Status.
+**You never type Slack channels into the case tracker.** The app reads your existing Google Sheet and stores Case # → channel name, Slack channel ID, optional Status, and **Date Signed** (from column H).
 
 **Client Contact Status** workbook, tab **Sheet1** (default range `Sheet1!A:H`):
 
-| A Slack Channel | B Case No | C Case | D Lead Attorney | E Paralegal | F Status | G Slack Channel ID |
-|-----------------|-----------|--------|-----------------|-------------|----------|---------------------|
-| jessicagutierrez-153 | 153 | Jessicagutierrez | Eric Cuellar | Giselle | Litigation | C0123456789 |
+| A Slack Channel | B Case No | C Case | D Lead Attorney | E Paralegal | F Status | G Slack Channel ID | H Date Created |
+|-----------------|-----------|--------|-----------------|-------------|----------|---------------------|----------------|
+| jessicagutierrez-153 | 153 | Jessicagutierrez | Eric Cuellar | Giselle | Litigation | C0123456789 | 11/30/2018 |
 
-Sync uses **Slack Channel** (A), **Case No** (B), **Status** (F), and **Slack Channel ID** (G). IDs are stored in Supabase (`case_slack_channels`); posting and reminders read from the database only — not the sheet or Slack channel list on each save. Re-import when the sheet changes. Client name and attorney/paralegal columns are ignored for mapping.
+Sync uses **Slack Channel** (A), **Case No** (B), **Status** (F), **Slack Channel ID** (G), and **Date Created** (H) as the tracker’s Date Signed. Column H accepts `MM/DD/YYYY` or timestamps (e.g. `7/1/2019 9:51:15`). Dates are written to `case_tracker_entries.date_signed_override` and take precedence over DocketFlow `created_at`. IDs are stored in Supabase (`case_slack_channels`); posting and reminders read from the database only — not the sheet or Slack channel list on each save. Re-import when the sheet changes. Client name and attorney/paralegal columns are ignored for mapping.
 
 Set env vars:
 

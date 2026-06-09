@@ -18,22 +18,27 @@ export function getCurrentCommissionYear(startMonth: number, refDate = new Date(
   return getCommissionYearLabel(refDate, startMonth);
 }
 
-/** True when a case is past the attorney visibility window (3+ months into current commission year). */
+export function getRecordDisburseDate(input: {
+  disburseDate: string | null;
+  checkDisbursedAt: string | null;
+}): string | null {
+  return input.disburseDate?.trim() || input.checkDisbursedAt?.trim() || null;
+}
+
+/** True when a disbursed case belongs to a prior commission year (commission years follow disburse date). */
 export function isCaseHistoricalForAttorney(
-  dateSigned: string,
+  disburseDate: string | null | undefined,
   startMonth: number,
   refDate = new Date(),
 ): boolean {
-  const signed = new Date(dateSigned);
-  if (Number.isNaN(signed.getTime())) return false;
+  if (!disburseDate?.trim()) return false;
 
-  const caseCommissionYear = getCommissionYearLabel(signed, startMonth);
+  const disbursed = new Date(disburseDate);
+  if (Number.isNaN(disbursed.getTime())) return false;
+
+  const caseCommissionYear = getCommissionYearLabel(disbursed, startMonth);
   const currentCommissionYear = getCurrentCommissionYear(startMonth, refDate);
-  if (caseCommissionYear >= currentCommissionYear) return false;
-
-  const currentYearStart = getCommissionYearStartDate(currentCommissionYear, startMonth);
-  const historicalCutoff = addMonths(currentYearStart, 3);
-  return refDate >= historicalCutoff;
+  return caseCommissionYear < currentCommissionYear;
 }
 
 export function isDateInCommissionYear(dateValue: string | null | undefined, commissionYear: number, startMonth: number) {
@@ -72,12 +77,6 @@ export function isTargetQuarterInCommissionYear(
   if (quarterYear == null) return false;
   if (startMonth === 1) return quarterYear === commissionYear;
   return quarterYear === commissionYear || quarterYear === commissionYear + 1;
-}
-
-function addMonths(date: Date, months: number) {
-  const next = new Date(date);
-  next.setMonth(next.getMonth() + months);
-  return next;
 }
 
 export type CommissionYearQuarter = 1 | 2 | 3 | 4;

@@ -1,4 +1,4 @@
-import { isCaseHistoricalForAttorney, isDisbursementOutsideCurrentCommissionYear } from "@/lib/commission-year";
+import { getAttorneyDisbursementVisibility } from "@/lib/disbursements";
 import { type SessionUser } from "@/lib/auth/types";
 import { type AppUser, type AttorneyGoal, type CaseRecord, type UserRole } from "@/lib/types";
 
@@ -44,14 +44,12 @@ export function getAttorneyCommissionStartMonth(goals: AttorneyGoal[], attorneyI
 
 export function isRecordHistoricalForViewer(record: CaseRecord, goals: AttorneyGoal[]) {
   const startMonth = getAttorneyCommissionStartMonth(goals, record.shared.attorneyId);
-  return isCaseHistoricalForAttorney(record.shared.dateSigned, startMonth);
+  return getAttorneyDisbursementVisibility(record.tracker, startMonth).historical;
 }
 
 function isRecordHiddenFromAttorney(record: CaseRecord, attorneyId: string, goals: AttorneyGoal[]) {
   const startMonth = getAttorneyCommissionStartMonth(goals, attorneyId);
-  if (isCaseHistoricalForAttorney(record.shared.dateSigned, startMonth)) return true;
-  if (isDisbursementOutsideCurrentCommissionYear(record.tracker.result.disburseDate, startMonth)) return true;
-  return false;
+  return getAttorneyDisbursementVisibility(record.tracker, startMonth).hidden;
 }
 
 export function getCasePipelineFilter(record: CaseRecord, goals: AttorneyGoal[]): CasePipelineFilter {

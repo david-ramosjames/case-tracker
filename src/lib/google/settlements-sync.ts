@@ -1,0 +1,170 @@
+import { cleanCaseNumber, parseSheetDate } from "@/lib/csv/parse";
+import { fetchGoogleSheetValues, findSheetColumnIndex } from "@/lib/google/client";
+import {
+  getGoogleSheetsCredentials,
+  getGoogleSheetsSettlementConfig,
+  isGoogleSheetsSettlementSyncConfigured,
+} from "@/lib/slack/config";
+import { syncSettlementsFromSheet } from "@/lib/supabase/services";
+
+export type SettlementSheetSyncResult = {
+  configured: boolean;
+  casesProcessed: number;
+  disbursementsSynced: number;
+  settlementsUpdated: number;
+  skippedNoTracker: number;
+};
+
+type ParsedSettlementRow = {
+  sheetRowKey: string;
+  caseNumber: string;
+  partyLabel: string | null;
+  /** Non-blank B = still waiting to disburse; blank B = this row has disbursed. */
+  pendingRemaining: boolean;
+  settlementDate: string | null;
+  disburseDate: string | null;
+  settlementAmount: number | null;
+  attorneyFees: number | null;
+};
+
+function parseSheetMoney(value: string) {
+  const numeric = Number(value.replace(/[$,%\s]/g, ""));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+/** Column B: remaining slots while pending (e.g. 0.5, 1, 2). Blank once disbursed. */
+function isPendingDisbursementCountCell(value: string) {
+  return value.trim().length > 0;
+}
+
+export async function syncSettlementsFromGoogleSheetIfConfigured(): Promise<SettlementSheetSyncResult> {
+  if (!isGoogleSheetsSettlementSyncConfigured()) {
+    return { configured: false, casesProcessed: 0, disbursementsSynced: 0, settlementsUpdated: 0, skippedNoTracker: 0 };
+  }
+  return { configured: true, ...(await syncSettlementsFromGoogleSheet()) };
+}
+
+export async function syncSettlementsFromGoogleSheet() {
+  const config = getGoogleSheetsSettlementConfig();
+  const credentials = getGoogleSheetsCredentials();
+  if (!config || !credentials) {
+    throw new Error(
+      "Settlement sheet sync is not configured. Set GOOGLE_SHEETS_SETTLEMENT_SPREADSHEET_ID, GOOGLE_SHEETS_SETTLEMENT_RANGE, and service account env vars.",
+    );
+  }
+
+  const rows = await fetchGoogleSheetValues(config.spreadsheetId, config.range, credentials);
+  if (rows.length < 2) {
+    return { casesProcessed: 0, disbursementsSynced: 0, settlementsUpdated: 0, skippedNoTracker: 0 };
+  }
+
+  const header = rows[0].map((cell) => cell.trim().toLowerCase());
+  const countIdx = findSheetColumnIndex(header, [
+    (cell) => cell.includes("disbursement") && cell.includes("count"),
+    (cell) => cell === "count of disbursements" || cell === "# of disbursements",
+    (cell) => cell === "count",
+  ]);
+  const caseIdx = findSheetColumnIndex(header, [
+    (cell) => /case\s*(#|no|number)/.test(cell),
+    (cell) => cell === "case no" || cell === "case #" || cell === "case",
+  ]);
+  const clientIdx = findSheetColumnIndex(header, [(cell) => cell === "client"]);
+  const settlementIdx = findSheetColumnIndex(header, [
+    (cell) => cell.includes("settlement") && cell.includes("date"),
+    (cell) => cell === "settlement date",
+  ]);
+  const grossSettlementIdx = findSheetColumnIndex(header, [
+    (cell) => cell.includes("gross") && cell.includes("settlement"),
+    (cell) => cell === "gross settlement",
+  ]);
+  const netFeesIdx = findSheetColumnIndex(header, [
+    (cell) => cell.includes("net") && cell.includes("attorney") && cell.includes("fee"),
+    (cell) => cell === "net attorney fees",
+  ]);
+  const disbursedIdx = findSheetColumnIndex(header, [
+    (cell) => cell.includes("date") && cell.includes("disburs"),
+    (cell) => cell === "date disbursed" || cell === "disburse date" || cell === "disbursed date",
+  ]);
+
+  const resolvedCountIdx = countIdx >= 0 ? countIdx : 1;
+  const resolvedCaseIdx = caseIdx >= 0 ? caseIdx : 2;
+  const resolvedClientIdx = clientIdx >= 0 ? clientIdx : 3;
+  const resolvedSettlementIdx = settlementIdx >= 0 ? settlementIdx : 7;
+  const resolvedGrossIdx = grossSettlementIdx >= 0 ? grossSettlementIdx : 9;
+  const resolvedNetFeesIdx = netFeesIdx >= 0 ? netFeesIdx : 10;
+  const resolvedDisbursedIdx = disbursedIdx >= 0 ? disbursedIdx : 25;
+
+  const parsed: ParsedSettlementRow[] = [];
+  rows.slice(1).forEach((row, offset) => {
+    const sheetRowNumber = offset + 2;
+    const caseNumber = cleanCaseNumber(row[resolvedCaseIdx] ?? "");
+    if (!caseNumber) return;
+
+    const countCell = (row[resolvedCountIdx] ?? "").trim();
+    const settlementDate = parseSheetDate(row[resolvedSettlementIdx] ?? "");
+    const disburseDate = parseSheetDate(row[resolvedDisbursedIdx] ?? "");
+
+    const partyLabel = (row[resolvedClientIdx] ?? "").trim() || null;
+
+    parsed.push({
+      sheetRowKey: `${config.spreadsheetId}:${sheetRowNumber}`,
+      caseNumber,
+      partyLabel,
+      pendingRemaining: isPendingDisbursementCountCell(countCell),
+      settlementDate,
+      disburseDate,
+      settlementAmount: parseSheetMoney(row[resolvedGrossIdx] ?? ""),
+      attorneyFees: parseSheetMoney(row[resolvedNetFeesIdx] ?? ""),
+    });
+  });
+
+  const byCase = new Map<string, ParsedSettlementRow[]>();
+  for (const row of parsed) {
+    byCase.set(row.caseNumber, [...(byCase.get(row.caseNumber) ?? []), row]);
+  }
+
+  const payload = [...byCase.entries()].map(([caseNumber, caseRows]) => {
+    const sheetRowCount = caseRows.length;
+    const settlementDate = caseRows.map((row) => row.settlementDate).find(Boolean) ?? null;
+    const disbursements = caseRows.map((row) => ({
+      sheetRowKey: row.sheetRowKey,
+      partyLabel: row.partyLabel,
+      disburseDate: row.disburseDate,
+      settlementDate: row.settlementDate ?? settlementDate,
+      settlementAmount: row.settlementAmount,
+      attorneyFees: row.attorneyFees,
+      pendingRemaining: row.pendingRemaining,
+    }));
+    const disbursedDates = disbursements.map((item) => item.disburseDate).filter(Boolean) as string[];
+    const latestDisburseDate = disbursedDates.length
+      ? disbursedDates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0]
+      : null;
+    const pendingCount = disbursements.filter((item) => item.pendingRemaining).length;
+    const completedCount = disbursements.filter((item) => !item.pendingRemaining).length;
+
+    const totalSettlementAmount = sumMoney(caseRows.map((row) => row.settlementAmount));
+    const totalAttorneyFees = sumMoney(caseRows.map((row) => row.attorneyFees));
+
+    return {
+      caseNumber,
+      sheetRowCount,
+      settlementDate,
+      totalSettlementAmount,
+      totalAttorneyFees,
+      latestDisburseDate,
+      allDisbursed: pendingCount === 0,
+      pendingDisbursementCount: pendingCount,
+      completedDisbursementCount: completedCount,
+      disbursements,
+    };
+  });
+
+  return syncSettlementsFromSheet(payload);
+}
+
+function sumMoney(values: Array<number | null>) {
+  return values.reduce<number | null>((total, value) => {
+    if (value == null) return total;
+    return (total ?? 0) + value;
+  }, null);
+}

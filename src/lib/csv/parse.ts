@@ -64,6 +64,20 @@ export function normalizeCsvHeader(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+/** Parse dates from Google Sheets or CSV (serial numbers, MM/DD/YYYY, ISO, timestamps). */
+export function parseSheetDate(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const numeric = Number(trimmed);
+  if (Number.isFinite(numeric) && numeric > 25000) {
+    return new Date(Date.UTC(1899, 11, 30) + numeric * 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+}
+
 export function cleanCaseNumber(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return "";

@@ -39,6 +39,7 @@ import {
   getProjectedFeeValue,
   needsQuarterlyCheckIn,
 } from "@/lib/calculations";
+import { DisbursementPartiesCard } from "@/components/cases/disbursement-parties-card";
 import { type SessionUser } from "@/lib/auth/types";
 import { formatSlackChannelLabel, getSlackChannelArchiveUrl } from "@/lib/slack/links";
 import {
@@ -193,6 +194,8 @@ export function CaseDetailView({
         statusNotes: nextTracker.statusNotes,
         lastQuarterlyCheckInAt: nextTracker.lastQuarterlyCheckInAt,
         forecastNotes: nextTracker.forecastNotes,
+        multipleDisbursementsEnabled: nextTracker.multipleDisbursementsEnabled,
+        expectedDisbursementCount: nextTracker.expectedDisbursementCount,
         result: nextTracker.result,
       },
       actor: {
@@ -925,6 +928,15 @@ export function CaseDetailView({
           </CardContent>
         </Card>
 
+        {(isResultsEditing || record.tracker.multipleDisbursementsEnabled || record.tracker.disbursements.length > 1) ? (
+          <DisbursementPartiesCard
+            record={record}
+            editing={isResultsEditing}
+            onEnabledChange={(enabled) => updateField("multipleDisbursementsEnabled", enabled)}
+            onExpectedCountChange={(count) => updateField("expectedDisbursementCount", count)}
+          />
+        ) : null}
+
         <Card>
           <CardHeader>
             <CardTitle>Comments and Manager Notes</CardTitle>
@@ -975,7 +987,20 @@ export function CaseDetailView({
       </div>
 
       <aside className="space-y-6">
-        <AttorneyFieldsChecklist record={record} />
+        <AttorneyFieldsChecklist
+          record={record}
+          quarterOptions={quarterOptions}
+          onUpdateField={updateField}
+          onMinimumValueChange={(value) => {
+            updateField("minimumValue", value);
+            updateField("caseSize", deriveCaseSizeFromMinimumValue(value));
+            updateField("estimatedFeeValue", value ? Math.round(value * getFeePercent(record)) : null);
+          }}
+          onSave={() => saveTracker()}
+          isSaving={isSaving}
+          savedAt={savedAt}
+          errorMessage={errorMessage}
+        />
 
         <Card>
           <CardHeader>

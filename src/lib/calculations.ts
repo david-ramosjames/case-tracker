@@ -7,10 +7,15 @@ import {
   getCommissionYearQuarterWindows,
   getCommissionYearStartDate,
   getCurrentCommissionYear,
-  isDateInCommissionYear,
   isTargetQuarterInCommissionYear,
   type CommissionYearQuarter,
 } from "@/lib/commission-year";
+import {
+  getWeightedDisbursedFeesInCommissionYear,
+  getWeightedDisbursedFeesInCommissionQuarter,
+  getWeightedSettlementInCommissionQuarter,
+  recordHasDisbursementInCommissionYear,
+} from "@/lib/disbursements";
 import {
   type AttorneyGoal,
   type CaseStage,
@@ -163,12 +168,11 @@ function isRecordInGoalCommissionYear(record: CaseRecord, goal: AttorneyGoal) {
   const startMonth = goal.commissionYearStartMonth;
   const commissionYear = goal.year;
 
-  if (isDateInCommissionYear(record.shared.dateSigned, commissionYear, startMonth)) return true;
-  if (isTargetQuarterInCommissionYear(record.tracker.targetResolutionQuarter, commissionYear, startMonth)) return true;
-  if (isDateInCommissionYear(record.tracker.result.checkDisbursedAt, commissionYear, startMonth)) return true;
-  if (isDateInCommissionYear(record.tracker.result.settlementDate, commissionYear, startMonth)) return true;
+  if (recordHasDisbursementInCommissionYear(record, commissionYear, startMonth)) {
+    return true;
+  }
 
-  return false;
+  return isTargetQuarterInCommissionYear(record.tracker.targetResolutionQuarter, commissionYear, startMonth);
 }
 
 function getCommissionYearElapsedPercentage(goal: AttorneyGoal, refDate = new Date()) {
@@ -225,9 +229,9 @@ export function getAttorneyGoalProgress(records: CaseRecord[], goals: AttorneyGo
         .map((record) => record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue),
     );
     const actualDisbursedFees = sum(
-      attorneyRecords
-        .filter((record) => record.tracker.result.checkDisbursedAt)
-        .map((record) => record.tracker.result.attorneyFees ?? record.tracker.disbursedAmount),
+      attorneyRecords.map((record) =>
+        getWeightedDisbursedFeesInCommissionYear(record, goal.year, goal.commissionYearStartMonth),
+      ),
     );
     const quarterGoal = [goal.q1Goal, goal.q2Goal, goal.q3Goal, goal.q4Goal][currentQuarterNumber - 1];
     const annualProgress = goal.annualFeeGoal > 0 ? (actualSettledFees / goal.annualFeeGoal) * 100 : 0;
@@ -333,21 +337,34 @@ export function getAttorneyCommissionQuarterRows(
       return getCommissionQuarterForDate(anchor, goal.year, goal.commissionYearStartMonth) === window.quarter;
     });
 
-    const actualRecords = attorneyRecords.filter((record) => {
-      if (!record.tracker.result.checkDisbursedAt) return false;
-      const disburseDate = record.tracker.result.disburseDate ?? record.tracker.result.checkDisbursedAt;
-      if (!disburseDate) return false;
-      return getCommissionQuarterForDate(disburseDate, goal.year, goal.commissionYearStartMonth) === window.quarter;
-    });
-
     const plan =
       mode === "gross"
         ? sum(planRecords.map((record) => record.tracker.minimumValue))
         : sum(planRecords.map((record) => getProjectedFeeValue(record)));
     const actual =
       mode === "gross"
-        ? sum(actualRecords.map((record) => record.tracker.result.settlementAmount))
-        : sum(actualRecords.map((record) => record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue));
+        ? sum(
+            attorneyRecords.map((record) =>
+              getWeightedSettlementInCommissionQuarter(
+                record,
+                goal.year,
+                goal.commissionYearStartMonth,
+                window.quarter,
+                getCommissionQuarterForDate,
+              ),
+            ),
+          )
+        : sum(
+            attorneyRecords.map((record) =>
+              getWeightedDisbursedFeesInCommissionQuarter(
+                record,
+                goal.year,
+                goal.commissionYearStartMonth,
+                window.quarter,
+                getCommissionQuarterForDate,
+              ),
+            ),
+          );
 
     return {
       label: `CY Q${window.quarter}` as const,
