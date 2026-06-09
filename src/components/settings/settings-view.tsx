@@ -1,4 +1,6 @@
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -22,6 +24,12 @@ export function SettingsView({
   return (
     <div className="grid gap-6 xl:grid-cols-[1fr_24rem]">
       <div className="space-y-6">
+        <div className="flex justify-end">
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/faq">Product FAQ</Link>
+          </Button>
+        </div>
+
         <BackfillImportCard />
 
         <SlackSyncCard />

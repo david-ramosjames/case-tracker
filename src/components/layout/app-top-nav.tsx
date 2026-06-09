@@ -2,7 +2,17 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, BriefcaseBusiness, CircleDollarSign, Gavel, LayoutDashboard, LogOut, Settings, Target } from "lucide-react";
+import {
+  BarChart3,
+  BriefcaseBusiness,
+  CircleDollarSign,
+  Gavel,
+  HelpCircle,
+  LayoutDashboard,
+  LogOut,
+  Settings,
+  Target,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { type SessionUser } from "@/lib/auth/types";
@@ -15,6 +25,7 @@ const navItems = [
   { href: "/output", label: "Output", icon: BarChart3 },
   { href: "/goals", label: "Goals", icon: Target },
   { href: "/settings", label: "Settings", icon: Settings, adminOnly: true },
+  { href: "/faq", label: "FAQ", icon: HelpCircle, adminOnly: true },
 ];
 
 export function AppTopNav({ sessionUser }: { sessionUser: SessionUser }) {
