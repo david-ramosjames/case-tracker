@@ -124,3 +124,25 @@ export async function resolveSlackChannelId(channelNameOrId: string) {
   const map = await loadChannelNameMap();
   return lookupChannelId(channelNameOrId, map);
 }
+
+type SlackHistoryMessage = { ts: string; text?: string };
+
+export async function fetchChannelHistory(
+  channelId: string,
+  options?: { oldest?: string; limit?: number },
+): Promise<SlackHistoryMessage[]> {
+  if (!isSlackEnabled()) return [];
+
+  const payload = await slackApi<{
+    ok: boolean;
+    messages?: SlackHistoryMessage[];
+  }>("conversations.history", {
+    channel: resolveSlackChannelParam(channelId),
+    limit: options?.limit ?? 20,
+    oldest: options?.oldest,
+    inclusive: false,
+  });
+
+  const messages = [...(payload.messages ?? [])].sort((a, b) => Number(a.ts) - Number(b.ts));
+  return messages;
+}

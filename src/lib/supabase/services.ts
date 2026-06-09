@@ -11,6 +11,7 @@ import {
 import { describeSlackThreadAppliedLabels, parseSlackThreadUpdate } from "@/lib/slack/thread-update";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { buildStagePatchFromConfirmation } from "@/lib/stage-triggers";
 import { buildTrackerActivityDescription, describeTrackerChanges } from "@/lib/tracker-changes";
 import {
   CASE_STAGE_OPTIONS,
@@ -530,6 +531,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
   let casesProcessed = 0;
   let disbursementsSynced = 0;
   let settlementsUpdated = 0;
+  let stagesAutoSettled = 0;
   let skippedNoTracker = 0;
   const syncedAt = new Date().toISOString();
 
@@ -539,7 +541,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
 
     const { data: trackerRows, error: trackerError } = await admin
       .from("case_tracker_entries")
-      .select("id,case_id,case_number,expected_disbursement_count")
+      .select("id,case_id,case_number,expected_disbursement_count,case_stage")
       .eq("case_number", caseNumber);
 
     if (trackerError) throw new Error(trackerError.message);
@@ -623,9 +625,25 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
 
     casesProcessed += 1;
     if (settlementDate || disburseDate) settlementsUpdated += 1;
+
+    if (settlementDate) {
+      const currentStage = normalizeStage(toStringOrNull(trackerRow.case_stage));
+      if (currentStage !== "Settled") {
+        const record = await getCaseById(caseId);
+        if (record) {
+          const patch = buildStagePatchFromConfirmation(record, "Settled");
+          await updateTrackerEntry(caseId, patch, {
+            actor: { userName: "Disbursing spreadsheet sync" },
+            markReviewed: true,
+            changeInput: patch,
+          });
+          stagesAutoSettled += 1;
+        }
+      }
+    }
   }
 
-  return { casesProcessed, disbursementsSynced, settlementsUpdated, skippedNoTracker };
+  return { casesProcessed, disbursementsSynced, settlementsUpdated, stagesAutoSettled, skippedNoTracker };
 }
 
 export async function createTrackerComment(
@@ -1306,6 +1324,9 @@ function suggestionRowToSuggestion(row: SuggestionRow): StageSuggestion {
     detectedAt: toString(row.detected_at, toString(row.created_at, new Date().toISOString())),
     confirmedAt: toStringOrNull(row.confirmed_at),
     dismissedAt: toStringOrNull(row.dismissed_at),
+    slackChannelId: toStringOrNull(row.slack_channel_id),
+    slackConfirmationThreadTs: toStringOrNull(row.slack_confirmation_thread_ts),
+    confirmationPostedAt: toStringOrNull(row.confirmation_posted_at),
   };
 }
 
@@ -1458,7 +1479,16 @@ function normalizeCommentType(value: string | null | undefined): CommentType {
 }
 
 function normalizeStageSignalSource(value: string | null | undefined): StageSignalSource {
-  if (value === "slack" || value === "workflow" || value === "matter_update" || value === "manual") return value;
+  if (
+    value === "slack" ||
+    value === "workflow" ||
+    value === "matter_update" ||
+    value === "manual" ||
+    value === "pulse" ||
+    value === "sheet"
+  ) {
+    return value;
+  }
   return "manual";
 }
 

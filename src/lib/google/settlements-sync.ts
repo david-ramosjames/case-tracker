@@ -12,6 +12,7 @@ export type SettlementSheetSyncResult = {
   casesProcessed: number;
   disbursementsSynced: number;
   settlementsUpdated: number;
+  stagesAutoSettled: number;
   skippedNoTracker: number;
 };
 
@@ -39,7 +40,14 @@ function isPendingDisbursementCountCell(value: string) {
 
 export async function syncSettlementsFromGoogleSheetIfConfigured(): Promise<SettlementSheetSyncResult> {
   if (!isGoogleSheetsSettlementSyncConfigured()) {
-    return { configured: false, casesProcessed: 0, disbursementsSynced: 0, settlementsUpdated: 0, skippedNoTracker: 0 };
+    return {
+      configured: false,
+      casesProcessed: 0,
+      disbursementsSynced: 0,
+      settlementsUpdated: 0,
+      stagesAutoSettled: 0,
+      skippedNoTracker: 0,
+    };
   }
   return { configured: true, ...(await syncSettlementsFromGoogleSheet()) };
 }
@@ -55,7 +63,13 @@ export async function syncSettlementsFromGoogleSheet() {
 
   const rows = await fetchGoogleSheetValues(config.spreadsheetId, config.range, credentials);
   if (rows.length < 2) {
-    return { casesProcessed: 0, disbursementsSynced: 0, settlementsUpdated: 0, skippedNoTracker: 0 };
+    return {
+      casesProcessed: 0,
+      disbursementsSynced: 0,
+      settlementsUpdated: 0,
+      stagesAutoSettled: 0,
+      skippedNoTracker: 0,
+    };
   }
 
   const header = rows[0].map((cell) => cell.trim().toLowerCase());

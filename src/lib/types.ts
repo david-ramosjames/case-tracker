@@ -16,7 +16,7 @@ export type ConfidenceLevel = "Low" | "Medium" | "High";
 
 export type ExpectedLitigationStatus = "Pre" | "Lit" | "Expect";
 
-export type StageSignalSource = "slack" | "workflow" | "matter_update" | "manual";
+export type StageSignalSource = "slack" | "workflow" | "matter_update" | "manual" | "pulse" | "sheet";
 
 export type ReleaseStatus = "No" | "Signed";
 export type ClosingStatus = "No" | "Drafted" | "Approved" | "Signed";
@@ -34,6 +34,9 @@ export type StageSuggestion = {
   detectedAt: string;
   confirmedAt: string | null;
   dismissedAt: string | null;
+  slackChannelId: string | null;
+  slackConfirmationThreadTs: string | null;
+  confirmationPostedAt: string | null;
 };
 
 export type CommentType =

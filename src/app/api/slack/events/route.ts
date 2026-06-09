@@ -1,8 +1,12 @@
 import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { findCaseForSlackThread } from "@/lib/slack/channels";
-import { getSlackSigningSecret, isSlackEnabled } from "@/lib/slack/config";
 import { postSlackMessage } from "@/lib/slack/client";
+import { getSlackSigningSecret, isSlackEnabled } from "@/lib/slack/config";
+import {
+  handleStageConfirmationReaction,
+  handleStageConfirmationReply,
+} from "@/lib/slack/stage-confirmation";
 import { formatSlackThreadAppliedMessage, parseSlackThreadUpdate } from "@/lib/slack/thread-update";
 import { applySlackThreadUpdate } from "@/lib/supabase/services";
 
@@ -18,6 +22,12 @@ type SlackEventPayload = {
     thread_ts?: string;
     ts?: string;
     bot_id?: string;
+    reaction?: string;
+    item?: {
+      type?: string;
+      channel?: string;
+      ts?: string;
+    };
   };
 };
 
@@ -62,6 +72,35 @@ function isUserThreadReply(event: SlackEventPayload["event"]): event is SlackThr
   return true;
 }
 
+type SlackReactionEvent = NonNullable<SlackEventPayload["event"]> & {
+  reaction: string;
+  item: { channel: string; ts: string };
+};
+
+function isReactionAdded(event: SlackEventPayload["event"]): event is SlackReactionEvent {
+  return Boolean(
+    event?.type === "reaction_added" &&
+      event.reaction &&
+      event.item?.channel &&
+      event.item?.ts &&
+      !event.bot_id,
+  );
+}
+
+function stageDisplay(stage: string) {
+  const labels: Record<string, string> = {
+    Onboarding: "Onboarding",
+    Txt: "Treatment",
+    Dmd: "Demand",
+    Lit: "Litigation",
+    Settled: "Settled",
+    Disengaged: "Disengaged",
+    Terminated: "Terminated",
+    Referred: "Referred",
+  };
+  return labels[stage] ?? stage;
+}
+
 export async function POST(request: Request) {
   const rawBody = await request.text();
   const timestamp = request.headers.get("x-slack-request-timestamp");
@@ -90,19 +129,56 @@ export async function POST(request: Request) {
   }
 
   const event = payload.event;
+
+  if (isReactionAdded(event)) {
+    try {
+      const result = await handleStageConfirmationReaction(event.item.ts, event.reaction, "Slack reaction");
+      if (result.handled && result.action === "confirmed" && result.stage) {
+        await postSlackMessage({
+          channel: event.item.channel,
+          threadTs: event.item.ts,
+          text: `Updated case tracker: *${stageDisplay(result.stage)}*.`,
+        }).catch(() => undefined);
+      }
+    } catch (error) {
+      console.error("Slack stage confirmation reaction failed", error);
+    }
+    return NextResponse.json({ ok: true });
+  }
+
   if (!isUserThreadReply(event)) {
     return NextResponse.json({ ok: true });
   }
 
+  try {
+    const stageResult = await handleStageConfirmationReply(event.thread_ts, event.text, "Slack thread");
+    if (stageResult.handled) {
+      if (stageResult.action === "confirmed" && stageResult.stage) {
+        await postSlackMessage({
+          channel: event.channel,
+          threadTs: event.thread_ts,
+          text: `Updated case tracker: *${stageDisplay(stageResult.stage)}*.`,
+        });
+      } else if (stageResult.action === "dismissed") {
+        await postSlackMessage({
+          channel: event.channel,
+          threadTs: event.thread_ts,
+          text: "Dismissed — no change to case tracker.",
+        });
+      }
+      return NextResponse.json({ ok: true });
+    }
+  } catch (error) {
+    console.error("Slack stage confirmation reply failed", error);
+  }
+
   const mapping = await findCaseForSlackThread(event.channel, event.thread_ts);
   if (!mapping?.caseId) {
-    // Only respond in threads that are already linked to a reminder the bot sent.
     return NextResponse.json({ ok: true });
   }
 
   const parsedUpdate = parseSlackThreadUpdate(event.text);
   if (!parsedUpdate) {
-    // Ignore normal chatter in threads. We only respond when the message looks like a case-tracker update.
     return NextResponse.json({ ok: true });
   }
 

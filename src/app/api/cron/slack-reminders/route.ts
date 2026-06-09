@@ -4,6 +4,7 @@ import { syncSettlementsFromGoogleSheetIfConfigured } from "@/lib/google/settlem
 import { syncSlackChannelsFromGoogleSheetIfConfigured } from "@/lib/google/sheets-sync";
 import { getCronSecret } from "@/lib/slack/config";
 import { sendSlackCaseReminders } from "@/lib/slack/notify";
+import { runDailyStageWorkflow } from "@/lib/slack/stage-workflow";
 import { getCases, getSettings } from "@/lib/supabase/services";
 
 export async function GET(request: Request) {
@@ -27,8 +28,17 @@ export async function GET(request: Request) {
       ? { synced: 0, configured: false, dateSignedUpdated: 0 }
       : await syncSlackChannelsFromGoogleSheetIfConfigured();
     const settlementSync = skipSheetSync
-      ? { configured: false, casesProcessed: 0, disbursementsSynced: 0, settlementsUpdated: 0, skippedNoTracker: 0 }
+      ? {
+          configured: false,
+          casesProcessed: 0,
+          disbursementsSynced: 0,
+          settlementsUpdated: 0,
+          stagesAutoSettled: 0,
+          skippedNoTracker: 0,
+        }
       : await syncSettlementsFromGoogleSheetIfConfigured();
+
+    const stageWorkflow = await runDailyStageWorkflow({ forcePulse: force });
 
     let records = await getCases();
     const settings = await getSettings();
@@ -47,6 +57,7 @@ export async function GET(request: Request) {
       ok: true,
       sheetSync,
       settlementSync,
+      stageWorkflow,
       reminders,
       filter: caseNumberParam ? { caseNumber: caseNumberParam, force } : null,
     });

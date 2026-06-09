@@ -12,8 +12,11 @@ Apply `supabase/sql/006_slack_integration.sql` in the Supabase SQL editor.
 2. **OAuth & Permissions** → Bot Token Scopes:
    - `chat:write`
    - `channels:read`
+   - `channels:history` (read `#daily-pulse` recaps)
    - `groups:read`
+   - `groups:history` (if `#daily-pulse` or case channels are **private**)
    - `groups:write` (if case channels are **private** — required to post)
+   - `reactions:read` (✅ confirmations on stage prompts)
 3. Install to workspace and copy **Bot User OAuth Token** → `SLACK_BOT_TOKEN`.
 4. **Basic Information** → copy **Signing Secret** → `SLACK_SIGNING_SECRET`.
 5. Set `NEXT_PUBLIC_SLACK_WORKSPACE_URL` to your workspace URL (e.g. `https://ramosjameslaw.slack.com`) so case detail pages show **Open in Slack** links.
@@ -23,7 +26,9 @@ Apply `supabase/sql/006_slack_integration.sql` in the Supabase SQL editor.
 1. Enable **Event Subscriptions**.
 2. Request URL: `https://YOUR_DOMAIN/api/slack/events` (e.g. `https://rjl-case-tracker.vercel.app/api/slack/events`)
 3. Set `SLACK_SIGNING_SECRET` on your host (Vercel → Environment Variables) and redeploy before clicking **Retry**.
-4. Subscribe to bot event: `message.channels` (and `message.groups` if private case channels).
+4. Subscribe to bot events:
+   - `message.channels` (and `message.groups` if private case channels)
+   - `reaction_added` (stage confirmation ✅)
 5. Reinstall the app if prompted.
 
 If verification fails with “didn't respond with the challenge”, the app was likely redirecting Slack to `/login` — ensure the latest deploy includes the public `/api/slack/*` middleware exception.
@@ -96,6 +101,56 @@ Response includes `sheetSync: { synced, configured }` and `reminders: { sent, sk
 
 Set `CRON_SECRET` in env. Optional: `SLACK_REMINDER_COOLDOWN_DAYS=3` (default) to avoid spamming the same case.
 
+Response also includes `stageWorkflow: { treatment: { promoted }, pulse: { processed, posted, skipped } }`.
+
+## 6. Stage confirmation workflow (#daily-pulse)
+
+Apply `supabase/sql/017_stage_confirmation_workflow.sql` in the Supabase SQL editor.
+
+The daily cron (after sheet sync) also:
+
+1. **Auto-promotes** Onboarding → Treatment (`Txt`) when date signed is 10+ days ago
+2. **Auto-sets Settled** when the disbursing spreadsheet has a settlement date (disburse dates update result fields only — there is no separate “Disbursed” stage)
+3. **Reads `#daily-pulse`** for Pulse recaps and posts a confirmation prompt in each mapped case channel
+
+Set either:
+
+```env
+SLACK_DAILY_PULSE_CHANNEL_ID=C0123456789
+```
+
+or resolve by name (default `daily-pulse`):
+
+```env
+SLACK_DAILY_PULSE_CHANNEL_NAME=daily-pulse
+```
+
+**Pulse format** (example):
+
+```text
+Pulse — Potential case status changes
+
+#abelperez-835 → Settled
+(medium confidence) (*release signed*)
+"Release was signed yesterday" — …
+```
+
+The bot posts in `#abelperez-835`:
+
+> Case #835 — confirm status change?  
+> Reply with ✅, `confirmed`, or `Stage: Demand`.
+
+Confirm in the **thread** (or react ✅ on the bot message). The tracker updates and the bot replies `Updated case tracker: Settled.`
+
+Pending suggestions also appear on the case detail page (Confirm / Dismiss persists to the database).
+
+**Reprocess pulse** (ignore cursor):
+
+```bash
+curl "https://YOUR_DOMAIN/api/cron/slack-reminders?force=true&syncSheet=false" \
+  -H "Authorization: Bearer YOUR_CRON_SECRET"
+```
+
 ## What triggers Slack
 
 | Trigger | Channel message |
@@ -103,6 +158,8 @@ Set `CRON_SECRET` in env. Optional: `SLACK_REMINDER_COOLDOWN_DAYS=3` (default) t
 | 90-day review / missing quarter, minimum, or stale Sources & Lit | Reminder + thread template |
 | Other missing required fields | Included in reminder |
 | Case stage saved | Short message in channel |
+| `#daily-pulse` recap item | Confirmation prompt in case channel |
+| ✅ / thread reply on stage prompt | Tracker stage updated |
 | Sources & Litigation saved | Confirmation message |
 | Comment / Manager note / Attorney update posted | Full note text |
 

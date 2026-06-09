@@ -54,3 +54,12 @@ export function getGoogleSheetsRange() {
 export const SLACK_REMINDER_COOLDOWN_DAYS = Number(process.env.SLACK_REMINDER_COOLDOWN_DAYS ?? 3);
 export const SOURCES_LIT_REVIEW_DAYS = 90;
 export const QUARTERLY_REVIEW_DAYS = 90;
+
+export async function getDailyPulseChannelId() {
+  const fromEnv = process.env.SLACK_DAILY_PULSE_CHANNEL_ID?.trim();
+  if (fromEnv) return fromEnv;
+
+  const name = process.env.SLACK_DAILY_PULSE_CHANNEL_NAME?.trim() || "daily-pulse";
+  const { resolveSlackChannelId } = await import("@/lib/slack/client");
+  return resolveSlackChannelId(name);
+}

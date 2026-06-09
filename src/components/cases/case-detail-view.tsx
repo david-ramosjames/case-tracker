@@ -93,6 +93,7 @@ export function CaseDetailView({
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingComment, setIsAddingComment] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [stageActionId, setStageActionId] = useState<string | null>(null);
   const [deleteDocketflowCase, setDeleteDocketflowCase] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const router = useRouter();
@@ -275,52 +276,95 @@ export function CaseDetailView({
     }
   }
 
-  function confirmStageSuggestion(signalId: string) {
-    const now = new Date().toISOString();
+  async function confirmStageSuggestion(signalId: string) {
     const signal = tracker.detectedStageSignals.find((item) => item.id === signalId);
     if (!signal) return;
 
-    setTracker((current) => ({
-      ...current,
-      caseStage: signal.suggestedStage,
-      expectedLitigation: signal.suggestedExpectedLitigation,
-      estimatedFeeValue: current.minimumValue
-        ? Math.round(
-            current.minimumValue *
-              deriveResultFeePercent({
-                caseStage: current.caseStage,
-                expectedLitigation: signal.suggestedExpectedLitigation,
-                referralFee: current.referralFee,
-              }),
-          )
-        : current.estimatedFeeValue,
-      detectedStageSignals: current.detectedStageSignals.map((item) =>
-        item.id === signalId ? { ...item, confirmedAt: now } : item,
-      ),
-      updatedAt: now,
-    }));
-    setActivity((current) => [
-      {
-        id: `activity-${Date.now()}`,
-        caseId: record.shared.id,
-        userId: "u-manager-1",
-        userName: "Harper Quinn",
-        action: "Stage suggestion confirmed",
-        description: `Confirmed ${signal.source} signal: case stage is now ${signal.suggestedStage}.`,
-        createdAt: now,
-      },
-      ...current,
-    ]);
+    setStageActionId(signalId);
+    setErrorMessage(null);
+    try {
+      const response = await fetch(`/api/stage-suggestions/${signalId}/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        tracker?: TrackerEntry;
+      };
+      if (!response.ok) throw new Error(payload.error ?? "Unable to confirm stage suggestion.");
+
+      const now = new Date().toISOString();
+      const savedTracker = payload.tracker;
+      setTracker((current) => ({
+        ...current,
+        ...(savedTracker ?? {
+          caseStage: signal.suggestedStage,
+          expectedLitigation: signal.suggestedExpectedLitigation,
+          estimatedFeeValue: current.minimumValue
+            ? Math.round(
+                current.minimumValue *
+                  deriveResultFeePercent({
+                    caseStage: signal.suggestedStage,
+                    expectedLitigation: signal.suggestedExpectedLitigation,
+                    referralFee: current.referralFee,
+                  }),
+              )
+            : current.estimatedFeeValue,
+        }),
+        detectedStageSignals: current.detectedStageSignals.map((item) =>
+          item.id === signalId ? { ...item, confirmedAt: now } : item,
+        ),
+        updatedAt: savedTracker?.updatedAt ?? now,
+      }));
+      if (savedTracker) {
+        setShared((current) => ({
+          ...current,
+          status: deriveCaseStatusFromTracker(savedTracker.caseStage, savedTracker.result.disbursedStatus),
+        }));
+      }
+      setActivity((current) => [
+        {
+          id: `activity-${Date.now()}`,
+          caseId: record.shared.id,
+          userId: sessionUser.id,
+          userName: sessionUser.name,
+          action: "Stage suggestion confirmed",
+          description: `Confirmed ${signal.source} signal: case stage is now ${signal.suggestedStage}.`,
+          createdAt: now,
+        },
+        ...current,
+      ]);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to confirm stage suggestion.");
+    } finally {
+      setStageActionId(null);
+    }
   }
 
-  function dismissStageSuggestion(signalId: string) {
-    const now = new Date().toISOString();
-    setTracker((current) => ({
-      ...current,
-      detectedStageSignals: current.detectedStageSignals.map((item) =>
-        item.id === signalId ? { ...item, dismissedAt: now } : item,
-      ),
-    }));
+  async function dismissStageSuggestion(signalId: string) {
+    const signal = tracker.detectedStageSignals.find((item) => item.id === signalId);
+    if (!signal) return;
+
+    setStageActionId(signalId);
+    setErrorMessage(null);
+    try {
+      const response = await fetch(`/api/stage-suggestions/${signalId}/dismiss`, { method: "POST" });
+      const payload = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Unable to dismiss stage suggestion.");
+
+      const now = new Date().toISOString();
+      setTracker((current) => ({
+        ...current,
+        detectedStageSignals: current.detectedStageSignals.map((item) =>
+          item.id === signalId ? { ...item, dismissedAt: now } : item,
+        ),
+      }));
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to dismiss stage suggestion.");
+    } finally {
+      setStageActionId(null);
+    }
   }
 
   async function addComment() {
@@ -468,10 +512,20 @@ export function CaseDetailView({
                   </div>
                   <p className="text-sm leading-6 text-muted-foreground">{signal.excerpt}</p>
                   <div className="mt-4 flex flex-wrap gap-2">
-                    <Button onClick={() => confirmStageSuggestion(signal.id)} variant="pink" size="sm">
-                      Confirm
+                    <Button
+                      onClick={() => void confirmStageSuggestion(signal.id)}
+                      variant="pink"
+                      size="sm"
+                      disabled={stageActionId === signal.id}
+                    >
+                      {stageActionId === signal.id ? "Saving…" : "Confirm"}
                     </Button>
-                    <Button onClick={() => dismissStageSuggestion(signal.id)} variant="outline" size="sm">
+                    <Button
+                      onClick={() => void dismissStageSuggestion(signal.id)}
+                      variant="outline"
+                      size="sm"
+                      disabled={stageActionId === signal.id}
+                    >
                       Dismiss
                     </Button>
                   </div>
