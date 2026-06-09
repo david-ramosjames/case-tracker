@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getFirmOutputMetrics } from "@/lib/calculations";
+import { getCurrentCommissionYearGoals, getFirmOutputMetrics } from "@/lib/calculations";
 import { type AppUser, type AttorneyGoal, type CaseRecord } from "@/lib/types";
 import { formatCurrency, percent } from "@/lib/utils";
 
@@ -35,19 +35,22 @@ export function OutputView({
     });
   }, [attorney, paralegal, records]);
 
-  const filteredGoals = useMemo(() => {
-    if (attorney !== "all") return goals.filter((goal) => goal.attorneyId === attorney);
-    const attorneyIds = new Set(filteredRecords.map((record) => record.shared.attorneyId));
-    return goals.filter((goal) => attorneyIds.has(goal.attorneyId));
+  const scopedGoals = useMemo(() => {
+    const attorneyIds =
+      attorney !== "all"
+        ? [attorney]
+        : [...new Set(filteredRecords.map((record) => record.shared.attorneyId))];
+    return getCurrentCommissionYearGoals(goals, attorneyIds);
   }, [attorney, filteredRecords, goals]);
 
-  const goalYear = useMemo(() => {
-    const years = filteredGoals.map((goal) => goal.year);
-    if (years.length === 0) return new Date().getFullYear();
-    return Math.max(...years);
-  }, [filteredGoals]);
+  const commissionYearLabel = useMemo(() => {
+    const years = [...new Set(scopedGoals.map((goal) => goal.year))].sort((a, b) => a - b);
+    if (years.length === 0) return String(new Date().getFullYear());
+    if (years.length === 1) return String(years[0]);
+    return `${years[0]}–${years[years.length - 1]}`;
+  }, [scopedGoals]);
 
-  const output = useMemo(() => getFirmOutputMetrics(filteredRecords, filteredGoals, goalYear), [filteredGoals, filteredRecords, goalYear]);
+  const output = useMemo(() => getFirmOutputMetrics(filteredRecords, scopedGoals), [filteredRecords, scopedGoals]);
   const { results } = output;
 
   const activeFilterCount = [attorney !== "all", paralegal !== "all"].filter(Boolean).length;
@@ -102,7 +105,7 @@ export function OutputView({
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-6">
-        <SummaryCard label="Target (top-down)" value={formatCurrency(results.annualFeeGoal)} detail={`${goalYear} commission year fee goal`} />
+        <SummaryCard label="Target (top-down)" value={formatCurrency(results.annualFeeGoal)} detail={`${commissionYearLabel} commission year fee goal`} />
         <SummaryCard label="Plan (bottom-up)" value={formatCurrency(results.planFees)} detail="Forecast fees from active cases in this commission year" />
         <SummaryCard label="Gross Settled" value={formatCurrency(results.grossSettled)} detail="Settlement amounts signed" />
         <SummaryCard label="Gross Disbursed" value={formatCurrency(results.grossDisbursed)} detail="Settlement dollars disbursed" />
@@ -114,7 +117,7 @@ export function OutputView({
         <CardHeader>
           <CardTitle>Results vs Goals</CardTitle>
           <CardDescription>
-            Full-year goal and current pacing view for settlements and attorney fees
+            {commissionYearLabel} commission year — full-year goal and current pacing for settlements and attorney fees
             {attorney !== "all" || paralegal !== "all" ? " (filtered)." : "."}
           </CardDescription>
         </CardHeader>
@@ -217,10 +220,6 @@ export function OutputView({
         </Card>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <QuarterTable title="Gross Settlements Disbursed" rows={output.grossQuarterRows} />
-        <QuarterTable title="RJL Attorney Fees" rows={output.feeQuarterRows} />
-      </div>
     </div>
   );
 }
@@ -276,50 +275,3 @@ function MiniStat({ label, value, variant = "outline" }: { label: string; value:
   );
 }
 
-function QuarterTable({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: Array<{ quarter: string; months: string; target: number; plan: number; actual: number }>;
-}) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        <CardDescription>Quarterly target, current plan, and actual disbursed performance.</CardDescription>
-      </CardHeader>
-      <CardContent className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Quarter</TableHead>
-              <TableHead>Months</TableHead>
-              <TableHead>Target</TableHead>
-              <TableHead>Plan</TableHead>
-              <TableHead>Actual</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.quarter}>
-                <TableCell className="font-medium">{row.quarter}</TableCell>
-                <TableCell>{row.months}</TableCell>
-                <TableCell>{formatCurrency(row.target)}</TableCell>
-                <TableCell>{formatCurrency(row.plan)}</TableCell>
-                <TableCell>{formatCurrency(row.actual)}</TableCell>
-              </TableRow>
-            ))}
-            <TableRow>
-              <TableCell className="font-semibold">Total</TableCell>
-              <TableCell />
-              <TableCell className="font-semibold">{formatCurrency(rows.reduce((total, row) => total + row.target, 0))}</TableCell>
-              <TableCell className="font-semibold">{formatCurrency(rows.reduce((total, row) => total + row.plan, 0))}</TableCell>
-              <TableCell className="font-semibold">{formatCurrency(rows.reduce((total, row) => total + row.actual, 0))}</TableCell>
-            </TableRow>
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
-}

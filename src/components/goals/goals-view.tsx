@@ -1,8 +1,9 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getAttorneyGoalProgress } from "@/lib/calculations";
+import { QuarterPerformanceTables } from "@/components/goals/quarter-performance-tables";
+import { type ViewerContext } from "@/lib/auth/access";
+import { getAttorneyGoalProgress, getCurrentCommissionYearGoals, getFirmOutputMetrics } from "@/lib/calculations";
 import { type AppUser, type AttorneyGoal, type CaseRecord } from "@/lib/types";
 import { formatCurrency, percent } from "@/lib/utils";
 
@@ -10,12 +11,32 @@ export function GoalsView({
   records,
   goals,
   users,
+  viewer,
 }: {
   records: CaseRecord[];
   goals: AttorneyGoal[];
   users: AppUser[];
+  viewer: ViewerContext;
 }) {
-  const progress = getAttorneyGoalProgress(records, goals);
+  const attorneyUsers = users.filter((user) => user.role === "attorney");
+  const visibleAttorneyIds =
+    viewer.isAttorney && viewer.contactId ? [viewer.contactId] : attorneyUsers.map((user) => user.id);
+
+  const scopedGoals = getCurrentCommissionYearGoals(goals, visibleAttorneyIds);
+  const scopedRecords =
+    viewer.isAttorney && viewer.contactId
+      ? records.filter((record) => record.shared.attorneyId === viewer.contactId)
+      : records;
+
+  const progress = getAttorneyGoalProgress(scopedRecords, scopedGoals);
+  const output = getFirmOutputMetrics(scopedRecords, scopedGoals);
+
+  const commissionYearLabel = (() => {
+    const years = [...new Set(scopedGoals.map((goal) => goal.year))].sort((a, b) => a - b);
+    if (years.length === 0) return String(new Date().getFullYear());
+    if (years.length === 1) return String(years[0]);
+    return `${years[0]}–${years[years.length - 1]}`;
+  })();
 
   return (
     <div className="space-y-6">
@@ -29,7 +50,9 @@ export function GoalsView({
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <CardTitle>{attorney?.name}</CardTitle>
-                    <CardDescription>Annual fee goal {formatCurrency(item.goal.annualFeeGoal)}</CardDescription>
+                    <CardDescription>
+                      {commissionYearLabel} commission year · annual fee goal {formatCurrency(item.goal.annualFeeGoal)}
+                    </CardDescription>
                   </div>
                   <Badge variant={item.pace === "ahead" ? "success" : "warning"}>
                     {item.pace === "ahead" ? "Ahead" : "Behind"}
@@ -56,46 +79,7 @@ export function GoalsView({
         })}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Quarterly Goals</CardTitle>
-          <CardDescription>Annual and quarterly fee targets by attorney.</CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Attorney</TableHead>
-                <TableHead>Annual</TableHead>
-                <TableHead>Q1</TableHead>
-                <TableHead>Q2</TableHead>
-                <TableHead>Q3</TableHead>
-                <TableHead>Q4</TableHead>
-                <TableHead>Forecast</TableHead>
-                <TableHead>Actual settled</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {progress.map((item) => {
-                const attorney = users.find((user) => user.id === item.goal.attorneyId);
-
-                return (
-                  <TableRow key={item.goal.id}>
-                    <TableCell className="font-semibold">{attorney?.name}</TableCell>
-                    <TableCell>{formatCurrency(item.goal.annualFeeGoal)}</TableCell>
-                    <TableCell>{formatCurrency(item.goal.q1Goal)}</TableCell>
-                    <TableCell>{formatCurrency(item.goal.q2Goal)}</TableCell>
-                    <TableCell>{formatCurrency(item.goal.q3Goal)}</TableCell>
-                    <TableCell>{formatCurrency(item.goal.q4Goal)}</TableCell>
-                    <TableCell>{formatCurrency(item.forecastedFees)}</TableCell>
-                    <TableCell>{formatCurrency(item.actualSettledFees)}</TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <QuarterPerformanceTables grossRows={output.grossQuarterRows} feeRows={output.feeQuarterRows} />
     </div>
   );
 }

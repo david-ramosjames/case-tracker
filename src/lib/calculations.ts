@@ -1,7 +1,9 @@
 import { getOutdatedValidationFields, getValidationFieldLabel } from "@/lib/attorney-score";
+import { getAttorneyCommissionStartMonth } from "@/lib/auth/access";
 import {
   getCommissionYearEndDate,
   getCommissionYearStartDate,
+  getCurrentCommissionYear,
   isDateInCommissionYear,
   isTargetQuarterInCommissionYear,
 } from "@/lib/commission-year";
@@ -17,6 +19,7 @@ import {
 } from "@/lib/types";
 import { daysSince, getCurrentQuarter, getQuarterElapsedPercentage, getYearElapsedPercentage } from "@/lib/utils";
 
+import { normalizeTargetQuarter } from "@/lib/case-options";
 import { QUARTERLY_REVIEW_DAYS, SOURCES_LIT_REVIEW_DAYS } from "@/lib/slack/config";
 
 const QUARTERLY_CHECK_IN_FIELDS = ["targetResolutionQuarter", "minimumValue"] as const;
@@ -287,10 +290,20 @@ export function getOpenStageSuggestions(record: CaseRecord) {
   return record.tracker.detectedStageSignals.filter((signal) => !signal.confirmedAt && !signal.dismissedAt);
 }
 
+export function getCurrentCommissionYearGoals(goals: AttorneyGoal[], attorneyIds?: string[]): AttorneyGoal[] {
+  const ids = attorneyIds?.length ? attorneyIds : [...new Set(goals.map((goal) => goal.attorneyId))];
+  return ids.flatMap((attorneyId) => {
+    const startMonth = getAttorneyCommissionStartMonth(goals, attorneyId);
+    const currentYear = getCurrentCommissionYear(startMonth);
+    const goal = goals.find((item) => item.attorneyId === attorneyId && item.year === currentYear);
+    return goal ? [goal] : [];
+  });
+}
+
 export function getFirmOutputMetrics(records: CaseRecord[], goals: AttorneyGoal[], goalYear?: number) {
   const scopedGoals = goalYear != null ? goals.filter((goal) => goal.year === goalYear) : goals;
   const scopedRecords =
-    goalYear != null && scopedGoals.length > 0
+    scopedGoals.length > 0
       ? records.filter((record) => scopedGoals.some((goal) => isRecordInGoalCommissionYear(record, goal)))
       : records;
 
@@ -371,25 +384,96 @@ export function getCaseStatusRollup(records: CaseRecord[]) {
   };
 }
 
-function getQuarterRows(records: CaseRecord[], annualGoal: number, mode: "gross" | "fees", goals: AttorneyGoal[] = []) {
-  const quarters = Array.from(
-    new Set(
-      records
-        .flatMap((record) => [record.tracker.targetResolutionQuarter, record.tracker.result.resultQuarter])
-        .filter(Boolean) as string[],
-    ),
-  ).sort(compareQuarters);
+function toCalendarQuarterLabel(calendarYear: number, quarter: 1 | 2 | 3 | 4) {
+  const yy = String(calendarYear % 100).padStart(2, "0");
+  return `Q${quarter}-${yy}`;
+}
+
+function calendarQuartersForYear(calendarYear: number) {
+  return ([1, 2, 3, 4] as const).map((quarter) => toCalendarQuarterLabel(calendarYear, quarter));
+}
+
+function calendarQuartersInCommissionYear(commissionYear: number, startMonth: number) {
+  const start = getCommissionYearStartDate(commissionYear, startMonth);
+  const end = getCommissionYearEndDate(commissionYear, startMonth);
+  const labels = new Set<string>();
+  const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
+  const endCursor = new Date(end.getFullYear(), end.getMonth(), 1);
+
+  while (cursor <= endCursor) {
+    const calendarQuarter = (Math.floor(cursor.getMonth() / 3) + 1) as 1 | 2 | 3 | 4;
+    labels.add(toCalendarQuarterLabel(cursor.getFullYear(), calendarQuarter));
+    cursor.setMonth(cursor.getMonth() + 1);
+  }
+
+  return [...labels];
+}
+
+/** Quarters shown on output tables: current calendar year + attorney commission year (past and future). */
+export function getOutputQuarterLabels(goals: AttorneyGoal[], refDate = new Date()) {
+  const labels = new Set(calendarQuartersForYear(refDate.getFullYear()));
+  for (const goal of goals) {
+    for (const quarter of calendarQuartersInCommissionYear(goal.year, goal.commissionYearStartMonth)) {
+      labels.add(quarter);
+    }
+  }
+  return [...labels].sort(compareQuarters);
+}
+
+function toCanonicalQuarter(value: string) {
+  return normalizeTargetQuarter(value);
+}
+
+function quarterMatches(recordQuarter: string | null | undefined, canonicalQuarter: string) {
+  if (!recordQuarter) return false;
+  return toCanonicalQuarter(recordQuarter) === canonicalQuarter;
+}
+
+function toDisplayQuarter(canonicalQuarter: string) {
+  const match = canonicalQuarter.match(/^(\d{4}) Q([1-4])$/);
+  if (!match) return canonicalQuarter;
+  return toCalendarQuarterLabel(Number(match[1]), Number(match[2]) as 1 | 2 | 3 | 4);
+}
+
+function collectOutputQuarterKeys(records: CaseRecord[], goals: AttorneyGoal[], refDate = new Date()) {
+  const keys = new Set<string>();
+
+  for (const quarter of getOutputQuarterLabels(goals, refDate)) {
+    const canonical = toCanonicalQuarter(quarter);
+    if (canonical) keys.add(canonical);
+  }
+
+  for (const record of records) {
+    for (const quarter of [record.tracker.targetResolutionQuarter, record.tracker.result.resultQuarter]) {
+      const canonical = quarter ? toCanonicalQuarter(quarter) : null;
+      if (canonical) keys.add(canonical);
+    }
+  }
+
+  return [...keys].sort((a, b) => compareQuarters(a, b));
+}
+
+function getQuarterRows(
+  records: CaseRecord[],
+  annualGoal: number,
+  mode: "gross" | "fees",
+  goals: AttorneyGoal[] = [],
+  refDate = new Date(),
+) {
+  const quarters = collectOutputQuarterKeys(records, goals, refDate);
   const target = Math.round(annualGoal / Math.max(quarters.length, 4));
 
   return quarters.map((quarter) => {
     const plannedRecords = records.filter((record) => {
-      if (record.tracker.targetResolutionQuarter !== quarter) return false;
+      if (!quarterMatches(record.tracker.targetResolutionQuarter, quarter)) return false;
       if (goals.length === 0) return true;
       const goal = goals.find((item) => item.attorneyId === record.shared.attorneyId);
       if (!goal) return false;
       return isTargetQuarterInCommissionYear(quarter, goal.year, goal.commissionYearStartMonth);
     });
-    const actualRecords = records.filter((record) => record.tracker.result.resultQuarter === quarter && record.tracker.result.checkDisbursedAt);
+    const actualRecords = records.filter(
+      (record) => quarterMatches(record.tracker.result.resultQuarter, quarter) && record.tracker.result.checkDisbursedAt,
+    );
     const plan =
       mode === "gross"
         ? sum(plannedRecords.map((record) => record.tracker.minimumValue))
@@ -400,7 +484,7 @@ function getQuarterRows(records: CaseRecord[], annualGoal: number, mode: "gross"
         : sum(actualRecords.map((record) => record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue));
 
     return {
-      quarter,
+      quarter: toDisplayQuarter(quarter),
       months: getQuarterMonths(quarter),
       target,
       plan,
@@ -426,6 +510,9 @@ function getQuarterMonths(quarter: string) {
 
 function compareQuarters(a: string, b: string) {
   const parse = (value: string) => {
+    const canonical = toCanonicalQuarter(value) ?? value;
+    const match = canonical.match(/^(\d{4}) Q([1-4])$/);
+    if (match) return Number(match[1]) * 10 + Number(match[2]);
     const twoDigitYear = value.match(/(?:Q[1-4]|[12]H)-(\d{2})/i)?.[1];
     const year = Number(value.match(/20\d{2}/)?.[0] ?? (twoDigitYear ? `20${twoDigitYear}` : "9999"));
     const quarter = Number(value.match(/Q([1-4])/i)?.[1] ?? (value.match(/1H/i) ? "2" : value.match(/2H/i) ? "4" : "9"));
