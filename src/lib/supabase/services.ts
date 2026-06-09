@@ -15,7 +15,8 @@ import {
   CASE_STAGE_OPTIONS,
   EXPECTED_LITIGATION_OPTIONS,
   caseTypeFromCasesTable,
-  applyDerivedResultQuarter,
+  applyDerivedResultFields,
+  applyDerivedSettlementResult,
   deriveCaseSizeFromMinimumValue,
   normalizeCaseType,
 } from "@/lib/case-options";
@@ -279,7 +280,9 @@ export async function updateTrackerEntry(
 
   if (error) throw error;
   if (data) {
-    const resultRow = requestedResult ? await upsertResultRow(caseId, toString(data.id, ""), requestedResult) : null;
+    const resultRow = requestedResult
+      ? await upsertResultRow(caseId, toString(data.id, ""), requestedResult, data as TrackerEntryRow)
+      : null;
     const tracker = rowToTrackerEntry(data as TrackerEntryRow, resultRow, []);
     const activity = await createActivityEntry(
       caseId,
@@ -309,7 +312,9 @@ export async function updateTrackerEntry(
     .single();
 
   if (insertError) throw insertError;
-  const resultRow = requestedResult ? await upsertResultRow(caseId, toString(inserted.id, ""), requestedResult) : null;
+  const resultRow = requestedResult
+    ? await upsertResultRow(caseId, toString(inserted.id, ""), requestedResult, inserted as TrackerEntryRow)
+    : null;
   const tracker = rowToTrackerEntry(inserted as TrackerEntryRow, resultRow, []);
   await syncDerivedSharedCaseStatus(caseId, tracker);
   const activity = await createActivityEntry(
@@ -727,22 +732,27 @@ async function createActivityEntry(
   return activityRowToActivity(data as UnknownRow);
 }
 
-async function upsertResultRow(caseId: string, trackerEntryId: string, result: SettlementResult): Promise<ResultRow | null> {
+async function upsertResultRow(
+  caseId: string,
+  trackerEntryId: string,
+  result: SettlementResult,
+  trackerRow: TrackerEntryRow,
+): Promise<ResultRow | null> {
   const client = await createTrackerClient();
-  const normalized = applyDerivedResultQuarter(result);
+  const normalized = applyDerivedSettlementResult(result, trackerFieldsFromRow(trackerRow));
 
   const payload = {
     case_id: caseId,
     tracker_entry_id: trackerEntryId || null,
-    settlement_date: result.settlementDate,
-    settlement_amount: result.settlementAmount,
-    fee_percent: result.feePercent,
-    attorney_fees: calculateAttorneyFees(result.settlementAmount, result.feePercent),
+    settlement_date: normalized.settlementDate,
+    settlement_amount: normalized.settlementAmount,
+    fee_percent: normalized.feePercent,
+    attorney_fees: normalized.attorneyFees,
     release_status: result.releaseStatus,
     closing_status: result.closingStatus,
     check_status: result.checkStatus,
     disbursed_status: result.disbursedStatus,
-    reductions_status: result.reductionsStatus,
+    reductions_status: normalized.reductionsStatus,
     release_signed_at: result.releaseSignedAt,
     closing_signed_at: result.closingSignedAt,
     check_deposited_at: result.checkDepositedAt,
@@ -857,9 +867,17 @@ function rowToCaseRecord(
   };
 }
 
+function trackerFieldsFromRow(row: TrackerEntryRow) {
+  return {
+    caseStage: normalizeStage(toStringOrNull(row.case_stage)),
+    expectedLitigation: normalizeExpectedLitigation(toStringOrNull(row.expected_litigation)),
+    referralFee: toNumber(row.referral_fee),
+  };
+}
+
 function rowToTrackerEntry(row: TrackerEntryRow, resultRow: ResultRow | null, suggestionRows: SuggestionRow[]): TrackerEntry {
   const minimumValue = toNumber(row.minimum_value);
-  return {
+  const entry: TrackerEntry = {
     id: toString(row.id, "pending-tracker-entry"),
     caseId: toString(row.case_id, toString(row.id, "pending-tracker-entry")),
     caseStage: normalizeStage(toStringOrNull(row.case_stage)),
@@ -905,10 +923,11 @@ function rowToTrackerEntry(row: TrackerEntryRow, resultRow: ResultRow | null, su
     actualFeeValue: toNumber(resultRow?.attorney_fees),
     updatedAt: toString(row.updated_at, new Date().toISOString()),
   };
+  return { ...entry, result: applyDerivedSettlementResult(entry.result, entry) };
 }
 
 function rowToResult(row: ResultRow | null): SettlementResult {
-  return applyDerivedResultQuarter({
+  return applyDerivedResultFields({
     settlementDate: toStringOrNull(row?.settlement_date),
     settlementAmount: toNumber(row?.settlement_amount),
     feePercent: toNumber(row?.fee_percent),
@@ -917,7 +936,10 @@ function rowToResult(row: ResultRow | null): SettlementResult {
     closingStatus: normalizeClosingStatus(toStringOrNull(row?.closing_status), toStringOrNull(row?.closing_signed_at)),
     checkStatus: normalizeCheckStatus(toStringOrNull(row?.check_status), toStringOrNull(row?.check_deposited_at)),
     disbursedStatus: normalizeDisbursedStatus(toStringOrNull(row?.disbursed_status), toStringOrNull(row?.check_disbursed_at)),
-    reductionsStatus: normalizeReductionsStatus(toStringOrNull(row?.reductions_status)),
+    reductionsStatus: normalizeReductionsStatus(
+      toStringOrNull(row?.reductions_status),
+      toStringOrNull(row?.disburse_date),
+    ),
     releaseSignedAt: toStringOrNull(row?.release_signed_at),
     closingSignedAt: toStringOrNull(row?.closing_signed_at),
     checkDepositedAt: toStringOrNull(row?.check_deposited_at),
@@ -1171,8 +1193,12 @@ function normalizeDisbursedStatus(value: string | null | undefined, disbursedAt:
   return value === "Yes" || disbursedAt ? "Yes" : "No";
 }
 
-function normalizeReductionsStatus(value: string | null | undefined): ReductionsStatus {
-  if (value === "Sent" || value === "Approved" || value === "N/A") return value;
+function normalizeReductionsStatus(
+  value: string | null | undefined,
+  disburseDate: string | null = null,
+): ReductionsStatus {
+  if (disburseDate?.trim()) return "Deposited";
+  if (value === "Sent" || value === "Approved" || value === "N/A" || value === "Deposited") return value;
   return "Not Complete";
 }
 

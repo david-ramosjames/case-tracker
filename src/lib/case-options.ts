@@ -1,3 +1,4 @@
+import { deriveResultFeePercent } from "@/lib/calculations";
 import {
   type CaseStage,
   type CaseStatus,
@@ -7,7 +8,9 @@ import {
   type ExpectedLitigationStatus,
   type ReductionsStatus,
   type ReleaseStatus,
+  type SettlementResult,
 } from "@/lib/types";
+import { getCalculatedAttorneyFees } from "@/lib/utils";
 
 export const CASE_STATUS_OPTIONS = ["Active", "Closed"] satisfies CaseStatus[];
 
@@ -106,7 +109,8 @@ export const RELEASE_STATUS_OPTIONS = ["No", "Signed"] satisfies ReleaseStatus[]
 export const CLOSING_STATUS_OPTIONS = ["No", "Drafted", "Approved", "Signed"] satisfies ClosingStatus[];
 export const CHECK_STATUS_OPTIONS = ["Deposited", "No", "Sent"] satisfies CheckStatus[];
 export const DISBURSED_STATUS_OPTIONS = ["No", "Yes"] satisfies DisbursedStatus[];
-export const REDUCTIONS_STATUS_OPTIONS = ["Not Complete", "Sent", "Approved", "N/A"] satisfies ReductionsStatus[];
+export const REDUCTIONS_MANUAL_STATUS_OPTIONS = ["Not Complete", "Sent", "Approved", "N/A"] satisfies ReductionsStatus[];
+export const REDUCTIONS_STATUS_OPTIONS = [...REDUCTIONS_MANUAL_STATUS_OPTIONS, "Deposited"] satisfies ReductionsStatus[];
 
 export function getTargetPeriodOptions(date = new Date()) {
   const currentYear = date.getFullYear() % 100;
@@ -139,6 +143,39 @@ export function applyDerivedResultQuarter<T extends { disburseDate: string | nul
   result: T,
 ): T {
   return { ...result, resultQuarter: deriveResultQuarterFromDisburseDate(result.disburseDate) };
+}
+
+/** When disburse date is set, reductions are treated as deposited. */
+export function deriveReductionsStatusFromDisburseDate(
+  disburseDate: string | null | undefined,
+): ReductionsStatus | null {
+  return disburseDate?.trim() ? "Deposited" : null;
+}
+
+export function applyDerivedReductionsStatus<T extends { disburseDate: string | null; reductionsStatus: ReductionsStatus }>(
+  result: T,
+): T {
+  const derived = deriveReductionsStatusFromDisburseDate(result.disburseDate);
+  return derived ? { ...result, reductionsStatus: derived } : result;
+}
+
+export function applyDerivedResultFields<
+  T extends { disburseDate: string | null; resultQuarter: string | null; reductionsStatus: ReductionsStatus },
+>(result: T): T {
+  return applyDerivedReductionsStatus(applyDerivedResultQuarter(result));
+}
+
+export function applyDerivedSettlementResult<
+  TResult extends SettlementResult,
+  TTracker extends { caseStage: CaseStage; expectedLitigation: ExpectedLitigationStatus | null; referralFee: number | null },
+>(result: TResult, tracker: TTracker): TResult {
+  const withWorkflow = applyDerivedResultFields(result);
+  const feePercent = deriveResultFeePercent(tracker);
+  return {
+    ...withWorkflow,
+    feePercent,
+    attorneyFees: getCalculatedAttorneyFees(withWorkflow.settlementAmount, feePercent),
+  };
 }
 
 /** Normalize quarter text to a standard value; maps legacy 1H/2H to Q2/Q4. */

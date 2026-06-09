@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  applyDerivedResultQuarter,
+  applyDerivedSettlementResult,
+  REDUCTIONS_MANUAL_STATUS_OPTIONS,
   CHECK_STATUS_OPTIONS,
   CLOSING_STATUS_OPTIONS,
   DISBURSED_STATUS_OPTIONS,
@@ -33,6 +34,7 @@ import {
   type ReleaseStatus,
   type SettlementResult,
 } from "@/lib/types";
+import { deriveResultFeePercent } from "@/lib/calculations";
 import { formatCurrency, getCalculatedAttorneyFees } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 
@@ -158,16 +160,13 @@ export function ResultsTable({
     setWorkingRecords((current) =>
       current.flatMap((record) => {
         if (record.shared.id !== recordId) return [record];
-        const result = applyDerivedResultQuarter(updater(record.tracker.result));
+        const result = applyDerivedSettlementResult(updater(record.tracker.result), record.tracker);
         if (!result.settlementDate) return [];
         nextRecord = {
           ...record,
           tracker: {
             ...record.tracker,
-            result: {
-              ...result,
-              attorneyFees: getCalculatedAttorneyFees(result.settlementAmount, result.feePercent),
-            },
+            result,
           },
         };
         return [nextRecord];
@@ -324,8 +323,8 @@ export function ResultsTable({
                     <TableCell>
                       <InlineNumberInput prefix="$" value={result.settlementAmount} onCommit={(value) => updateResult(record.shared.id, (current) => ({ ...current, settlementAmount: value }))} />
                     </TableCell>
-                    <TableCell>
-                      <InlineNumberInput suffix="%" value={result.feePercent == null ? null : Math.round(result.feePercent * 100)} onCommit={(value) => updateResult(record.shared.id, (current) => ({ ...current, feePercent: value == null ? null : value / 100 }))} />
+                    <TableCell className="text-sm text-muted-foreground">
+                      {Math.round(deriveResultFeePercent(record.tracker) * 100)}%
                     </TableCell>
                     <TableCell>{formatCurrency(getCalculatedAttorneyFees(result.settlementAmount, result.feePercent))}</TableCell>
                     <TableCell>
@@ -349,16 +348,22 @@ export function ResultsTable({
                       </InlineSelect>
                     </TableCell>
                     <TableCell>
-                      <InlineSelect
-                        value={result.reductionsStatus}
-                        onChange={(value) => updateResult(record.shared.id, (current) => ({ ...current, reductionsStatus: value as ReductionsStatus }))}
-                      >
-                        {REDUCTIONS_STATUS_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </InlineSelect>
+                      {result.disburseDate ? (
+                        <span className="text-sm text-muted-foreground">Deposited</span>
+                      ) : (
+                        <InlineSelect
+                          value={result.reductionsStatus}
+                          onChange={(value) =>
+                            updateResult(record.shared.id, (current) => ({ ...current, reductionsStatus: value as ReductionsStatus }))
+                          }
+                        >
+                          {REDUCTIONS_MANUAL_STATUS_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </InlineSelect>
+                      )}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {result.resultQuarter ?? "—"}

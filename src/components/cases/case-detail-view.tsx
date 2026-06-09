@@ -16,14 +16,14 @@ import { NextScheduledEventsCard } from "@/components/cases/next-scheduled-event
 import type { AttorneySourcedFieldId } from "@/lib/attorney-sourced-fields";
 import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import {
-  applyDerivedResultQuarter,
+  applyDerivedSettlementResult,
+  REDUCTIONS_MANUAL_STATUS_OPTIONS,
   deriveCaseSizeFromMinimumValue,
   CASE_STAGE_OPTIONS,
   caseTypeSelectOptions,
   CHECK_STATUS_OPTIONS,
   CLOSING_STATUS_OPTIONS,
   DISBURSED_STATUS_OPTIONS,
-  REDUCTIONS_STATUS_OPTIONS,
   EXPECTED_LITIGATION_OPTIONS,
   LIABILITY_OPTIONS,
   RELEASE_STATUS_OPTIONS,
@@ -31,7 +31,14 @@ import {
 } from "@/lib/case-options";
 import { AttorneyScoreBreakdown } from "@/components/attorney-score/attorney-score";
 import { getCaseAttorneyScore, getValidationFieldLabel } from "@/lib/attorney-score";
-import { getDataQualityFlags, getFeePercent, getOpenStageSuggestions, getProjectedFeeValue, needsQuarterlyCheckIn } from "@/lib/calculations";
+import {
+  deriveResultFeePercent,
+  getDataQualityFlags,
+  getFeePercent,
+  getOpenStageSuggestions,
+  getProjectedFeeValue,
+  needsQuarterlyCheckIn,
+} from "@/lib/calculations";
 import { type SessionUser } from "@/lib/auth/types";
 import { formatSlackChannelLabel, getSlackChannelArchiveUrl } from "@/lib/slack/links";
 import {
@@ -110,6 +117,9 @@ export function CaseDetailView({
           status: deriveCaseStatusFromTracker(next.caseStage, next.result.disbursedStatus),
         }));
       }
+      if (key === "caseStage" || key === "expectedLitigation" || key === "referralFee") {
+        return { ...next, result: applyDerivedSettlementResult(next.result, next) };
+      }
       return next;
     });
   }
@@ -121,10 +131,13 @@ export function CaseDetailView({
   function updateResult<K extends keyof SettlementResult>(key: K, value: SettlementResult[K]) {
     setTracker((current) => ({
       ...current,
-      result: applyDerivedResultQuarter({
-        ...current.result,
-        [key]: value,
-      }),
+      result: applyDerivedSettlementResult(
+        {
+          ...current.result,
+          [key]: value,
+        },
+        current,
+      ),
     }));
   }
 
@@ -204,10 +217,7 @@ export function CaseDetailView({
     const now = new Date().toISOString();
     const nextTracker = {
       ...tracker,
-      result: {
-        ...tracker.result,
-        attorneyFees: getCalculatedAttorneyFees(tracker.result.settlementAmount, tracker.result.feePercent),
-      },
+      result: applyDerivedSettlementResult(tracker.result, tracker),
       lastReviewedAt: markReviewed ? now : tracker.lastReviewedAt,
       updatedAt: now,
     };
@@ -241,10 +251,7 @@ export function CaseDetailView({
     const now = new Date().toISOString();
     const nextTracker = {
       ...tracker,
-      result: {
-        ...tracker.result,
-        attorneyFees: getCalculatedAttorneyFees(tracker.result.settlementAmount, tracker.result.feePercent),
-      },
+      result: applyDerivedSettlementResult(tracker.result, tracker),
       lastQuarterlyCheckInAt: now,
       lastReviewedAt: now,
       updatedAt: now,
@@ -274,7 +281,16 @@ export function CaseDetailView({
       ...current,
       caseStage: signal.suggestedStage,
       expectedLitigation: signal.suggestedExpectedLitigation,
-      estimatedFeeValue: current.minimumValue ? Math.round(current.minimumValue * (signal.suggestedExpectedLitigation === "Pre" ? 0.3 : 0.4)) : current.estimatedFeeValue,
+      estimatedFeeValue: current.minimumValue
+        ? Math.round(
+            current.minimumValue *
+              deriveResultFeePercent({
+                caseStage: current.caseStage,
+                expectedLitigation: signal.suggestedExpectedLitigation,
+                referralFee: current.referralFee,
+              }),
+          )
+        : current.estimatedFeeValue,
       detectedStageSignals: current.detectedStageSignals.map((item) =>
         item.id === signalId ? { ...item, confirmedAt: now } : item,
       ),
@@ -612,7 +628,17 @@ export function CaseDetailView({
                           const expectedLitigation = event.target.value as TrackerEntry["expectedLitigation"];
                           updateField("expectedLitigation", expectedLitigation || null);
                           if (tracker.minimumValue) {
-                            updateField("estimatedFeeValue", Math.round(tracker.minimumValue * (expectedLitigation === "Pre" ? 0.3 : 0.4)));
+                            updateField(
+                              "estimatedFeeValue",
+                              Math.round(
+                                tracker.minimumValue *
+                                  deriveResultFeePercent({
+                                    caseStage: tracker.caseStage,
+                                    expectedLitigation: expectedLitigation || null,
+                                    referralFee: tracker.referralFee,
+                                  }),
+                              ),
+                            );
                           }
                         }}
                       >
@@ -781,10 +807,7 @@ export function CaseDetailView({
               <>
                 <Info label="Settlement Date" value={formatDate(tracker.result.settlementDate)} />
                 <Info label="Settlement Amount" value={formatCurrency(tracker.result.settlementAmount)} />
-                <Info
-                  label="Fee Percent"
-                  value={tracker.result.feePercent == null ? "Not set" : `${Math.round(tracker.result.feePercent * 100)}%`}
-                />
+                <Info label="Fee Percent" value={`${Math.round(deriveResultFeePercent(tracker) * 100)}%`} />
                 <Info
                   label="RJL Attorney Fees"
                   value={formatCurrency(getCalculatedAttorneyFees(tracker.result.settlementAmount, tracker.result.feePercent))}
@@ -812,8 +835,8 @@ export function CaseDetailView({
                 <Field label="Fee Percent">
                   <FormattedNumberInput
                     suffix="%"
-                    value={tracker.result.feePercent == null ? null : Math.round(tracker.result.feePercent * 100)}
-                    onValueChange={(value) => updateResult("feePercent", value == null ? null : value / 100)}
+                    value={Math.round(deriveResultFeePercent(tracker) * 100)}
+                    readOnly
                   />
                 </Field>
                 <Field label="RJL Attorney Fees">
@@ -856,16 +879,20 @@ export function CaseDetailView({
                   </Select>
                 </Field>
                 <Field label="Reductions">
-                  <Select
-                    value={tracker.result.reductionsStatus}
-                    onChange={(event) => updateResult("reductionsStatus", event.target.value as ReductionsStatus)}
-                  >
-                    {REDUCTIONS_STATUS_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </Select>
+                  {tracker.result.disburseDate ? (
+                    <Input value="Deposited" readOnly />
+                  ) : (
+                    <Select
+                      value={tracker.result.reductionsStatus}
+                      onChange={(event) => updateResult("reductionsStatus", event.target.value as ReductionsStatus)}
+                    >
+                      {REDUCTIONS_MANUAL_STATUS_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </Select>
+                  )}
                 </Field>
                 <Field label="Release Signed">
                   <Input type="date" value={toDateInput(tracker.result.releaseSignedAt)} onChange={(event) => updateResult("releaseSignedAt", fromDateInput(event.target.value))} />
@@ -993,7 +1020,11 @@ export function CaseDetailView({
             <ResultStep
               label="Reductions"
               value={tracker.result.reductionsStatus}
-              complete={tracker.result.reductionsStatus === "Approved" || tracker.result.reductionsStatus === "N/A"}
+              complete={
+                tracker.result.reductionsStatus === "Deposited" ||
+                tracker.result.reductionsStatus === "Approved" ||
+                tracker.result.reductionsStatus === "N/A"
+              }
             />
           </CardContent>
         </Card>

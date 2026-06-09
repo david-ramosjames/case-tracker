@@ -1,5 +1,7 @@
+import { deriveResultFeePercent } from "@/lib/calculations";
 import {
   deriveCaseSizeFromMinimumValue,
+  deriveReductionsStatusFromDisburseDate,
   deriveResultQuarterFromDisburseDate,
   normalizeCaseType,
   normalizeTargetQuarter,
@@ -108,8 +110,16 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
         tracker.estimatedSettlementValue = minimumValue;
         tracker.caseSize = deriveCaseSizeFromMinimumValue(minimumValue);
         const normalizedExpected = expectedLit ? normalizeExpectedLitigation(expectedLit, tracker.caseStage ?? "Onboarding") : null;
-        const feePercent = normalizedExpected === "Pre" ? 0.3 : normalizedExpected ? 0.4 : null;
-        if (feePercent != null) tracker.estimatedFeeValue = Math.round(minimumValue * feePercent);
+        if (minimumValue != null) {
+          tracker.estimatedFeeValue = Math.round(
+            minimumValue *
+              deriveResultFeePercent({
+                caseStage: tracker.caseStage ?? "Onboarding",
+                expectedLitigation: normalizedExpected,
+                referralFee: tracker.referralFee ?? null,
+              }),
+          );
+        }
       }
       if (expectedLit) tracker.expectedLitigation = normalizeExpectedLitigation(expectedLit, tracker.caseStage ?? "Onboarding");
 
@@ -151,9 +161,6 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       const settlementAmount = getCsvCell(row, headers, "Settlement Amount");
       if (settlementAmount) result.settlementAmount = parseMoney(settlementAmount);
 
-      const feePercent = getCsvCell(row, headers, "Fee Percent");
-      if (feePercent) result.feePercent = parseFeePercent(feePercent);
-
       const release = getCsvCell(row, headers, "Release");
       if (release) result.releaseStatus = normalizeReleaseStatus(release);
 
@@ -167,7 +174,6 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       if (disbursed) result.disbursedStatus = normalizeDisbursedStatus(disbursed);
 
       const reductions = getCsvCell(row, headers, "Reductions");
-      if (reductions) result.reductionsStatus = normalizeReductionsStatus(reductions);
 
       const releaseSigned = getCsvCell(row, headers, "Release Signed Date");
       if (releaseSigned) result.releaseSignedAt = parseOptionalDate(releaseSigned);
@@ -187,8 +193,18 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       const resultQuarter = getCsvCell(row, headers, "Result Quarter");
       if (result.disburseDate) {
         result.resultQuarter = deriveResultQuarterFromDisburseDate(result.disburseDate) ?? undefined;
-      } else if (resultQuarter) {
-        result.resultQuarter = normalizeTargetQuarter(resultQuarter) ?? undefined;
+        result.reductionsStatus = deriveReductionsStatusFromDisburseDate(result.disburseDate) ?? undefined;
+      } else {
+        if (resultQuarter) result.resultQuarter = normalizeTargetQuarter(resultQuarter) ?? undefined;
+        if (reductions) result.reductionsStatus = normalizeReductionsStatus(reductions);
+      }
+
+      if (result.settlementAmount != null || result.settlementDate) {
+        result.feePercent = deriveResultFeePercent({
+          caseStage: tracker.caseStage ?? "Onboarding",
+          expectedLitigation: tracker.expectedLitigation ?? null,
+          referralFee: tracker.referralFee ?? null,
+        });
       }
 
       return { caseNumber, shared, tracker, result };
@@ -205,12 +221,6 @@ export function hasCaseBackfillHeaders(csvText: string) {
 function parseMoney(value: string) {
   const numeric = Number(value.replace(/[$,%\s]/g, ""));
   return Number.isFinite(numeric) ? numeric : null;
-}
-
-function parseFeePercent(value: string) {
-  const numeric = Number(value.replace(/[%\s]/g, ""));
-  if (!Number.isFinite(numeric)) return null;
-  return numeric > 1 ? numeric / 100 : numeric;
 }
 
 function parseOptionalDate(value: string) {
@@ -274,6 +284,7 @@ function normalizeReductionsStatus(value: string): ReductionsStatus {
   const normalized = value.trim().toLowerCase();
   if (normalized === "sent") return "Sent";
   if (normalized === "approved") return "Approved";
+  if (normalized === "deposited") return "Deposited";
   if (normalized === "n/a" || normalized === "na" || normalized === "not applicable") return "N/A";
   return "Not Complete";
 }
