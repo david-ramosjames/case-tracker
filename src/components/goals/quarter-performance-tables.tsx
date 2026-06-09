@@ -1,45 +1,50 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { type CommissionQuarterPerformanceRow } from "@/lib/calculations";
 import { formatCurrency } from "@/lib/utils";
-
-export type QuarterPerformanceRow = {
-  quarter: string;
-  months: string;
-  target: number;
-  plan: number;
-  actual: number;
-};
 
 export function QuarterPerformanceTables({
   grossRows,
   feeRows,
+  description,
 }: {
-  grossRows: QuarterPerformanceRow[];
-  feeRows: QuarterPerformanceRow[];
+  grossRows: CommissionQuarterPerformanceRow[];
+  feeRows: CommissionQuarterPerformanceRow[];
+  description?: string;
 }) {
+  const tableDescription =
+    description ??
+    "Commission-year quarters (CY Q1–Q4) from each attorney's start month — target from goals, plan from forecast, actual from disburse dates.";
+
   return (
     <div className="grid gap-6 xl:grid-cols-2">
-      <QuarterTable title="Gross Settlements Disbursed" rows={grossRows} />
-      <QuarterTable title="RJL Attorney Fees" rows={feeRows} />
+      <QuarterTable title="Gross Settlements Disbursed" rows={grossRows} description={tableDescription} />
+      <QuarterTable title="RJL Attorney Fees" rows={feeRows} description={tableDescription} />
     </div>
   );
 }
 
-function QuarterTable({ title, rows }: { title: string; rows: QuarterPerformanceRow[] }) {
+function QuarterTable({
+  title,
+  rows,
+  description,
+}: {
+  title: string;
+  rows: CommissionQuarterPerformanceRow[];
+  description: string;
+}) {
   return (
     <Card>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
-        <CardDescription>
-          Current calendar year and commission-year quarters — target, plan (including future), and actual disbursed.
-        </CardDescription>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent className="overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
               <TableHead>Quarter</TableHead>
-              <TableHead>Months</TableHead>
+              <TableHead>Period</TableHead>
               <TableHead>Target</TableHead>
               <TableHead>Plan</TableHead>
               <TableHead>Actual</TableHead>
@@ -47,9 +52,9 @@ function QuarterTable({ title, rows }: { title: string; rows: QuarterPerformance
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={row.quarter}>
-                <TableCell className="font-medium">{row.quarter}</TableCell>
-                <TableCell>{row.months}</TableCell>
+              <TableRow key={`${row.label}-${row.period}`}>
+                <TableCell className="font-medium">{row.label}</TableCell>
+                <TableCell className="text-sm text-muted-foreground">{row.period}</TableCell>
                 <TableCell>{formatCurrency(row.target)}</TableCell>
                 <TableCell>{formatCurrency(row.plan)}</TableCell>
                 <TableCell>{formatCurrency(row.actual)}</TableCell>

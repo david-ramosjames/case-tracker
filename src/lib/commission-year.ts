@@ -80,6 +80,69 @@ function addMonths(date: Date, months: number) {
   return next;
 }
 
+export type CommissionYearQuarter = 1 | 2 | 3 | 4;
+
+export type CommissionQuarterWindow = {
+  quarter: CommissionYearQuarter;
+  start: Date;
+  end: Date;
+};
+
+/** Three-month windows from the commission year start month (CY Q1–Q4). */
+export function getCommissionYearQuarterWindows(commissionYear: number, startMonth: number): CommissionQuarterWindow[] {
+  const yearStart = getCommissionYearStartDate(commissionYear, startMonth);
+
+  return ([0, 1, 2, 3] as const).map((index) => {
+    const start = new Date(yearStart.getFullYear(), yearStart.getMonth() + index * 3, 1);
+    const end = new Date(start.getFullYear(), start.getMonth() + 3, 0, 23, 59, 59, 999);
+    return {
+      quarter: (index + 1) as CommissionYearQuarter,
+      start,
+      end,
+    };
+  });
+}
+
+export function getCommissionQuarterForDate(
+  dateValue: string | Date,
+  commissionYear: number,
+  startMonth: number,
+): CommissionYearQuarter | null {
+  const date = typeof dateValue === "string" ? new Date(dateValue) : dateValue;
+  if (Number.isNaN(date.getTime())) return null;
+  if (getCommissionYearLabel(date, startMonth) !== commissionYear) return null;
+
+  for (const window of getCommissionYearQuarterWindows(commissionYear, startMonth)) {
+    if (date >= window.start && date <= window.end) return window.quarter;
+  }
+
+  return null;
+}
+
+function formatShortMonthYear(date: Date) {
+  return new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" }).format(date);
+}
+
+export function formatCommissionYearPeriod(commissionYear: number, startMonth: number) {
+  const start = getCommissionYearStartDate(commissionYear, startMonth);
+  const end = getCommissionYearEndDate(commissionYear, startMonth);
+  return `${formatShortMonthYear(start)} – ${formatShortMonthYear(end)}`;
+}
+
+export function formatCommissionQuarterPeriod(
+  commissionYear: number,
+  startMonth: number,
+  quarter: CommissionYearQuarter,
+) {
+  const window = getCommissionYearQuarterWindows(commissionYear, startMonth).find((item) => item.quarter === quarter);
+  if (!window) return "";
+  return `${formatShortMonthYear(window.start)} – ${formatShortMonthYear(window.end)}`;
+}
+
+export function getCommissionYearStartMonthLabel(startMonth: number) {
+  return COMMISSION_YEAR_MONTH_OPTIONS.find((item) => item.value === startMonth)?.label ?? "January";
+}
+
 export const COMMISSION_YEAR_MONTH_OPTIONS = [
   { value: 1, label: "January" },
   { value: 2, label: "February" },

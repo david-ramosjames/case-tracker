@@ -1,11 +1,15 @@
 import { getOutdatedValidationFields, getValidationFieldLabel } from "@/lib/attorney-score";
 import { getAttorneyCommissionStartMonth } from "@/lib/auth/access";
 import {
+  formatCommissionQuarterPeriod,
+  getCommissionQuarterForDate,
   getCommissionYearEndDate,
+  getCommissionYearQuarterWindows,
   getCommissionYearStartDate,
   getCurrentCommissionYear,
   isDateInCommissionYear,
   isTargetQuarterInCommissionYear,
+  type CommissionYearQuarter,
 } from "@/lib/commission-year";
 import {
   type AttorneyGoal,
@@ -288,6 +292,71 @@ export function needsQuarterlyCheckIn(record: CaseRecord) {
 
 export function getOpenStageSuggestions(record: CaseRecord) {
   return record.tracker.detectedStageSignals.filter((signal) => !signal.confirmedAt && !signal.dismissedAt);
+}
+
+export type CommissionQuarterPerformanceRow = {
+  label: string;
+  period: string;
+  target: number;
+  plan: number;
+  actual: number;
+};
+
+function calendarQuarterAnchorDate(quarterValue: string): Date | null {
+  const canonical = normalizeTargetQuarter(quarterValue);
+  if (!canonical) return null;
+  const match = canonical.match(/^(\d{4}) Q([1-4])$/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const calendarQuarter = Number(match[2]);
+  const month = (calendarQuarter - 1) * 3;
+  return new Date(year, month, 15);
+}
+
+/** Quarterly target/plan/actual using commission-year quarters (CY Q1–Q4), not calendar Q1–Q4. */
+export function getAttorneyCommissionQuarterRows(
+  records: CaseRecord[],
+  goal: AttorneyGoal,
+  mode: "gross" | "fees",
+): CommissionQuarterPerformanceRow[] {
+  const windows = getCommissionYearQuarterWindows(goal.year, goal.commissionYearStartMonth);
+  const quarterTargets = [goal.q1Goal, goal.q2Goal, goal.q3Goal, goal.q4Goal];
+  const attorneyRecords = records.filter(
+    (record) => record.shared.attorneyId === goal.attorneyId && isRecordInGoalCommissionYear(record, goal),
+  );
+
+  return windows.map((window) => {
+    const planRecords = attorneyRecords.filter((record) => {
+      if (!record.tracker.isActive || !record.tracker.targetResolutionQuarter) return false;
+      const anchor = calendarQuarterAnchorDate(record.tracker.targetResolutionQuarter);
+      if (!anchor) return false;
+      return getCommissionQuarterForDate(anchor, goal.year, goal.commissionYearStartMonth) === window.quarter;
+    });
+
+    const actualRecords = attorneyRecords.filter((record) => {
+      if (!record.tracker.result.checkDisbursedAt) return false;
+      const disburseDate = record.tracker.result.disburseDate ?? record.tracker.result.checkDisbursedAt;
+      if (!disburseDate) return false;
+      return getCommissionQuarterForDate(disburseDate, goal.year, goal.commissionYearStartMonth) === window.quarter;
+    });
+
+    const plan =
+      mode === "gross"
+        ? sum(planRecords.map((record) => record.tracker.minimumValue))
+        : sum(planRecords.map((record) => getProjectedFeeValue(record)));
+    const actual =
+      mode === "gross"
+        ? sum(actualRecords.map((record) => record.tracker.result.settlementAmount))
+        : sum(actualRecords.map((record) => record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue));
+
+    return {
+      label: `CY Q${window.quarter}` as const,
+      period: formatCommissionQuarterPeriod(goal.year, goal.commissionYearStartMonth, window.quarter as CommissionYearQuarter),
+      target: quarterTargets[window.quarter - 1] ?? 0,
+      plan,
+      actual,
+    };
+  });
 }
 
 export function getCurrentCommissionYearGoals(goals: AttorneyGoal[], attorneyIds?: string[]): AttorneyGoal[] {
