@@ -112,6 +112,12 @@ export const DISBURSED_STATUS_OPTIONS = ["No", "Yes"] satisfies DisbursedStatus[
 export const REDUCTIONS_MANUAL_STATUS_OPTIONS = ["Not Complete", "Sent", "Approved", "N/A"] satisfies ReductionsStatus[];
 export const REDUCTIONS_STATUS_OPTIONS = [...REDUCTIONS_MANUAL_STATUS_OPTIONS, "Deposited"] satisfies ReductionsStatus[];
 
+/** Forecast quarter when the case is expected to disburse (planning field on the tracker). */
+export const EXPECTED_DISBURSEMENT_QUARTER_LABEL = "Expected disbursement quarter";
+
+/** Actual quarter from disburse date on the results tab (auto-derived from the sheet). */
+export const RESULT_QUARTER_LABEL = "Result quarter";
+
 export function getTargetPeriodOptions(date = new Date()) {
   const currentYear = date.getFullYear() % 100;
   const years = Array.from({ length: 6 }, (_, index) => currentYear - 1 + index);

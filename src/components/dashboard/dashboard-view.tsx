@@ -80,7 +80,7 @@ export function DashboardView({
           icon={ClipboardCheck}
           label="Quarterly check-ins due"
           value={String(metrics.casesNeedingQuarterlyCheckIn)}
-          detail="Quarter, minimum value, recent activity"
+          detail="Expected disbursement quarter, minimum value"
         />
         <MetricCard
           icon={TimerReset}
@@ -98,7 +98,7 @@ export function DashboardView({
 
       <Card>
         <CardHeader>
-          <CardTitle>Attorney score</CardTitle>
+          <CardTitle>Case Tracker Score</CardTitle>
           <CardDescription>
             Average case score across active matters — 40% completeness, 60% fields validated within 90 days.
           </CardDescription>

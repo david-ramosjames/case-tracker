@@ -4,7 +4,7 @@ const TRACKER_FIELD_LABELS: Record<string, string> = {
   caseStage: "Case stage",
   estimatedSettlementValue: "Estimated settlement value",
   estimatedFeeValue: "Projected firm fee",
-  targetResolutionQuarter: "Quarter",
+  targetResolutionQuarter: "Expected disbursement quarter",
   confidenceLevel: "Confidence level",
   sourceOfEstimate: "Source of estimate",
   liability: "Liability",

@@ -543,7 +543,7 @@ export function CaseDetailView({
                 Validation overdue
               </CardTitle>
               <CardDescription>
-                Your-input fields (liability, quarter, minimum value, policy limits) must be confirmed or updated every 90 days.
+                Your-input fields (liability, expected disbursement quarter, minimum value, policy limits) must be confirmed or updated every 90 days.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-wrap gap-2">
@@ -561,7 +561,7 @@ export function CaseDetailView({
             <CardHeader>
               <CardTitle>Quarterly Check-In Required</CardTitle>
               <CardDescription>
-                Confirm or update quarter, minimum value, sources, injuries, and description every 90 days — even when nothing changed. You can also reply in the case Slack channel thread when reminded.
+                Confirm or update expected disbursement quarter and minimum value every 90 days — even when nothing changed. You can also reply in the case Slack channel when reminded.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-wrap items-center gap-3">
@@ -750,7 +750,7 @@ export function CaseDetailView({
                     </AttorneyField>
                     <AttorneyField fieldId="targetResolutionQuarter" record={record}>
                       <Select value={tracker.targetResolutionQuarter ?? ""} onChange={(event) => updateField("targetResolutionQuarter", event.target.value || null)}>
-                        <option value="">Select quarter</option>
+                        <option value="">Select expected disbursement quarter</option>
                         {quarterOptions.map((quarter) => (
                           <option key={quarter} value={quarter}>
                             {quarter}
@@ -1065,7 +1065,7 @@ export function CaseDetailView({
             <Info label="Policy Limits" value={formatCurrency(tracker.policyLimits)} />
             <Info label="Fee Percent" value={`${Math.round(getFeePercent(record) * 100)}%`} />
             <Info label="Projected Firm Fee" value={formatCurrency(getProjectedFeeValue(record))} />
-            <Info label="Quarter" value={tracker.targetResolutionQuarter ?? "Not set"} />
+            <Info label="Expected disbursement quarter" value={tracker.targetResolutionQuarter ?? "Not set"} />
           </CardContent>
         </Card>
 
@@ -1110,7 +1110,7 @@ export function CaseDetailView({
 
         <Card>
           <CardHeader>
-            <CardTitle>Attorney score</CardTitle>
+            <CardTitle>Case Tracker Score</CardTitle>
             <CardDescription>{attorneyScore.percent}% — contributes to your dashboard rollup.</CardDescription>
           </CardHeader>
           <CardContent>

@@ -1,4 +1,5 @@
 import { cleanCaseNumber } from "@/lib/csv/parse";
+import { normalizePulseChannelRef } from "@/lib/slack/pulse";
 import {
   buildStagePatchFromConfirmation,
   deriveExpectedLitigationForStage,
@@ -246,13 +247,10 @@ export async function findCaseBySlackChannelRef(channelRef: string) {
   const admin = createSupabaseAdminClient();
   if (!admin) return null;
 
-  const normalized = channelRef.trim().toLowerCase().replace(/^#/, "");
+  const normalized = normalizePulseChannelRef(channelRef);
   const { data: channels } = await admin.from("case_slack_channels").select("case_number,slack_channel_name,slack_channel_id");
 
-  const match = (channels ?? []).find((row) => {
-    const name = String(row.slack_channel_name ?? "").toLowerCase().replace(/^#/, "");
-    return name === normalized || name.endsWith(normalized) || normalized.endsWith(name);
-  });
+  const match = (channels ?? []).find((row) => normalizePulseChannelRef(String(row.slack_channel_name ?? "")) === normalized);
 
   if (!match?.case_number) return null;
 

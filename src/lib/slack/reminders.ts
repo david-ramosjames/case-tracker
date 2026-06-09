@@ -57,7 +57,7 @@ export function buildSlackReminderMessage(record: CaseRecord, reasons: SlackRemi
   if (reasons.includes("quarterly_review") || reasons.includes("missing_quarter") || reasons.includes("missing_minimum_value") || reasons.includes("sources_lit_stale")) {
     lines.push("*90-day review* — please confirm or update:");
     if (reasons.includes("missing_quarter") || reasons.includes("quarterly_review")) {
-      lines.push("• Expected completion *Quarter*");
+      lines.push("• *Expected disbursement quarter*");
     }
     if (reasons.includes("missing_minimum_value") || reasons.includes("quarterly_review")) {
       lines.push("• *Minimum value*");
@@ -68,7 +68,7 @@ export function buildSlackReminderMessage(record: CaseRecord, reasons: SlackRemi
     lines.push("");
     lines.push("_Reply in this thread with updates, for example:_");
     lines.push("```");
-    lines.push("Quarter: 2026 Q3");
+    lines.push("Expected disbursement quarter: 2026 Q3");
     lines.push("Minimum: 75000");
     lines.push("Sources: Updated treatment status...");
     lines.push("```");

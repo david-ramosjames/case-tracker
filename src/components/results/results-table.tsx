@@ -289,7 +289,7 @@ export function ResultsTable({
                 </TableHead>
                 <TableHead className="align-top">
                   <HeaderFilter
-                    label="Quarter"
+                    label="Result quarter"
                     value={quarter}
                     onChange={setQuarter}
                     options={[

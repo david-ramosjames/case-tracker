@@ -2,7 +2,7 @@ import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
 import { fetchChannelHistory, postSlackMessage, resolveSlackChannelId } from "@/lib/slack/client";
 import { getDailyPulseChannelId, isSlackEnabled } from "@/lib/slack/config";
-import { parseDailyPulseMessage, type ParsedPulseItem } from "@/lib/slack/pulse";
+import { isIgnoredPulseChannelRef, parseDailyPulseMessage, type ParsedPulseItem } from "@/lib/slack/pulse";
 import {
   isStageConfirmationReaction,
   parseStageConfirmationText,
@@ -131,6 +131,8 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
 }
 
 async function fanOutPulseItem(item: ParsedPulseItem, pulseMessageTs: string): Promise<"posted" | "skipped"> {
+  if (isIgnoredPulseChannelRef(item.channelRef)) return "skipped";
+
   const match = await findCaseBySlackChannelRef(item.channelRef);
   if (!match) return "skipped";
 

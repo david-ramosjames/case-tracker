@@ -31,7 +31,7 @@ export function SettingsView({
 
         <Card>
           <CardHeader>
-            <CardTitle>How attorney score is calculated</CardTitle>
+            <CardTitle>How Case Tracker Score is calculated</CardTitle>
             <CardDescription>Case-level scoring rolled up per attorney on the dashboard.</CardDescription>
           </CardHeader>
           <CardContent>

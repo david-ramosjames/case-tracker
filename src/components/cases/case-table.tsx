@@ -422,7 +422,7 @@ export function CaseTable({
                 </TableHead>
                 <TableHead className="w-32 align-top">
                   <HeaderFilter
-                    label="Quarter"
+                    label="Exp. disburse Q"
                     value={quarter}
                     onChange={setQuarter}
                     options={[

@@ -55,7 +55,7 @@ export function AttorneyFieldsChecklist({
           Your input
         </CardTitle>
         <CardDescription>
-          These fields come from you, not DocketFlow. Enter or update them here — save when done to stamp 90-day review.
+          These fields come from you, not DocketFlow. Fields marked with 90-day review are confirmed via Slack or saved in the tracker.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -75,7 +75,11 @@ export function AttorneyFieldsChecklist({
               <div>
                 <p className="text-sm font-medium text-navy-950">{field.label}</p>
                 <p className="text-xs text-muted-foreground">
-                  {field.reviewKind === "none" ? "Set once" : "90-day review"}
+                  {field.reviewKind === "validation_90d"
+                    ? "90-day review"
+                    : field.id === "referralFee"
+                      ? "Set once"
+                      : "Optional"}
                 </p>
               </div>
               {statusBadge(getAttorneySourcedFieldStatus(record, field.id))}

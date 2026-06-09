@@ -1,3 +1,4 @@
+import { EXPECTED_DISBURSEMENT_QUARTER_LABEL } from "@/lib/case-options";
 import { sourcesLitNeedsReview } from "@/lib/calculations";
 import {
   getOutdatedValidationFields,
@@ -32,8 +33,8 @@ export const ATTORNEY_SOURCED_FIELDS: AttorneySourcedFieldMeta[] = [
   { id: "liability", label: "Liability", shortLabel: "Liability", reviewKind: "validation_90d", validationFieldId: "liability" },
   {
     id: "targetResolutionQuarter",
-    label: "Quarter",
-    shortLabel: "Quarter",
+    label: EXPECTED_DISBURSEMENT_QUARTER_LABEL,
+    shortLabel: "Exp. disburse Q",
     reviewKind: "validation_90d",
     validationFieldId: "targetResolutionQuarter",
   },
@@ -52,9 +53,9 @@ export const ATTORNEY_SOURCED_FIELDS: AttorneySourcedFieldMeta[] = [
     reviewKind: "validation_90d",
     validationFieldId: "policyLimits",
   },
-  { id: "sources", label: "Sources", shortLabel: "Sources", reviewKind: "sources_lit_90d" },
-  { id: "injuries", label: "Injuries", shortLabel: "Injuries", reviewKind: "sources_lit_90d" },
-  { id: "caseDescription", label: "Description", shortLabel: "Description", reviewKind: "sources_lit_90d" },
+  { id: "sources", label: "Sources", shortLabel: "Sources", reviewKind: "none" },
+  { id: "injuries", label: "Injuries", shortLabel: "Injuries", reviewKind: "none" },
+  { id: "caseDescription", label: "Description", shortLabel: "Description", reviewKind: "none" },
 ];
 
 export const ATTORNEY_SOURCED_FIELD_BY_ID = Object.fromEntries(
@@ -92,6 +93,7 @@ export function getAttorneySourcedFieldStatus(record: CaseRecord, fieldId: Attor
   if (!hasAttorneyFieldValue(record, fieldId)) return "missing";
 
   if (meta.reviewKind === "validation_90d" && meta.validationFieldId) {
+    if (fieldId === "liability" && record.tracker.liability?.trim() !== "Pending") return "current";
     const outdated = getOutdatedValidationFields(record);
     if (outdated.includes(meta.validationFieldId)) return "stale";
     return "current";

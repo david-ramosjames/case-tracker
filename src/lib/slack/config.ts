@@ -55,6 +55,18 @@ export const SLACK_REMINDER_COOLDOWN_DAYS = Number(process.env.SLACK_REMINDER_CO
 export const SOURCES_LIT_REVIEW_DAYS = 90;
 export const QUARTERLY_REVIEW_DAYS = 90;
 
+/** True during the 9:00 AM hour in America/Chicago (for daily cron gating). */
+export function isNineAmCentral(now = new Date()) {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/Chicago",
+      hour: "numeric",
+      hour12: false,
+    }).format(now),
+  );
+  return hour === 9;
+}
+
 export async function getDailyPulseChannelId() {
   const fromEnv = process.env.SLACK_DAILY_PULSE_CHANNEL_ID?.trim();
   if (fromEnv) return fromEnv;

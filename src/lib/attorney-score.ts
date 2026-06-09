@@ -1,3 +1,4 @@
+import { EXPECTED_DISBURSEMENT_QUARTER_LABEL } from "@/lib/case-options";
 import { daysSince } from "@/lib/utils";
 import { type CaseRecord } from "@/lib/types";
 
@@ -8,7 +9,7 @@ export const FRESHNESS_SCORE_WEIGHT = 0.6;
 export const COMPLETENESS_FIELDS = [
   { id: "caseType", label: "Case type" },
   { id: "liability", label: "Liability" },
-  { id: "quarter", label: "Quarter" },
+  { id: "quarter", label: EXPECTED_DISBURSEMENT_QUARTER_LABEL },
   { id: "minimumValue", label: "Minimum value" },
   { id: "referralFee", label: "Referral fee" },
   { id: "policyLimits", label: "Policy limits" },
@@ -20,7 +21,11 @@ export type CompletenessFieldId = (typeof COMPLETENESS_FIELDS)[number]["id"];
 
 export const VALIDATION_FIELDS = [
   { id: "liability", label: "Liability", validatedAtKey: "liabilityValidatedAt" as const },
-  { id: "targetResolutionQuarter", label: "Quarter", validatedAtKey: "targetResolutionQuarterValidatedAt" as const },
+  {
+    id: "targetResolutionQuarter",
+    label: EXPECTED_DISBURSEMENT_QUARTER_LABEL,
+    validatedAtKey: "targetResolutionQuarterValidatedAt" as const,
+  },
   { id: "minimumValue", label: "Minimum value", validatedAtKey: "minimumValueValidatedAt" as const },
   { id: "policyLimits", label: "Policy limits", validatedAtKey: "policyLimitsValidatedAt" as const },
 ] as const;
@@ -104,6 +109,12 @@ export function isValidationFieldFresh(record: CaseRecord, fieldId: ValidationFi
 /** Fields missing or not validated within 90 days — triggers alerts. */
 export function getOutdatedValidationFields(record: CaseRecord): ValidationFieldId[] {
   return VALIDATION_FIELDS.filter((field) => {
+    if (field.id === "liability") {
+      const liability = record.tracker.liability?.trim();
+      if (!liability) return true;
+      if (liability !== "Pending") return false;
+      return !isValidationFieldFresh(record, field.id);
+    }
     if (!hasValidationFieldValue(record, field.id)) return true;
     return !isValidationFieldFresh(record, field.id);
   }).map((field) => field.id);
@@ -119,9 +130,12 @@ export function getCaseAttorneyScore(record: CaseRecord): CaseAttorneyScore {
   const completenessPercent =
     completenessTotal > 0 ? Math.round((completenessCompleted / completenessTotal) * 100) : 0;
 
-  const freshnessCompleted = VALIDATION_FIELDS.filter(
-    (field) => hasValidationFieldValue(record, field.id) && isValidationFieldFresh(record, field.id),
-  ).length;
+  const freshnessCompleted = VALIDATION_FIELDS.filter((field) => {
+    if (field.id === "liability" && record.tracker.liability?.trim() && record.tracker.liability.trim() !== "Pending") {
+      return true;
+    }
+    return hasValidationFieldValue(record, field.id) && isValidationFieldFresh(record, field.id);
+  }).length;
   const freshnessTotal = VALIDATION_FIELDS.length;
   const freshnessPercent = freshnessTotal > 0 ? Math.round((freshnessCompleted / freshnessTotal) * 100) : 0;
 
@@ -199,6 +213,9 @@ export function buildFieldValidationRowPatch(
   }
   if ("policyLimits" in changeInput && changeInput.policyLimits !== undefined) {
     patch.policy_limits_validated_at = now;
+  }
+  if ("expectedLitigation" in changeInput && changeInput.expectedLitigation !== undefined) {
+    patch.expected_litigation_validated_at = now;
   }
 
   if ("lastQuarterlyCheckInAt" in changeInput && changeInput.lastQuarterlyCheckInAt) {

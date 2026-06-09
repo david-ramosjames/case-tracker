@@ -13,7 +13,9 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
   for (const line of lines) {
-    const quarterMatch = line.match(/^(?:quarter|expected completion quarter|target quarter)\s*:\s*(.+)$/i);
+    const quarterMatch = line.match(
+      /^(?:quarter|expected disbursement quarter|expected completion quarter|target quarter|disbursement quarter)\s*:\s*(.+)$/i,
+    );
     if (quarterMatch) {
       tracker.targetResolutionQuarter = normalizeTargetQuarter(quarterMatch[1]) ?? undefined;
       continue;
@@ -55,6 +57,28 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
       tracker.statusNotes = statusMatch[1];
       continue;
     }
+
+    const liabilityMatch = line.match(/^liability\s*:\s*(.+)$/i);
+    if (liabilityMatch) {
+      tracker.liability = liabilityMatch[1].trim();
+      continue;
+    }
+
+    const policyMatch = line.match(/^policy\s*limits?\s*:\s*(.+)$/i);
+    if (policyMatch) {
+      const value = parseMoney(policyMatch[1]);
+      if (value != null) tracker.policyLimits = value;
+      continue;
+    }
+
+    const expectedLitMatch = line.match(/^(?:expected\s*lit(?:igation)?|expected litigation)\s*:\s*(.+)$/i);
+    if (expectedLitMatch) {
+      const normalized = expectedLitMatch[1].trim().toLowerCase();
+      if (normalized.includes("litigation") || normalized === "lit") tracker.expectedLitigation = "Lit";
+      else if (normalized.includes("expected")) tracker.expectedLitigation = "Expect";
+      else if (normalized.includes("pre")) tracker.expectedLitigation = "Pre";
+      continue;
+    }
   }
 
   if (Object.keys(tracker).length === 0) {
@@ -72,7 +96,7 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
 /** User-facing labels for Slack confirmation (matches reminder wording). */
 export function describeSlackThreadAppliedLabels(patch: TrackerUpdateInput): string[] {
   const labels: string[] = [];
-  if (patch.targetResolutionQuarter != null) labels.push("Expected completion quarter");
+  if (patch.targetResolutionQuarter != null) labels.push("Expected disbursement quarter");
   if (patch.minimumValue != null) labels.push("Minimum value");
   if (patch.sources != null) labels.push("Sources & litigation detail");
   if (patch.injuries != null) labels.push("Injuries");
@@ -82,6 +106,8 @@ export function describeSlackThreadAppliedLabels(patch: TrackerUpdateInput): str
   if (patch.estimatedFeeValue != null) labels.push("Projected firm fee");
   if (patch.confidenceLevel != null) labels.push("Confidence level");
   if (patch.policyLimits != null) labels.push("Policy limits");
+  if (patch.liability != null) labels.push("Liability");
+  if (patch.expectedLitigation != null) labels.push("Expected litigation");
   return labels;
 }
 

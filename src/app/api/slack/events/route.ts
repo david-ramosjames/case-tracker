@@ -4,6 +4,11 @@ import { findCaseForSlackThread } from "@/lib/slack/channels";
 import { postSlackMessage } from "@/lib/slack/client";
 import { getSlackSigningSecret, isSlackEnabled } from "@/lib/slack/config";
 import {
+  formatFieldReminderAppliedMessage,
+  handleFieldReminderReaction,
+  handleFieldReminderReply,
+} from "@/lib/slack/field-confirmation";
+import {
   handleStageConfirmationReaction,
   handleStageConfirmationReply,
 } from "@/lib/slack/stage-confirmation";
@@ -132,6 +137,16 @@ export async function POST(request: Request) {
 
   if (isReactionAdded(event)) {
     try {
+      const fieldResult = await handleFieldReminderReaction(event.item.ts, event.reaction, "Slack reaction");
+      if (fieldResult.handled) {
+        await postSlackMessage({
+          channel: event.item.channel,
+          threadTs: event.item.ts,
+          text: formatFieldReminderAppliedMessage(fieldResult.fieldKey),
+        }).catch(() => undefined);
+        return NextResponse.json({ ok: true });
+      }
+
       const result = await handleStageConfirmationReaction(event.item.ts, event.reaction, "Slack reaction");
       if (result.handled && result.action === "confirmed" && result.stage) {
         await postSlackMessage({
@@ -141,7 +156,7 @@ export async function POST(request: Request) {
         }).catch(() => undefined);
       }
     } catch (error) {
-      console.error("Slack stage confirmation reaction failed", error);
+      console.error("Slack confirmation reaction failed", error);
     }
     return NextResponse.json({ ok: true });
   }
@@ -151,6 +166,27 @@ export async function POST(request: Request) {
   }
 
   try {
+    const fieldResult = await handleFieldReminderReply(event.thread_ts, event.text, "Slack thread");
+    if (fieldResult.handled) {
+      if (fieldResult.action === "dismissed") {
+        await postSlackMessage({
+          channel: event.channel,
+          threadTs: event.thread_ts,
+          text: "Dismissed — no change to case tracker.",
+        });
+      } else {
+        await postSlackMessage({
+          channel: event.channel,
+          threadTs: event.thread_ts,
+          text: formatFieldReminderAppliedMessage(
+            fieldResult.fieldKey,
+            fieldResult.action === "updated" ? fieldResult.labels : undefined,
+          ),
+        });
+      }
+      return NextResponse.json({ ok: true });
+    }
+
     const stageResult = await handleStageConfirmationReply(event.thread_ts, event.text, "Slack thread");
     if (stageResult.handled) {
       if (stageResult.action === "confirmed" && stageResult.stage) {
@@ -194,7 +230,7 @@ export async function POST(request: Request) {
       await postSlackMessage({
         channel: event.channel,
         threadTs: event.thread_ts,
-        text: `Could not apply update — ${result.reason ?? "use lines like Quarter: 2026 Q3, Minimum: 75000, Sources: …"}`,
+        text: `Could not apply update — ${result.reason ?? "use lines like Expected disbursement quarter: 2026 Q3, Minimum: 75000, …"}`,
       });
     }
   } catch (error) {

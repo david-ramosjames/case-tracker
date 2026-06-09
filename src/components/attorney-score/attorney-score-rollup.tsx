@@ -49,7 +49,7 @@ export function AttorneyScoreRollupCard({
               </div>
               <div className="text-right">
                 <p className="text-2xl font-bold tabular-nums text-navy-950">{rollup.averageScore}%</p>
-                <p className="text-xs text-muted-foreground">Attorney score</p>
+                <p className="text-xs text-muted-foreground">Case Tracker Score</p>
               </div>
             </div>
             <Progress value={rollup.averageScore} />

@@ -64,10 +64,6 @@ export function getDataQualityFlags(
     flags.push({ id: "missing-balance-cta", label: "Missing balance/CTA info", severity: "warning" });
   }
 
-  if (!tracker.injuries) {
-    flags.push({ id: "missing-injuries", label: "Missing injuries", severity: "danger" });
-  }
-
   if (!tracker.policyLimits) {
     flags.push({ id: "missing-policy-limits", label: "Missing policy limits", severity: "warning" });
   }
@@ -77,11 +73,7 @@ export function getDataQualityFlags(
   }
 
   if (!tracker.targetResolutionQuarter) {
-    flags.push({ id: "missing-quarter", label: "Missing target quarter", severity: "warning" });
-  }
-
-  if (!tracker.sources) {
-    flags.push({ id: "missing-source", label: "Missing sources", severity: "warning" });
+    flags.push({ id: "missing-quarter", label: "Missing expected disbursement quarter", severity: "warning" });
   }
 
   if (daysSince(tracker.lastReviewedAt) > settings.staleReviewThresholdDays) {
@@ -289,9 +281,8 @@ export function getProjectedFeeValue(record: CaseRecord) {
 
 export function needsQuarterlyCheckIn(record: CaseRecord) {
   const missingQuarterlyField = QUARTERLY_CHECK_IN_FIELDS.some((field) => !record.tracker[field]);
-  const sourcesLitDue = sourcesLitNeedsReview(record);
   const reviewStale = daysSince(record.tracker.lastQuarterlyCheckInAt) >= QUARTERLY_REVIEW_DAYS;
-  return missingQuarterlyField || sourcesLitDue || reviewStale;
+  return missingQuarterlyField || reviewStale;
 }
 
 export function getOpenStageSuggestions(record: CaseRecord) {

@@ -36,7 +36,7 @@ If verification fails with “didn't respond with the challenge”, the app was 
 Thread replies on reminder messages can update the tracker using lines like:
 
 ```text
-Quarter: 2026 Q3
+Expected disbursement quarter: 2026 Q3
 Minimum: 75000
 Sources: Updated treatment plan...
 ```
@@ -77,16 +77,20 @@ curl -X POST https://YOUR_DOMAIN/api/slack/sync-channels \
 
 When you add a new case row to the sheet, the next cron run (or Sync now) picks it up.
 
-## 5. Scheduled sync + reminders
+## 5. Scheduled sync + field reminders (9 AM Central)
 
-One cron job syncs the sheet and sends reminders:
+`vercel.json` defines **one cron job** (`/api/cron/slack-reminders` at **14:00 UTC** ≈ 9 AM Central during daylight saving). The route checks `America/Chicago` so only the 9 AM hour runs. In standard time (CST), change the schedule to `0 15 * * *` in `vercel.json`.
+
+Set `CRON_SECRET` in Vercel env (Vercel cron sends `Authorization: Bearer CRON_SECRET` automatically).
+
+Manual run:
 
 ```bash
 curl "https://YOUR_DOMAIN/api/cron/slack-reminders" \
   -H "Authorization: Bearer YOUR_CRON_SECRET"
 ```
 
-**Test one case** (bypasses reminder rules and cooldown; sends even if fields are complete):
+**Test one case** (bypasses 9 AM window and field cooldown):
 
 ```bash
 curl "https://YOUR_DOMAIN/api/cron/slack-reminders?caseNumber=99999&force=true&syncSheet=false" \
@@ -95,13 +99,33 @@ curl "https://YOUR_DOMAIN/api/cron/slack-reminders?caseNumber=99999&force=true&s
 
 Set `NEXT_PUBLIC_SITE_URL=https://YOUR_DOMAIN` on Vercel (then redeploy) so Slack messages use production links, not `localhost`.
 
-Response includes `sheetSync: { synced, configured }` and `reminders: { sent, skipped }`.
+Response includes `sheetSync`, `settlementSync`, `stageWorkflow`, and `fieldReminders: { posted, skipped, fields }`.
 
 **Channel topics:** the app does **not** change Slack channel topics (Attorney/Paralegal mentions stay as you set them in Slack).
 
-Set `CRON_SECRET` in env. Optional: `SLACK_REMINDER_COOLDOWN_DAYS=3` (default) to avoid spamming the same case.
+### Per-field attorney reminders
 
-Response also includes `stageWorkflow: { treatment: { promoted }, pulse: { processed, posted, skipped } }`.
+Apply `supabase/sql/018_field_reminder_workflow.sql`.
+
+Each overdue field gets **its own Slack post** in the case channel (not one bundled message). Every post includes the **Case Tracker Score** and which fields still need attention.
+
+**No Slack reminders** for Sources, Injuries, Description, or Referral fee (optional / set-once fields).
+
+| Field | Reminder rule |
+|-------|----------------|
+| **Liability** | Only when value is `Pending` — confirm every 90 days |
+| **Expected disbursement quarter** | When you expect the case to disburse — missing or not confirmed in 90 days |
+| **Minimum value** | Missing or not confirmed in 90 days |
+| **Policy limits** | Missing or not confirmed in 90 days |
+| **Expected lit** | Confirm every 90 days unless case is/was **Litigation** (then auto-set to Lit, no prompts) |
+
+**Confirm unchanged:** react ✅ or reply `confirmed` / `yes` in the thread.
+
+**Update value:** reply in thread, e.g. `Expected disbursement quarter: Q3-26` (or shorthand `Quarter: Q3-26`), `Minimum: 85000`, `Liability: Accepted 100%`, `Policy limits: 100000`, `Expected lit: Pre-lit`. The bot confirms what was saved.
+
+**Result quarter** on the Results tab is separate — it is auto-set from the actual disburse date on the settlements sheet.
+
+Field posts respect a **3-day cooldown** per field (`FIELD_REMINDER_COOLDOWN_DAYS`) so the same field is not reposted daily while waiting for a reply.
 
 ## 6. Stage confirmation workflow (#daily-pulse)
 
@@ -124,6 +148,8 @@ or resolve by name (default `daily-pulse`):
 ```env
 SLACK_DAILY_PULSE_CHANNEL_NAME=daily-pulse
 ```
+
+Non-case channels in the recap (e.g. `#lead-calls`) are ignored. Add more with `SLACK_PULSE_IGNORED_CHANNELS=lead-calls,other-channel` (comma-separated).
 
 **Pulse format** (example):
 
@@ -155,8 +181,8 @@ curl "https://YOUR_DOMAIN/api/cron/slack-reminders?force=true&syncSheet=false" \
 
 | Trigger | Channel message |
 |--------|------------------|
-| 90-day review / missing quarter, minimum, or stale Sources & Lit | Reminder + thread template |
-| Other missing required fields | Included in reminder |
+| Overdue attorney field (liability, quarter, minimum, policy limits, expected lit) | One Slack post per field with score + options |
+| ✅ / thread reply on field post | Confirms or updates tracker |
 | Case stage saved | Short message in channel |
 | `#daily-pulse` recap item | Confirmation prompt in case channel |
 | ✅ / thread reply on stage prompt | Tracker stage updated |

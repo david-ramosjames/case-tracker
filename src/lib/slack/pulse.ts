@@ -11,6 +11,27 @@ export type ParsedPulseItem = {
 
 const PULSE_HEADER = /pulse\s*[—-]\s*potential case status changes/i;
 
+const DEFAULT_IGNORED_PULSE_CHANNELS = new Set(["lead-calls", "daily-pulse"]);
+
+export function normalizePulseChannelRef(channelRef: string) {
+  return channelRef.trim().toLowerCase().replace(/^#/, "");
+}
+
+function getIgnoredPulseChannelRefs() {
+  const ignored = new Set(DEFAULT_IGNORED_PULSE_CHANNELS);
+  const extra = process.env.SLACK_PULSE_IGNORED_CHANNELS?.split(",") ?? [];
+  for (const ref of extra) {
+    const normalized = normalizePulseChannelRef(ref);
+    if (normalized) ignored.add(normalized);
+  }
+  return ignored;
+}
+
+/** Non-case Slack channels (firm-wide) — skip these in pulse stage fan-out. */
+export function isIgnoredPulseChannelRef(channelRef: string) {
+  return getIgnoredPulseChannelRefs().has(normalizePulseChannelRef(channelRef));
+}
+
 /** Parse a #daily-pulse recap message into per-channel stage suggestions. */
 export function parseDailyPulseMessage(text: string): ParsedPulseItem[] {
   if (!PULSE_HEADER.test(text)) return [];
@@ -28,6 +49,11 @@ export function parseDailyPulseMessage(text: string): ParsedPulseItem[] {
     }
 
     const channelRef = headerMatch[1].replace(/^#/, "").trim();
+    if (isIgnoredPulseChannelRef(channelRef)) {
+      index += 1;
+      continue;
+    }
+
     const suggestedStage = normalizePulseStageLabel(headerMatch[2]);
     let confidence: ConfidenceLevel = "Medium";
     let reason = "";
@@ -63,7 +89,5 @@ export function parseDailyPulseMessage(text: string): ParsedPulseItem[] {
 }
 
 export function channelRefMatchesSlackName(channelRef: string, slackChannelName: string) {
-  const a = channelRef.trim().toLowerCase().replace(/^#/, "");
-  const b = slackChannelName.trim().toLowerCase().replace(/^#/, "");
-  return a === b || b.endsWith(a) || a.endsWith(b);
+  return normalizePulseChannelRef(channelRef) === normalizePulseChannelRef(slackChannelName);
 }

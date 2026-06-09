@@ -146,6 +146,8 @@ export type TrackerEntry = {
   targetResolutionQuarterValidatedAt: string | null;
   minimumValueValidatedAt: string | null;
   policyLimitsValidatedAt: string | null;
+  expectedLitigationValidatedAt: string | null;
+  hasEverBeenLitigation: boolean;
   isActive: boolean;
   settledAmount: number | null;
   disbursedAmount: number | null;
@@ -169,6 +171,13 @@ export type SlackReminderReason =
   | "sources_lit_stale"
   | "missing_fields"
   | "validation_stale";
+
+export type FieldReminderKey =
+  | "liability"
+  | "targetResolutionQuarter"
+  | "minimumValue"
+  | "policyLimits"
+  | "expectedLitigation";
 
 export type CaseRecord = {
   shared: SharedCase;

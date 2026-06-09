@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { syncSettlementsFromGoogleSheetIfConfigured } from "@/lib/google/settlements-sync";
 import { syncSlackChannelsFromGoogleSheetIfConfigured } from "@/lib/google/sheets-sync";
-import { getCronSecret } from "@/lib/slack/config";
-import { sendSlackCaseReminders } from "@/lib/slack/notify";
+import { getCronSecret, isNineAmCentral } from "@/lib/slack/config";
+import { sendSlackFieldReminders } from "@/lib/slack/field-reminder-notify";
 import { runDailyStageWorkflow } from "@/lib/slack/stage-workflow";
-import { getCases, getSettings } from "@/lib/supabase/services";
+import { getCases } from "@/lib/supabase/services";
 
 export async function GET(request: Request) {
   const secret = getCronSecret();
@@ -24,6 +24,14 @@ export async function GET(request: Request) {
     const force = searchParams.get("force") === "true";
     const skipSheetSync = searchParams.get("syncSheet") === "false";
 
+    if (!force && !isNineAmCentral()) {
+      return NextResponse.json({
+        ok: true,
+        skipped: "outside_9am_central_window",
+        hint: "Runs daily at 9:00 AM America/Chicago. Use ?force=true to run now.",
+      });
+    }
+
     const sheetSync = skipSheetSync
       ? { synced: 0, configured: false, dateSignedUpdated: 0 }
       : await syncSlackChannelsFromGoogleSheetIfConfigured();
@@ -41,14 +49,13 @@ export async function GET(request: Request) {
     const stageWorkflow = await runDailyStageWorkflow({ forcePulse: force });
 
     let records = await getCases();
-    const settings = await getSettings();
 
     if (caseNumberParam) {
       const key = cleanCaseNumber(caseNumberParam);
       records = records.filter((record) => cleanCaseNumber(record.shared.caseNumber) === key);
     }
 
-    const reminders = await sendSlackCaseReminders(records, settings, {
+    const fieldReminders = await sendSlackFieldReminders(records, {
       force,
       forceSend: force && Boolean(caseNumberParam),
     });
@@ -58,7 +65,7 @@ export async function GET(request: Request) {
       sheetSync,
       settlementSync,
       stageWorkflow,
-      reminders,
+      fieldReminders,
       filter: caseNumberParam ? { caseNumber: caseNumberParam, force } : null,
     });
   } catch (error) {

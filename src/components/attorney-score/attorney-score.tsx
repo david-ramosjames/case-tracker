@@ -88,8 +88,8 @@ export function AttorneyScoreExplainer() {
   return (
     <div className="space-y-4 text-sm leading-6 text-muted-foreground">
       <p>
-        Each active case earns an attorney score from 0–100%. Attorney rollups on the dashboard average scores across
-        that attorney&apos;s active cases.
+        Each active case earns a Case Tracker Score from 0–100%. Dashboard rollups average scores across that
+        attorney&apos;s active cases.
       </p>
       <div>
         <p className="font-semibold text-navy-950">Completeness — 40% of case score</p>

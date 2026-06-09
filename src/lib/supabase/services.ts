@@ -281,7 +281,24 @@ export async function updateTrackerEntry(
     now,
   );
 
-  const payload = { ...trackerUpdateToRow(inputWithSourcesLit, markReviewed), ...validationPatch };
+  const litigationPatch: Record<string, unknown> = {};
+  const nextStage = input.caseStage ?? existingTracker?.caseStage;
+  if (nextStage === "Lit" || existingTracker?.hasEverBeenLitigation || existingTracker?.caseStage === "Lit") {
+    litigationPatch.has_ever_been_litigation = true;
+  }
+  if (nextStage === "Lit") {
+    litigationPatch.expected_litigation = toDatabaseExpectedLitigation("Lit");
+    litigationPatch.expected_litigation_validated_at = now;
+    if (input.expectedLitigation === undefined && existingTracker?.expectedLitigation !== "Lit") {
+      inputWithSourcesLit.expectedLitigation = "Lit";
+    }
+  }
+
+  const payload = {
+    ...trackerUpdateToRow(inputWithSourcesLit, markReviewed),
+    ...validationPatch,
+    ...litigationPatch,
+  };
   const requestedResult = input.result;
   const previousStage = existingTracker?.caseStage;
   const { data, error } = await client
@@ -1147,6 +1164,8 @@ function rowToTrackerEntry(
     targetResolutionQuarterValidatedAt: toStringOrNull(row.target_resolution_quarter_validated_at),
     minimumValueValidatedAt: toStringOrNull(row.minimum_value_validated_at),
     policyLimitsValidatedAt: toStringOrNull(row.policy_limits_validated_at),
+    expectedLitigationValidatedAt: toStringOrNull(row.expected_litigation_validated_at),
+    hasEverBeenLitigation: toBoolean(row.has_ever_been_litigation, normalizeStage(toStringOrNull(row.case_stage)) === "Lit"),
     isActive: toBoolean(row.is_active, true),
     settledAmount: toNumber(resultRow?.settlement_amount),
     disbursedAmount: resultRow?.check_disbursed_at ? toNumber(resultRow?.settlement_amount) : null,
