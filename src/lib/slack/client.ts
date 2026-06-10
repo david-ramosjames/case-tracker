@@ -1,4 +1,5 @@
 import { getSlackBotToken, isSlackEnabled } from "@/lib/slack/config";
+import { errorMessage } from "@/lib/utils";
 
 type SlackPostMessageResponse = {
   ok: boolean;
@@ -45,6 +46,29 @@ function resolveSlackChannelParam(channelId: string) {
   return normalized;
 }
 
+function isNotInChannelError(error: unknown) {
+  return errorMessage(error).includes("not_in_channel");
+}
+
+/** Join public channels before posting. Private channels must invite the bot manually. */
+async function ensureSlackChannelMembership(channelId: string) {
+  try {
+    await slackApi<{ ok: boolean }>("conversations.join", { channel: channelId });
+  } catch (error) {
+    const message = errorMessage(error);
+    if (message.includes("already_in_channel")) return;
+    // Private channels cannot be joined via API — invite @Case Tracker in Slack.
+    if (
+      message.includes("method_not_supported_for_channel_type") ||
+      message.includes("channel_not_found") ||
+      message.includes("missing_scope")
+    ) {
+      return;
+    }
+    throw error;
+  }
+}
+
 export async function postSlackMessage(input: {
   channel: string;
   text: string;
@@ -53,15 +77,36 @@ export async function postSlackMessage(input: {
 }) {
   if (!isSlackEnabled()) return null;
 
-  const payload = await slackApi<SlackPostMessageResponse>("chat.postMessage", {
-    channel: resolveSlackChannelParam(input.channel),
-    text: input.text,
-    thread_ts: input.threadTs,
-    blocks: input.blocks,
-    unfurl_links: false,
-  });
+  const channel = resolveSlackChannelParam(input.channel);
 
-  return { channel: payload.channel ?? input.channel, ts: payload.ts ?? null };
+  async function attemptPost() {
+    const payload = await slackApi<SlackPostMessageResponse>("chat.postMessage", {
+      channel,
+      text: input.text,
+      thread_ts: input.threadTs,
+      blocks: input.blocks,
+      unfurl_links: false,
+    });
+    return { channel: payload.channel ?? input.channel, ts: payload.ts ?? null };
+  }
+
+  try {
+    return await attemptPost();
+  } catch (error) {
+    if (!isNotInChannelError(error)) throw error;
+
+    await ensureSlackChannelMembership(channel);
+
+    try {
+      return await attemptPost();
+    } catch (retryError) {
+      if (isNotInChannelError(retryError)) {
+        console.warn("Slack post skipped: bot is not in channel", { channel });
+        return null;
+      }
+      throw retryError;
+    }
+  }
 }
 
 let channelNameCache: Map<string, string> | null = null;

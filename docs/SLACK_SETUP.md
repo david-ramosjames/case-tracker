@@ -12,6 +12,7 @@ Apply `supabase/sql/006_slack_integration.sql` in the Supabase SQL editor.
 2. **OAuth & Permissions** → Bot Token Scopes:
    - `chat:write`
    - `channels:read`
+   - `channels:join` (auto-join **public** case channels before posting)
    - `channels:history` (read `#daily-pulse` recaps)
    - `groups:read`
    - `groups:history` (if `#daily-pulse` or case channels are **private**)
@@ -165,6 +166,8 @@ The bot posts in `#abelperez-835`:
 
 > Case #835 — confirm status change?  
 > Reply with ✅, `confirmed`, or `Stage: Demand`.
+
+**Bot must be in each case channel.** Public channels: the app auto-joins when `channels:join` is granted. **Private case channels** (most firms): in each channel run `/invite @Case Tracker` once (same as you did for `#daily-pulse`). Without this, posts fail with `not_in_channel`.
 
 Confirm in the **thread** (or react ✅ on the bot message). The tracker updates and the bot replies `Updated case tracker: Settled.`
 
