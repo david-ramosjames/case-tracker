@@ -1,7 +1,79 @@
 import { cleanCaseNumber } from "@/lib/csv/parse";
+import { normalizePulseChannelRef } from "@/lib/slack/pulse";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { type CaseSlackChannel } from "@/lib/types";
 import { daysSince } from "@/lib/utils";
+
+export type PulseChannelMatch = {
+  caseId: string;
+  caseNumber: string;
+  slackChannelId: string | null;
+  slackChannelName: string;
+};
+
+/** Case channel lookups for pulse parsing/fan-out — DB only, no Slack channel list API. */
+export async function loadPulseChannelContext() {
+  const admin = createSupabaseAdminClient();
+  if (!admin) {
+    return {
+      matchByChannelRef: new Map<string, PulseChannelMatch>(),
+      channelIdToName: new Map<string, string>(),
+    };
+  }
+
+  const { data: channels } = await admin
+    .from("case_slack_channels")
+    .select("case_number,slack_channel_name,slack_channel_id");
+
+  const caseNumbers = [
+    ...new Set(
+      (channels ?? [])
+        .map((row) => cleanCaseNumber(String(row.case_number ?? "")))
+        .filter(Boolean),
+    ),
+  ];
+
+  const trackerByCaseNumber = new Map<string, { caseId: string; caseNumber: string }>();
+  if (caseNumbers.length > 0) {
+    const { data: trackers } = await admin
+      .from("case_tracker_entries")
+      .select("case_id,id,case_number")
+      .in("case_number", caseNumbers);
+
+    for (const row of trackers ?? []) {
+      const caseNumber = cleanCaseNumber(String(row.case_number));
+      const caseId = String(row.case_id ?? row.id);
+      trackerByCaseNumber.set(caseNumber, { caseId, caseNumber });
+    }
+  }
+
+  const matchByChannelRef = new Map<string, PulseChannelMatch>();
+  const channelIdToName = new Map<string, string>();
+
+  for (const row of channels ?? []) {
+    const channelName = String(row.slack_channel_name ?? "");
+    const normalized = normalizePulseChannelRef(channelName);
+    if (!normalized) continue;
+
+    const caseNumber = cleanCaseNumber(String(row.case_number));
+    const tracker = trackerByCaseNumber.get(caseNumber);
+    if (!tracker) continue;
+
+    const slackChannelId = (row.slack_channel_id as string | null) ?? null;
+    matchByChannelRef.set(normalized, {
+      caseId: tracker.caseId,
+      caseNumber: tracker.caseNumber,
+      slackChannelId,
+      slackChannelName: channelName,
+    });
+
+    if (slackChannelId) {
+      channelIdToName.set(slackChannelId, normalized);
+    }
+  }
+
+  return { matchByChannelRef, channelIdToName };
+}
 
 function trackerCaseId(row: { case_id: string | null; id?: string | null }) {
   return (row.case_id as string | null) ?? (row.id as string | null) ?? null;

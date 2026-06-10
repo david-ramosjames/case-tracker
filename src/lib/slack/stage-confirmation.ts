@@ -1,16 +1,15 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
-import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
+import { loadPulseChannelContext, type PulseChannelMatch } from "@/lib/slack/channels";
 import {
   extractSlackMessageTextForParsing,
-  fetchChannelHistorySince,
-  loadChannelIdToNameMap,
+  fetchChannelHistory,
   postSlackMessage,
-  resolveSlackChannelId,
 } from "@/lib/slack/client";
 import { getDailyPulseChannelId, isSlackEnabled } from "@/lib/slack/config";
 import {
   isIgnoredPulseChannelRef,
   isPulseStatusRecapMessage,
+  normalizePulseChannelRef,
   normalizeSlackMessageMarkup,
   parseDailyPulseMessage,
   type ParsedPulseItem,
@@ -25,7 +24,6 @@ import {
   applyConfirmedStage,
   createStageSuggestion,
   dismissStageSuggestionById,
-  findCaseBySlackChannelRef,
   findStageSuggestionByConfirmationThread,
   getCaseIdForSuggestion,
   getDailyPulseLastTs,
@@ -79,11 +77,11 @@ export async function postStageConfirmationForSuggestion(
   caseNumber: string,
   clientName: string,
   item: ParsedPulseItem,
+  preferredChannelId?: string | null,
 ) {
   if (!isSlackEnabled()) return { posted: false as const, reason: "slack_disabled" };
 
-  const mapping = await getSlackChannelForCaseNumber(caseNumber);
-  const channelId = mapping?.slackChannelId ?? (await resolveSlackChannelId(item.channelRef));
+  const channelId = preferredChannelId?.trim() || null;
   if (!channelId) return { posted: false as const, reason: "no_channel" };
 
   const appUrl = getAppOriginForNotifications() ?? "";
@@ -117,9 +115,11 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
   const lookbackOldest = String(Math.floor(Date.now() / 1000) - PULSE_LOOKBACK_HOURS * 3600);
   const oldest = lastTs ?? lookbackOldest;
 
-  let messages: Awaited<ReturnType<typeof fetchChannelHistorySince>>;
+  const pulseContext = await loadPulseChannelContext();
+
+  let messages: Awaited<ReturnType<typeof fetchChannelHistory>>;
   try {
-    messages = await fetchChannelHistorySince(pulseChannelId, { oldest, maxMessages: 100 });
+    messages = await fetchChannelHistory(pulseChannelId, { oldest, limit: 50 });
   } catch (error) {
     const detail = errorMessage(error);
     console.error("Daily pulse history fetch failed", detail);
@@ -134,8 +134,7 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
   let recapHeadersFound = 0;
   let newestTs = lastTs;
 
-  const needsChannelResolve = messages.some((message) => (message.blocks?.length ?? 0) > 0);
-  const channelIdToName = needsChannelResolve ? await loadChannelIdToNameMap() : new Map<string, string>();
+  const channelIdToName = pulseContext.channelIdToName;
 
   for (const message of messages) {
     if (!message.ts) continue;
@@ -156,7 +155,7 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
     processed += items.length;
 
     for (const item of items) {
-      const result = await fanOutPulseItem(item, message.ts);
+      const result = await fanOutPulseItem(item, message.ts, pulseContext.matchByChannelRef);
       if (result === "posted") posted += 1;
       else skipped += 1;
     }
@@ -178,10 +177,14 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
   };
 }
 
-async function fanOutPulseItem(item: ParsedPulseItem, pulseMessageTs: string): Promise<"posted" | "skipped"> {
+async function fanOutPulseItem(
+  item: ParsedPulseItem,
+  pulseMessageTs: string,
+  matchByChannelRef: Map<string, PulseChannelMatch>,
+): Promise<"posted" | "skipped"> {
   if (isIgnoredPulseChannelRef(item.channelRef)) return "skipped";
 
-  const match = await findCaseBySlackChannelRef(item.channelRef);
+  const match = matchByChannelRef.get(normalizePulseChannelRef(item.channelRef));
   if (!match) return "skipped";
 
   const record = await getCaseById(match.caseId);
@@ -212,6 +215,7 @@ async function fanOutPulseItem(item: ParsedPulseItem, pulseMessageTs: string): P
     record.shared.caseNumber,
     record.shared.clientName,
     item,
+    match.slackChannelId,
   );
 
   return postResult.posted ? "posted" : "skipped";
@@ -255,7 +259,8 @@ export async function processManualPulseText(text: string, pulseMessageTs = Stri
   let posted = 0;
   let skipped = 0;
   for (const item of items) {
-    const result = await fanOutPulseItem(item, pulseMessageTs);
+    const pulseContext = await loadPulseChannelContext();
+    const result = await fanOutPulseItem(item, pulseMessageTs, pulseContext.matchByChannelRef);
     if (result === "posted") posted += 1;
     else skipped += 1;
   }
