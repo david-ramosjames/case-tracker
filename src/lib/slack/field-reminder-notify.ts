@@ -70,7 +70,7 @@ export async function sendSlackFieldReminders(
       continue;
     }
 
-    for (const fieldKey of fieldsToPost) {
+    for (const [index, fieldKey] of fieldsToPost.entries()) {
       fields += 1;
 
       const open = await getOpenFieldReminder(record.shared.id, fieldKey);
@@ -82,7 +82,9 @@ export async function sendSlackFieldReminders(
         await dismissFieldReminder(open.id, record.shared.id, "Replaced by new field reminder");
       }
 
-      const text = buildFieldReminderMessage(record, fieldKey, appUrl);
+      const text = buildFieldReminderMessage(record, fieldKey, appUrl, {
+        includeCaseSummary: index === 0,
+      });
       const message = await postSlackMessage({ channel: context.channelId, text });
       if (!message?.ts) {
         skipped += 1;

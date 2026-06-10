@@ -132,30 +132,41 @@ function fieldOptionsBlock(fieldKey: FieldReminderKey) {
   }
 }
 
-export function buildFieldReminderMessage(record: CaseRecord, fieldKey: FieldReminderKey, appUrl: string) {
+export function buildFieldReminderMessage(
+  record: CaseRecord,
+  fieldKey: FieldReminderKey,
+  appUrl: string,
+  options?: { includeCaseSummary?: boolean },
+) {
   const meta = FIELD_REMINDER_META[fieldKey];
-  const score = getCaseAttorneyScore(record);
-  const attention = getFieldReminderAttentionSummary(record);
   const caseLink = `${appUrl}/cases/${record.shared.id}`;
+  const lines: string[] = [];
 
-  const lines = [
-    `*Case #${record.shared.caseNumber}* (${record.shared.clientName}) — *${meta.label}* review`,
-    `Case Tracker Score: *${score.percent}%* (completeness ${score.completenessPercent}% · freshness ${score.freshnessPercent}%)`,
-  ];
+  if (options?.includeCaseSummary) {
+    const score = getCaseAttorneyScore(record);
+    const attention = getFieldReminderAttentionSummary(record);
+    lines.push(`*Case #${record.shared.caseNumber}* (${record.shared.clientName})`);
+    lines.push(
+      `Case Tracker Score: *${score.percent}%* (completeness ${score.completenessPercent}% · freshness ${score.freshnessPercent}%)`,
+    );
+    if (attention.length > 1) {
+      lines.push(`Fields needing attention: *${attention.join(", ")}*`);
+    }
+    lines.push("");
+  } else {
+    lines.push(`*${meta.label}* · Case #${record.shared.caseNumber}`);
+  }
 
-  if (attention.length > 0) {
-    lines.push(`Fields needing attention: *${attention.join(", ")}*`);
+  if (options?.includeCaseSummary) {
+    lines.push(`*${meta.label}*`);
   }
 
   lines.push(
-    "",
-    `Current *${meta.label.toLowerCase()}*: ${formatFieldValue(record, fieldKey)}`,
+    `Current: ${formatFieldValue(record, fieldKey)}`,
     meta.shortPrompt,
-    "",
     `Options: ${fieldOptionsBlock(fieldKey)}`,
     "",
-    "React ✅ or reply `confirmed` / `yes` if unchanged.",
-    `<${caseLink}|Open in Case Tracker>`,
+    `React ✅ or reply \`confirmed\` / \`yes\` if unchanged · <${caseLink}|Open in Case Tracker>`,
   );
 
   return lines.join("\n");
