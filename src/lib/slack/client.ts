@@ -69,6 +69,26 @@ async function ensureSlackChannelMembership(channelId: string) {
   }
 }
 
+export async function fetchChannelTopic(channelId: string) {
+  if (!isSlackEnabled()) return null;
+
+  try {
+    const payload = await slackApi<{
+      ok: boolean;
+      channel?: { topic?: { value?: string } | string };
+    }>("conversations.info", {
+      channel: resolveSlackChannelParam(channelId),
+    });
+
+    const topic = payload.channel?.topic;
+    if (typeof topic === "string") return topic.trim() || null;
+    return topic?.value?.trim() || null;
+  } catch (error) {
+    console.warn("Slack channel topic fetch failed", { channelId, error: errorMessage(error) });
+    return null;
+  }
+}
+
 export async function postSlackMessage(input: {
   channel: string;
   text: string;

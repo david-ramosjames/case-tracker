@@ -162,9 +162,9 @@ Pulse — Potential case status changes
 "Release was signed yesterday" — …
 ```
 
-The bot posts in `#abelperez-835`:
+The bot posts in `#abelperez-835` (tags attorney/paralegal from the channel topic when set):
 
-> Case #835 — confirm status change?  
+> @Jesus @Adrian Bot suggests case status is: Settled (high confidence)  
 > Reply with ✅, `confirmed`, or `Stage: Demand`.
 
 **Bot must be in each case channel.** Public channels: the app auto-joins when `channels:join` is granted. **Private case channels** (most firms): in each channel run `/invite @Case Tracker` once (same as you did for `#daily-pulse`). Without this, posts fail with `not_in_channel`.

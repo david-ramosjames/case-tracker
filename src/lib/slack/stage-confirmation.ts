@@ -1,8 +1,10 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
+import { formatTopicUserMentions } from "@/lib/slack/channel-topic";
 import { loadPulseChannelContext, type PulseChannelMatch } from "@/lib/slack/channels";
 import {
   extractSlackMessageTextForParsing,
   fetchChannelHistory,
+  fetchChannelTopic,
   postSlackMessage,
 } from "@/lib/slack/client";
 import { getDailyPulseChannelId, isSlackEnabled } from "@/lib/slack/config";
@@ -50,24 +52,22 @@ function stageDisplay(stage: CaseStage) {
 }
 
 export function buildStageConfirmationMessage(input: {
-  caseNumber: string;
-  clientName: string;
   suggestedStage: CaseStage;
   confidence: string;
-  excerpt: string;
-  reason?: string;
   appUrl: string;
   caseId: string;
+  topicMentions?: string;
 }) {
+  const mentionPrefix = input.topicMentions ? `${input.topicMentions} ` : "";
+  const stage = stageDisplay(input.suggestedStage);
+  const confidence = input.confidence.toLowerCase();
+
   const lines = [
-    `*Case #${input.caseNumber}* (${input.clientName}) — confirm status change?`,
-    `Pulse suggests: *${stageDisplay(input.suggestedStage)}* (${input.confidence.toLowerCase()} confidence)`,
+    `${mentionPrefix}Bot suggests case status is: ${stage} (${confidence} confidence)`,
+    "",
+    "Reply in this thread with ✅, `confirmed`, or the correct stage (e.g. `Stage: Demand`).",
+    `<${input.appUrl}/cases/${input.caseId}|Open in Case Tracker>`,
   ];
-  if (input.reason) lines.push(`_${input.reason}_`);
-  if (input.excerpt) lines.push(`> ${input.excerpt}`);
-  lines.push("");
-  lines.push("Reply in this thread with ✅, `confirmed`, or the correct stage (e.g. `Stage: Demand`).");
-  lines.push(`<${input.appUrl}/cases/${input.caseId}|Open in Case Tracker>`);
   return lines.join("\n");
 }
 
@@ -85,15 +85,14 @@ export async function postStageConfirmationForSuggestion(
   if (!channelId) return { posted: false as const, reason: "no_channel" };
 
   const appUrl = getAppOriginForNotifications() ?? "";
+  const topic = await fetchChannelTopic(channelId);
+  const topicMentions = formatTopicUserMentions(topic);
   const text = buildStageConfirmationMessage({
-    caseNumber,
-    clientName,
     suggestedStage: item.suggestedStage,
     confidence: item.confidence,
-    excerpt: item.excerpt,
-    reason: item.reason,
     appUrl,
     caseId,
+    topicMentions,
   });
 
   const posted = await postSlackMessage({ channel: channelId, text });
