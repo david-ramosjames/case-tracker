@@ -34,6 +34,7 @@ import {
   wasPulseItemHandled,
 } from "@/lib/supabase/stage-suggestions";
 import { type CaseStage } from "@/lib/types";
+import { errorMessage } from "@/lib/utils";
 
 function stageDisplay(stage: CaseStage) {
   const labels: Record<CaseStage, string> = {
@@ -119,7 +120,7 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
   try {
     messages = await fetchChannelHistorySince(pulseChannelId, { oldest, maxMessages: 100 });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
+    const detail = errorMessage(error);
     console.error("Daily pulse history fetch failed", detail);
     return { processed: 0, posted: 0, skipped: 0, reason: "pulse_history_failed", error: detail };
   }

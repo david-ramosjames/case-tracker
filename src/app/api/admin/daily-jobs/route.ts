@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
 import { type DailyJobStep, runDailyJob } from "@/lib/cron/daily-jobs";
+import { errorMessage } from "@/lib/utils";
 
 const VALID_STEPS: DailyJobStep[] = [
   "sheetSync",
@@ -40,7 +41,7 @@ export async function POST(request: Request) {
     return NextResponse.json(result, { status: result.ok ? 200 : 500 });
   } catch (error) {
     console.error("Daily job failed", error);
-    const message = error instanceof Error ? error.message : "Daily job failed.";
+    const message = errorMessage(error) || "Daily job failed.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

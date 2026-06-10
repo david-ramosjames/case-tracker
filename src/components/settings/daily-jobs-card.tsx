@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { type DailyJobStep } from "@/lib/cron/daily-jobs";
+import { errorMessage } from "@/lib/utils";
 
 type JobRow = {
   step: DailyJobStep;
@@ -42,7 +43,13 @@ const JOB_ROWS: JobRow[] = [
 ];
 
 function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): string {
-  if (!body.ok && body.error) return String(body.error);
+  if (!body.ok) {
+    if (body.error) return errorMessage(body.error);
+    const errors = body.errors as { step: string; error: unknown }[] | undefined;
+    if (errors?.length) {
+      return errors.map((entry) => `${entry.step}: ${errorMessage(entry.error)}`).join("; ");
+    }
+  }
 
   if (step === "all") {
     const parts: string[] = [];
@@ -67,9 +74,9 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
     if (fieldReminders) {
       parts.push(`${fieldReminders.posted ?? 0} field reminder(s) (${fieldReminders.fields ?? 0} fields)`);
     }
-    const errors = body.errors as { step: string; error: string }[] | undefined;
+    const errors = body.errors as { step: string; error: unknown }[] | undefined;
     if (errors?.length) {
-      parts.push(`Errors: ${errors.map((entry) => `${entry.step}: ${entry.error}`).join("; ")}`);
+      parts.push(`Errors: ${errors.map((entry) => `${entry.step}: ${errorMessage(entry.error)}`).join("; ")}`);
     }
     return parts.length > 0 ? parts.join(". ") + "." : "Completed.";
   }
@@ -106,7 +113,7 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
     if (result.reason === "slack_disabled") return "Slack is not enabled.";
     if (result.reason === "no_pulse_channel") return "SLACK_DAILY_PULSE_CHANNEL_ID is not set.";
     if (result.reason === "pulse_history_failed") {
-      return `Could not read pulse channel: ${result.error ?? "unknown error"}.`;
+      return `Could not read pulse channel: ${errorMessage(result.error) || "unknown error"}.`;
     }
     const summary = `Processed ${result.processed ?? 0} pulse item(s), posted ${result.posted ?? 0} confirmation(s), skipped ${result.skipped ?? 0}.`;
     if ((result.processed ?? 0) === 0) {
@@ -160,7 +167,7 @@ export function DailyJobsCard() {
 
       const body = (await response.json()) as Record<string, unknown> & { error?: string };
       if (!response.ok && body.error && !body.step) {
-        throw new Error(body.error);
+        throw new Error(errorMessage(body.error));
       }
 
       const message = formatJobResult(step, body);

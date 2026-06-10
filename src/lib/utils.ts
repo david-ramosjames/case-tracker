@@ -5,6 +5,22 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+export function errorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+    if (typeof record.message === "string" && record.message) return record.message;
+    if (typeof record.error === "string" && record.error) return record.error;
+    if (typeof record.details === "string" && record.details) return record.details;
+  }
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Unknown error";
+  }
+}
+
 export function formatCurrency(value: number | null | undefined) {
   if (value == null) return "Not set";
 

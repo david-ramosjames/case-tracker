@@ -5,6 +5,7 @@ import { sendSlackFieldReminders } from "@/lib/slack/field-reminder-notify";
 import { processDailyPulseRecap } from "@/lib/slack/stage-confirmation";
 import { promoteOnboardingToTreatment, runDailyStageWorkflow } from "@/lib/slack/stage-workflow";
 import { getCases } from "@/lib/supabase/services";
+import { errorMessage } from "@/lib/utils";
 
 export type DailyJobStep =
   | "sheetSync"
@@ -29,7 +30,7 @@ export async function runDailyJobStep<T>(
   try {
     return { data: await fn() };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     console.error(`Daily job step failed: ${step}`, message, error);
     return { error: { step, error: message } };
   }
