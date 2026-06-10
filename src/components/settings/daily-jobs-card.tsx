@@ -117,6 +117,10 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
         return `${summary} No messages in #daily-pulse for the last ${lookback}h — check SLACK_DAILY_PULSE_CHANNEL_ID.`;
       }
       if (found === 0) {
+        const headers = Number(result.recapHeadersFound ?? 0);
+        if (headers > 0) {
+          return `${summary} Found ${headers} status-change recap(s) but no case lines parsed — Slack may be omitting bullet text from the API response.`;
+        }
         return `${summary} Scanned ${scanned} message(s) in the last ${lookback}h but none matched the Pulse recap format.`;
       }
     }

@@ -65,15 +65,17 @@ export async function postSlackMessage(input: {
 }
 
 let channelNameCache: Map<string, string> | null = null;
+let channelIdToNameCache: Map<string, string> | null = null;
 let channelCacheExpiresAt = 0;
 
 /** Load all workspace channels once (cached 30 min). Used only if resolving by name. */
 export async function loadChannelNameMap(forceRefresh = false) {
-  if (!forceRefresh && channelNameCache && Date.now() < channelCacheExpiresAt) {
+  if (!forceRefresh && channelNameCache && channelIdToNameCache && Date.now() < channelCacheExpiresAt) {
     return channelNameCache;
   }
 
   const map = new Map<string, string>();
+  const idToName = new Map<string, string>();
   let cursor: string | undefined;
   let page = 0;
 
@@ -93,6 +95,7 @@ export async function loadChannelNameMap(forceRefresh = false) {
       map.set(channel.name.toLowerCase(), channel.id);
       map.set(`#${channel.name}`.toLowerCase(), channel.id);
       map.set(channel.id, channel.id);
+      idToName.set(channel.id, channel.name);
     }
 
     cursor = payload.response_metadata?.next_cursor || undefined;
@@ -100,8 +103,14 @@ export async function loadChannelNameMap(forceRefresh = false) {
   } while (cursor);
 
   channelNameCache = map;
+  channelIdToNameCache = idToName;
   channelCacheExpiresAt = Date.now() + 30 * 60 * 1000;
   return map;
+}
+
+export async function loadChannelIdToNameMap(forceRefresh = false) {
+  await loadChannelNameMap(forceRefresh);
+  return channelIdToNameCache ?? new Map<string, string>();
 }
 
 export function normalizeSlackChannelId(value: string) {
@@ -136,33 +145,73 @@ export type SlackHistoryMessage = {
   }>;
 };
 
-function collectRichTextElements(element: Record<string, unknown>): string[] {
+function collectRichTextElements(
+  element: Record<string, unknown>,
+  channelIdToName?: Map<string, string>,
+): string[] {
   if (element.type === "text" && typeof element.text === "string") return [element.text];
+  if (element.type === "link" && typeof element.url === "string") {
+    const label = typeof element.text === "string" ? element.text : element.url;
+    return [label];
+  }
+  if (element.type === "emoji" && typeof element.name === "string") return [`:${element.name}:`];
+  if (element.type === "channel" && typeof element.channel_id === "string") {
+    const name = channelIdToName?.get(element.channel_id);
+    return [name ? `#${name}` : `<#${element.channel_id}>`];
+  }
   if (!Array.isArray(element.elements)) return [];
-  return element.elements.flatMap((child) => collectRichTextElements(child as Record<string, unknown>));
+  return element.elements.flatMap((child) =>
+    collectRichTextElements(child as Record<string, unknown>, channelIdToName),
+  );
 }
 
-function collectBlockText(block: Record<string, unknown>): string[] {
+function richTextSectionToLine(section: Record<string, unknown>, channelIdToName?: Map<string, string>) {
+  return collectRichTextElements(section, channelIdToName).join("");
+}
+
+function collectBlockText(block: Record<string, unknown>, channelIdToName?: Map<string, string>): string[] {
   const parts: string[] = [];
   const type = block.type;
 
   if ((type === "section" || type === "header") && block.text && typeof block.text === "object") {
     const text = (block.text as { text?: string }).text;
     if (text) parts.push(text);
+    return parts;
+  }
+
+  if (type === "rich_text_list" && Array.isArray(block.elements)) {
+    for (const element of block.elements) {
+      if (!element || typeof element !== "object") continue;
+      const line = richTextSectionToLine(element as Record<string, unknown>, channelIdToName);
+      if (line) parts.push(`• ${line}`);
+    }
+    return parts;
+  }
+
+  if (
+    (type === "rich_text_section" ||
+      type === "rich_text_quote" ||
+      type === "rich_text_preformatted") &&
+    Array.isArray(block.elements)
+  ) {
+    const line = richTextSectionToLine(block, channelIdToName);
+    if (line) parts.push(line);
+    return parts;
   }
 
   if (type === "rich_text" && Array.isArray(block.elements)) {
     for (const element of block.elements) {
       if (element && typeof element === "object") {
-        parts.push(...collectRichTextElements(element as Record<string, unknown>));
+        parts.push(...collectBlockText(element as Record<string, unknown>, channelIdToName));
       }
     }
+    return parts;
   }
 
   if (Array.isArray(block.elements)) {
     for (const element of block.elements) {
       if (element && typeof element === "object") {
-        parts.push(...collectBlockText(element as Record<string, unknown>));
+        parts.push(...collectBlockText(element as Record<string, unknown>, channelIdToName));
       }
     }
   }
@@ -170,22 +219,52 @@ function collectBlockText(block: Record<string, unknown>): string[] {
   return parts;
 }
 
-export function extractSlackMessageText(message: SlackHistoryMessage) {
-  if (message.text?.trim()) return message.text;
-
+function collectMessageBodyParts(message: SlackHistoryMessage, channelIdToName?: Map<string, string>) {
   const parts: string[] = [];
+
   for (const block of message.blocks ?? []) {
-    parts.push(...collectBlockText(block));
+    parts.push(...collectBlockText(block, channelIdToName));
   }
   for (const attachment of message.attachments ?? []) {
     if (attachment.text) parts.push(attachment.text);
     if (attachment.fallback) parts.push(attachment.fallback);
     for (const block of attachment.blocks ?? []) {
-      parts.push(...collectBlockText(block));
+      parts.push(...collectBlockText(block, channelIdToName));
     }
   }
 
-  return parts.join("\n").trim();
+  return parts;
+}
+
+/** Merge plain-text preview and Block Kit body — Pulse puts bullets only in blocks. */
+export function extractSlackMessageText(
+  message: SlackHistoryMessage,
+  channelIdToName?: Map<string, string>,
+) {
+  const blockParts = collectMessageBodyParts(message, channelIdToName);
+  const blockText = blockParts.join("\n").trim();
+  const plainText = message.text?.trim() ?? "";
+
+  if (blockText && plainText) {
+    if (blockText.includes(plainText)) return blockText;
+    return `${plainText}\n${blockText}`;
+  }
+
+  return blockText || plainText;
+}
+
+export async function extractSlackMessageTextForParsing(message: SlackHistoryMessage) {
+  const channelIdToName = await loadChannelIdToNameMap();
+  let text = extractSlackMessageText(message, channelIdToName);
+  text = text.replace(/<#([CGD][A-Z0-9]+)>/gi, (_, id: string) => {
+    const name = channelIdToName.get(id);
+    return name ? `#${name}` : `#${id}`;
+  });
+  text = text.replace(/#([CGD][A-Z0-9]+)\b/g, (match, id: string) => {
+    const name = channelIdToName.get(id);
+    return name ? `#${name}` : match;
+  });
+  return text;
 }
 
 export async function fetchChannelHistory(

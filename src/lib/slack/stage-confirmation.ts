@@ -1,13 +1,19 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
 import {
-  extractSlackMessageText,
+  extractSlackMessageTextForParsing,
   fetchChannelHistorySince,
   postSlackMessage,
   resolveSlackChannelId,
 } from "@/lib/slack/client";
 import { getDailyPulseChannelId, isSlackEnabled } from "@/lib/slack/config";
-import { isIgnoredPulseChannelRef, parseDailyPulseMessage, type ParsedPulseItem } from "@/lib/slack/pulse";
+import {
+  isIgnoredPulseChannelRef,
+  isPulseStatusRecapMessage,
+  normalizeSlackMessageMarkup,
+  parseDailyPulseMessage,
+  type ParsedPulseItem,
+} from "@/lib/slack/pulse";
 import {
   isStageConfirmationReaction,
   parseStageConfirmationText,
@@ -123,6 +129,7 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
   let skipped = 0;
   let messagesScanned = 0;
   let pulseMessagesFound = 0;
+  let recapHeadersFound = 0;
   let newestTs = lastTs;
 
   for (const message of messages) {
@@ -130,8 +137,11 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
     messagesScanned += 1;
     if (lastTs && Number(message.ts) <= Number(lastTs)) continue;
 
-    const text = extractSlackMessageText(message);
+    const text = await extractSlackMessageTextForParsing(message);
     if (!text) continue;
+
+    const normalizedText = normalizeSlackMessageMarkup(text);
+    if (isPulseStatusRecapMessage(normalizedText)) recapHeadersFound += 1;
 
     const items = parseDailyPulseMessage(text);
     if (items.length === 0) continue;
@@ -158,6 +168,7 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
     lastTs: newestTs,
     messagesScanned,
     pulseMessagesFound,
+    recapHeadersFound,
     lookbackHours: PULSE_LOOKBACK_HOURS,
   };
 }

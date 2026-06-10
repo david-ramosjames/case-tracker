@@ -9,7 +9,10 @@ export type ParsedPulseItem = {
   excerpt: string;
 };
 
-const PULSE_HEADER = /pulse\s*[—-]\s*potential case status changes/i;
+/** Pulse app title line — allow en/em dash and optional date suffix. */
+const PULSE_HEADER = /pulse\s*[\u2013\u2014–—\-]\s*potential\s+case\s+status\s+changes/i;
+
+const PULSE_ARROW = /(?:→|->|➜|➔|—>)/;
 
 const DEFAULT_IGNORED_PULSE_CHANNELS = new Set(["lead-calls", "daily-pulse"]);
 
@@ -30,6 +33,19 @@ function getIgnoredPulseChannelRefs() {
 /** Non-case Slack channels (firm-wide) — skip these in pulse stage fan-out. */
 export function isIgnoredPulseChannelRef(channelRef: string) {
   return getIgnoredPulseChannelRefs().has(normalizePulseChannelRef(channelRef));
+}
+
+export function isPulseStatusRecapMessage(text: string) {
+  if (/daily\s+flags/i.test(text)) return false;
+  return PULSE_HEADER.test(text) || /potential\s+case\s+status\s+changes/i.test(text);
+}
+
+/** Expand Slack mrkdwn channel links to #channel-name for parsing. */
+export function normalizeSlackMessageMarkup(text: string) {
+  return text
+    .replace(/<#[^|>]+\|([^>]+)>/gi, "#$1")
+    .replace(/<#([CGD][A-Z0-9]+)>/gi, (_, id: string) => `#${id}`)
+    .replace(/<!subteam\^[^|>]+\|([^>]+)>/gi, "#$1");
 }
 
 function stripPulseLinePrefix(line: string) {
@@ -54,10 +70,16 @@ function parseConfidenceAndReason(text: string) {
     remainder = remainder.replace(confidenceMatch[0], "").trim();
   }
 
-  const reasonMatch = remainder.match(/\(\*([^*]+)\*\)/);
-  if (reasonMatch) {
-    reason = reasonMatch[1].trim();
-    remainder = remainder.replace(reasonMatch[0], "").trim();
+  const starredReasonMatch = remainder.match(/\(\*([^*]+)\*\)/);
+  if (starredReasonMatch) {
+    reason = starredReasonMatch[1].trim();
+    remainder = remainder.replace(starredReasonMatch[0], "").trim();
+  }
+
+  const plainReasonMatch = remainder.match(/\(([^)]+)\)\s*$/);
+  if (plainReasonMatch && !plainReasonMatch[1].toLowerCase().includes("confidence")) {
+    reason = reason || plainReasonMatch[1].trim();
+    remainder = remainder.replace(plainReasonMatch[0], "").trim();
   }
 
   return { remainder, confidence, reason };
@@ -65,35 +87,39 @@ function parseConfidenceAndReason(text: string) {
 
 function parseExcerptFromLine(line: string) {
   const trimmed = stripPulseLinePrefix(line);
-  const quotedMatch = trimmed.match(/^[""'](.+?)[""']\s*[—-]/);
+  const quotedMatch = trimmed.match(/^[""'\u201c\u201d](.+?)[""'\u201c\u201d]\s*[\u2013\u2014–—\-]/);
   if (quotedMatch) return quotedMatch[1].trim();
-  if (/^[""']/.test(trimmed)) return trimmed.replace(/^[""']|[""'].*$/g, "").trim();
+  if (/^[""'\u201c\u201d]/.test(trimmed)) {
+    return trimmed.replace(/^[""'\u201c\u201d]|[""'\u201c\u201d].*$/g, "").trim();
+  }
   return null;
 }
 
-/** Parse a #daily-pulse recap message into per-channel stage suggestions. */
-export function parseDailyPulseMessage(text: string): ParsedPulseItem[] {
-  if (!PULSE_HEADER.test(text)) return [];
+function parsePulseItemLine(line: string) {
+  const normalized = stripPulseLinePrefix(line);
+  const arrowPattern = new RegExp(`^#?([\\w.-]+)\\s*${PULSE_ARROW.source}\\s*(.+)$`, "i");
+  const headerMatch = normalized.match(arrowPattern);
+  if (!headerMatch) return null;
 
+  const channelRef = headerMatch[1].replace(/^#/, "").trim();
+  if (isIgnoredPulseChannelRef(channelRef)) return null;
+
+  const inline = parseConfidenceAndReason(headerMatch[2]);
+  return { channelRef, inline };
+}
+
+function extractPulseItemsFromLines(lines: string[]) {
   const items: ParsedPulseItem[] = [];
-  const lines = text.split(/\r?\n/);
   let index = 0;
 
   while (index < lines.length) {
-    const line = stripPulseLinePrefix(lines[index]);
-    const headerMatch = line.match(/^#?([\w.-]+)\s*→\s*(.+)$/i);
-    if (!headerMatch) {
+    const parsedLine = parsePulseItemLine(lines[index]);
+    if (!parsedLine) {
       index += 1;
       continue;
     }
 
-    const channelRef = headerMatch[1].replace(/^#/, "").trim();
-    if (isIgnoredPulseChannelRef(channelRef)) {
-      index += 1;
-      continue;
-    }
-
-    const inline = parseConfidenceAndReason(headerMatch[2]);
+    const { channelRef, inline } = parsedLine;
     let confidence: ConfidenceLevel = inline.confidence ?? "Medium";
     let reason = inline.reason;
     let excerpt = "";
@@ -103,7 +129,7 @@ export function parseDailyPulseMessage(text: string): ParsedPulseItem[] {
       const confidenceMatch = nextLine.match(/\((\w+)\s+confidence\)/i);
       if (confidenceMatch) {
         confidence = parseConfidenceLevel(confidenceMatch[1]);
-        const reasonMatch = nextLine.match(/\(\*([^*]+)\*\)/);
+        const reasonMatch = nextLine.match(/\(\*([^*]+)\*\)/) ?? nextLine.match(/\(([^)]+)\)/);
         if (reasonMatch) reason = reasonMatch[1].trim();
         index += 1;
       }
@@ -128,6 +154,16 @@ export function parseDailyPulseMessage(text: string): ParsedPulseItem[] {
     index += 1;
   }
 
+  return items;
+}
+
+/** Parse a #daily-pulse recap message into per-channel stage suggestions. */
+export function parseDailyPulseMessage(text: string): ParsedPulseItem[] {
+  const normalizedText = normalizeSlackMessageMarkup(text);
+  const lines = normalizedText.split(/\r?\n/);
+  const items = extractPulseItemsFromLines(lines);
+  if (items.length > 0) return items;
+  if (!isPulseStatusRecapMessage(normalizedText)) return [];
   return items;
 }
 
