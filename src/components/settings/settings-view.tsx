@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AttorneyGoalsManager } from "@/components/settings/attorney-goals-manager";
 import { AttorneyScoreExplainer } from "@/components/attorney-score/attorney-score";
 import { BackfillImportCard } from "@/components/settings/backfill-import-card";
+import { DailyJobsCard } from "@/components/settings/daily-jobs-card";
 import { SettlementSyncCard } from "@/components/settings/settlement-sync-card";
 import { SlackSyncCard } from "@/components/settings/slack-sync-card";
 import { type AppUser, type AttorneyGoal, type CaseTrackerSettings } from "@/lib/types";
@@ -79,6 +80,8 @@ export function SettingsView({
             </Table>
           </CardContent>
         </Card>
+
+        <DailyJobsCard />
       </div>
 
       <aside className="space-y-6">
