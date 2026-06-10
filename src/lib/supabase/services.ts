@@ -1446,7 +1446,7 @@ async function syncDerivedSharedCaseStatus(caseId: string, tracker: TrackerEntry
   await updateSharedCaseFields(caseId, {}, { explicitStatus: status });
 }
 
-function normalizeStage(value: string | null | undefined): CaseStage {
+export function normalizeStage(value: string | null | undefined): CaseStage {
   const normalized = value?.toLowerCase();
   if (normalized === "lit" || normalized === "litigation" || normalized === "litigated") return "Lit";
   if (normalized === "txt" || normalized === "treatment") return "Txt";
@@ -1463,7 +1463,7 @@ function normalizeConfidence(value: string | null | undefined): ConfidenceLevel 
   return null;
 }
 
-function normalizeExpectedLitigation(value: string | null | undefined): ExpectedLitigationStatus {
+export function normalizeExpectedLitigation(value: string | null | undefined): ExpectedLitigationStatus {
   const normalized = value?.toLowerCase();
   if (normalized === "lit" || normalized === "litigation") return "Lit";
   if (normalized === "expect" || normalized === "expected litigation" || normalized === "expected") return "Expect";
@@ -1502,7 +1502,7 @@ function calculateAttorneyFees(settlementAmount: number | null, feePercent: numb
   return Math.round(settlementAmount * feePercent);
 }
 
-function toDatabaseStage(value: CaseStage | undefined) {
+export function toDatabaseStage(value: CaseStage | undefined) {
   if (!value) return undefined;
   const map: Record<CaseStage, string> = {
     Onboarding: "Intake",
@@ -1517,7 +1517,7 @@ function toDatabaseStage(value: CaseStage | undefined) {
   return map[value];
 }
 
-function toDatabaseExpectedLitigation(value: ExpectedLitigationStatus | null | undefined) {
+export function toDatabaseExpectedLitigation(value: ExpectedLitigationStatus | null | undefined) {
   if (!value) return undefined;
   const map: Record<ExpectedLitigationStatus, string> = {
     Pre: "Pre-lit",

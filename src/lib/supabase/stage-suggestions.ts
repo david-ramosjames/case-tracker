@@ -5,7 +5,14 @@ import {
   deriveExpectedLitigationForStage,
 } from "@/lib/stage-triggers";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { getCaseById, updateTrackerEntry } from "@/lib/supabase/services";
+import {
+  getCaseById,
+  normalizeExpectedLitigation,
+  normalizeStage,
+  toDatabaseExpectedLitigation,
+  toDatabaseStage,
+  updateTrackerEntry,
+} from "@/lib/supabase/services";
 import {
   type CaseStage,
   type ConfidenceLevel,
@@ -19,9 +26,8 @@ function rowToSuggestion(row: SuggestionRow): StageSuggestion {
   return {
     id: String(row.id ?? "stage-suggestion"),
     source: (row.source as StageSuggestion["source"]) ?? "manual",
-    suggestedStage: (row.suggested_stage as CaseStage) ?? "Onboarding",
-    suggestedExpectedLitigation:
-      (row.suggested_expected_litigation as StageSuggestion["suggestedExpectedLitigation"]) ?? "Pre",
+    suggestedStage: normalizeStage(String(row.suggested_stage ?? "")),
+    suggestedExpectedLitigation: normalizeExpectedLitigation(String(row.suggested_expected_litigation ?? "")),
     confidence: (row.confidence as ConfidenceLevel) ?? "Medium",
     excerpt: String(row.excerpt ?? ""),
     detectedAt: String(row.detected_at ?? row.created_at ?? new Date().toISOString()),
@@ -54,8 +60,10 @@ export async function createStageSuggestion(input: {
       case_id: input.caseId,
       tracker_entry_id: input.trackerEntryId,
       source: input.source,
-      suggested_stage: input.suggestedStage,
-      suggested_expected_litigation: deriveExpectedLitigationForStage(input.suggestedStage),
+      suggested_stage: toDatabaseStage(input.suggestedStage),
+      suggested_expected_litigation: toDatabaseExpectedLitigation(
+        deriveExpectedLitigationForStage(input.suggestedStage),
+      ),
       confidence: input.confidence,
       excerpt: input.excerpt,
       metadata: input.metadata ?? {},
@@ -202,7 +210,7 @@ export async function applyConfirmedStage(
   if (admin) {
     await admin
       .from("case_tracker_stage_suggestions")
-      .update({ confirmed_at: new Date().toISOString(), suggested_stage: stage })
+      .update({ confirmed_at: new Date().toISOString(), suggested_stage: toDatabaseStage(stage) })
       .eq("id", suggestion.id);
 
     await admin.from("case_tracker_activity").insert({
