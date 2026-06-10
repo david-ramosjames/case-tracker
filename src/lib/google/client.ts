@@ -46,8 +46,19 @@ export async function fetchGoogleSheetValues(spreadsheetId: string, range: strin
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${token}` },
   });
-  const body = (await response.json()) as { values?: string[][]; error?: { message?: string } };
-  if (!response.ok) throw new Error(body.error?.message ?? "Unable to read Google Sheet.");
+  const body = (await response.json()) as {
+    values?: string[][];
+    error?: { message?: string; status?: string };
+  };
+  if (!response.ok) {
+    const detail = body.error?.message ?? "Unable to read Google Sheet.";
+    if (/permission/i.test(detail)) {
+      throw new Error(
+        `${detail} Share spreadsheet ${spreadsheetId} with ${credentials.clientEmail} as Viewer, and enable the Google Sheets API in Google Cloud.`,
+      );
+    }
+    throw new Error(`${detail} (spreadsheet ${spreadsheetId}, range ${range})`);
+  }
   return body.values ?? [];
 }
 

@@ -99,7 +99,15 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
   if (!pulseChannelId) return { processed: 0, posted: 0, skipped: 0, reason: "no_pulse_channel" };
 
   const lastTs = options?.force ? null : await getDailyPulseLastTs();
-  const messages = await fetchChannelHistory(pulseChannelId, { oldest: lastTs ?? undefined, limit: 10 });
+
+  let messages: Awaited<ReturnType<typeof fetchChannelHistory>>;
+  try {
+    messages = await fetchChannelHistory(pulseChannelId, { oldest: lastTs ?? undefined, limit: 10 });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    console.error("Daily pulse history fetch failed", detail);
+    return { processed: 0, posted: 0, skipped: 0, reason: "pulse_history_failed", error: detail };
+  }
 
   let processed = 0;
   let posted = 0;
