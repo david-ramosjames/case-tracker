@@ -125,7 +125,68 @@ export async function resolveSlackChannelId(channelNameOrId: string) {
   return lookupChannelId(channelNameOrId, map);
 }
 
-type SlackHistoryMessage = { ts: string; text?: string };
+export type SlackHistoryMessage = {
+  ts: string;
+  text?: string;
+  blocks?: Array<Record<string, unknown>>;
+  attachments?: Array<{
+    text?: string;
+    fallback?: string;
+    blocks?: Array<Record<string, unknown>>;
+  }>;
+};
+
+function collectRichTextElements(element: Record<string, unknown>): string[] {
+  if (element.type === "text" && typeof element.text === "string") return [element.text];
+  if (!Array.isArray(element.elements)) return [];
+  return element.elements.flatMap((child) => collectRichTextElements(child as Record<string, unknown>));
+}
+
+function collectBlockText(block: Record<string, unknown>): string[] {
+  const parts: string[] = [];
+  const type = block.type;
+
+  if ((type === "section" || type === "header") && block.text && typeof block.text === "object") {
+    const text = (block.text as { text?: string }).text;
+    if (text) parts.push(text);
+  }
+
+  if (type === "rich_text" && Array.isArray(block.elements)) {
+    for (const element of block.elements) {
+      if (element && typeof element === "object") {
+        parts.push(...collectRichTextElements(element as Record<string, unknown>));
+      }
+    }
+  }
+
+  if (Array.isArray(block.elements)) {
+    for (const element of block.elements) {
+      if (element && typeof element === "object") {
+        parts.push(...collectBlockText(element as Record<string, unknown>));
+      }
+    }
+  }
+
+  return parts;
+}
+
+export function extractSlackMessageText(message: SlackHistoryMessage) {
+  if (message.text?.trim()) return message.text;
+
+  const parts: string[] = [];
+  for (const block of message.blocks ?? []) {
+    parts.push(...collectBlockText(block));
+  }
+  for (const attachment of message.attachments ?? []) {
+    if (attachment.text) parts.push(attachment.text);
+    if (attachment.fallback) parts.push(attachment.fallback);
+    for (const block of attachment.blocks ?? []) {
+      parts.push(...collectBlockText(block));
+    }
+  }
+
+  return parts.join("\n").trim();
+}
 
 export async function fetchChannelHistory(
   channelId: string,
@@ -145,4 +206,46 @@ export async function fetchChannelHistory(
 
   const messages = [...(payload.messages ?? [])].sort((a, b) => Number(a.ts) - Number(b.ts));
   return messages;
+}
+
+/** Paginated channel history for pulse lookback (newest pages first, returned oldest→newest). */
+export async function fetchChannelHistorySince(
+  channelId: string,
+  options?: { oldest?: string; latest?: string; maxMessages?: number },
+): Promise<SlackHistoryMessage[]> {
+  if (!isSlackEnabled()) return [];
+
+  const maxMessages = options?.maxMessages ?? 200;
+  const collected: SlackHistoryMessage[] = [];
+  let cursor: string | undefined;
+
+  while (collected.length < maxMessages) {
+    const limit = Math.min(100, maxMessages - collected.length);
+    const payload = await slackApi<{
+      ok: boolean;
+      messages?: SlackHistoryMessage[];
+      response_metadata?: { next_cursor?: string };
+    }>("conversations.history", {
+      channel: resolveSlackChannelParam(channelId),
+      limit,
+      oldest: options?.oldest,
+      latest: options?.latest,
+      inclusive: false,
+      cursor,
+    });
+
+    const batch = payload.messages ?? [];
+    if (batch.length === 0) break;
+    collected.push(...batch);
+
+    cursor = payload.response_metadata?.next_cursor || undefined;
+    if (!cursor) break;
+  }
+
+  const deduped = new Map<string, SlackHistoryMessage>();
+  for (const message of collected) {
+    if (message.ts) deduped.set(message.ts, message);
+  }
+
+  return [...deduped.values()].sort((a, b) => Number(a.ts) - Number(b.ts));
 }

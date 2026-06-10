@@ -32,6 +32,45 @@ export function isIgnoredPulseChannelRef(channelRef: string) {
   return getIgnoredPulseChannelRefs().has(normalizePulseChannelRef(channelRef));
 }
 
+function stripPulseLinePrefix(line: string) {
+  return line.trim().replace(/^[\s•·▪\-\*]+/, "").trim();
+}
+
+function parseConfidenceLevel(raw: string): ConfidenceLevel {
+  const level = raw.toLowerCase();
+  if (level === "high") return "High";
+  if (level === "low") return "Low";
+  return "Medium";
+}
+
+function parseConfidenceAndReason(text: string) {
+  let remainder = text.trim();
+  let confidence: ConfidenceLevel | undefined;
+  let reason = "";
+
+  const confidenceMatch = remainder.match(/\((\w+)\s+confidence\)/i);
+  if (confidenceMatch) {
+    confidence = parseConfidenceLevel(confidenceMatch[1]);
+    remainder = remainder.replace(confidenceMatch[0], "").trim();
+  }
+
+  const reasonMatch = remainder.match(/\(\*([^*]+)\*\)/);
+  if (reasonMatch) {
+    reason = reasonMatch[1].trim();
+    remainder = remainder.replace(reasonMatch[0], "").trim();
+  }
+
+  return { remainder, confidence, reason };
+}
+
+function parseExcerptFromLine(line: string) {
+  const trimmed = stripPulseLinePrefix(line);
+  const quotedMatch = trimmed.match(/^[""'](.+?)[""']\s*[—-]/);
+  if (quotedMatch) return quotedMatch[1].trim();
+  if (/^[""']/.test(trimmed)) return trimmed.replace(/^[""']|[""'].*$/g, "").trim();
+  return null;
+}
+
 /** Parse a #daily-pulse recap message into per-channel stage suggestions. */
 export function parseDailyPulseMessage(text: string): ParsedPulseItem[] {
   if (!PULSE_HEADER.test(text)) return [];
@@ -41,7 +80,7 @@ export function parseDailyPulseMessage(text: string): ParsedPulseItem[] {
   let index = 0;
 
   while (index < lines.length) {
-    const line = lines[index].trim();
+    const line = stripPulseLinePrefix(lines[index]);
     const headerMatch = line.match(/^#?([\w.-]+)\s*→\s*(.+)$/i);
     if (!headerMatch) {
       index += 1;
@@ -54,34 +93,38 @@ export function parseDailyPulseMessage(text: string): ParsedPulseItem[] {
       continue;
     }
 
-    const suggestedStage = normalizePulseStageLabel(headerMatch[2]);
-    let confidence: ConfidenceLevel = "Medium";
-    let reason = "";
+    const inline = parseConfidenceAndReason(headerMatch[2]);
+    let confidence: ConfidenceLevel = inline.confidence ?? "Medium";
+    let reason = inline.reason;
     let excerpt = "";
 
-    const nextLine = (lines[index + 1] ?? "").trim();
-    const confidenceMatch = nextLine.match(/\((\w+)\s+confidence\)/i);
-    if (confidenceMatch) {
-      const level = confidenceMatch[1].toLowerCase();
-      confidence = level === "high" ? "High" : level === "low" ? "Low" : "Medium";
-      const reasonMatch = nextLine.match(/\(\*([^*]+)\*\)/);
-      if (reasonMatch) reason = reasonMatch[1].trim();
-      index += 1;
+    if (!inline.confidence) {
+      const nextLine = stripPulseLinePrefix(lines[index + 1] ?? "");
+      const confidenceMatch = nextLine.match(/\((\w+)\s+confidence\)/i);
+      if (confidenceMatch) {
+        confidence = parseConfidenceLevel(confidenceMatch[1]);
+        const reasonMatch = nextLine.match(/\(\*([^*]+)\*\)/);
+        if (reasonMatch) reason = reasonMatch[1].trim();
+        index += 1;
+      }
     }
 
-    const excerptLine = (lines[index + 1] ?? "").trim();
-    const quotedMatch = excerptLine.match(/^[""](.+)[""]\s*[—-]/);
-    if (quotedMatch) {
-      excerpt = quotedMatch[1].trim();
-      index += 1;
-    } else if (!confidenceMatch && excerptLine.startsWith('"')) {
-      excerpt = excerptLine.replace(/^[""]|[""].*$/g, "").trim();
+    const excerptLine = stripPulseLinePrefix(lines[index + 1] ?? "");
+    const parsedExcerpt = parseExcerptFromLine(excerptLine);
+    if (parsedExcerpt) {
+      excerpt = parsedExcerpt;
       index += 1;
     }
 
     if (!excerpt && reason) excerpt = reason;
 
-    items.push({ channelRef, suggestedStage, confidence, reason, excerpt });
+    items.push({
+      channelRef,
+      suggestedStage: normalizePulseStageLabel(inline.remainder),
+      confidence,
+      reason,
+      excerpt,
+    });
     index += 1;
   }
 

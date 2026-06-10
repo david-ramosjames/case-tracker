@@ -1,6 +1,11 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
-import { fetchChannelHistory, postSlackMessage, resolveSlackChannelId } from "@/lib/slack/client";
+import {
+  extractSlackMessageText,
+  fetchChannelHistorySince,
+  postSlackMessage,
+  resolveSlackChannelId,
+} from "@/lib/slack/client";
 import { getDailyPulseChannelId, isSlackEnabled } from "@/lib/slack/config";
 import { isIgnoredPulseChannelRef, parseDailyPulseMessage, type ParsedPulseItem } from "@/lib/slack/pulse";
 import {
@@ -92,6 +97,8 @@ export async function postStageConfirmationForSuggestion(
   return { posted: true as const, threadTs: posted.ts, channelId };
 }
 
+const PULSE_LOOKBACK_HOURS = 48;
+
 export async function processDailyPulseRecap(options?: { force?: boolean }) {
   if (!isSlackEnabled()) return { processed: 0, posted: 0, skipped: 0, reason: "slack_disabled" };
 
@@ -99,10 +106,12 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
   if (!pulseChannelId) return { processed: 0, posted: 0, skipped: 0, reason: "no_pulse_channel" };
 
   const lastTs = options?.force ? null : await getDailyPulseLastTs();
+  const lookbackOldest = String(Math.floor(Date.now() / 1000) - PULSE_LOOKBACK_HOURS * 3600);
+  const oldest = lastTs ?? lookbackOldest;
 
-  let messages: Awaited<ReturnType<typeof fetchChannelHistory>>;
+  let messages: Awaited<ReturnType<typeof fetchChannelHistorySince>>;
   try {
-    messages = await fetchChannelHistory(pulseChannelId, { oldest: lastTs ?? undefined, limit: 10 });
+    messages = await fetchChannelHistorySince(pulseChannelId, { oldest, maxMessages: 100 });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     console.error("Daily pulse history fetch failed", detail);
@@ -112,15 +121,22 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
   let processed = 0;
   let posted = 0;
   let skipped = 0;
+  let messagesScanned = 0;
+  let pulseMessagesFound = 0;
   let newestTs = lastTs;
 
   for (const message of messages) {
-    if (!message.text || !message.ts) continue;
+    if (!message.ts) continue;
+    messagesScanned += 1;
     if (lastTs && Number(message.ts) <= Number(lastTs)) continue;
 
-    const items = parseDailyPulseMessage(message.text);
+    const text = extractSlackMessageText(message);
+    if (!text) continue;
+
+    const items = parseDailyPulseMessage(text);
     if (items.length === 0) continue;
 
+    pulseMessagesFound += 1;
     newestTs = message.ts;
     processed += items.length;
 
@@ -135,7 +151,15 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
     await setDailyPulseLastTs(newestTs);
   }
 
-  return { processed, posted, skipped, lastTs: newestTs };
+  return {
+    processed,
+    posted,
+    skipped,
+    lastTs: newestTs,
+    messagesScanned,
+    pulseMessagesFound,
+    lookbackHours: PULSE_LOOKBACK_HOURS,
+  };
 }
 
 async function fanOutPulseItem(item: ParsedPulseItem, pulseMessageTs: string): Promise<"posted" | "skipped"> {

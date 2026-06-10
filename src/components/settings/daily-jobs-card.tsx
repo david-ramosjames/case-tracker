@@ -108,7 +108,19 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
     if (result.reason === "pulse_history_failed") {
       return `Could not read pulse channel: ${result.error ?? "unknown error"}.`;
     }
-    return `Processed ${result.processed ?? 0} pulse item(s), posted ${result.posted ?? 0} confirmation(s), skipped ${result.skipped ?? 0}.`;
+    const summary = `Processed ${result.processed ?? 0} pulse item(s), posted ${result.posted ?? 0} confirmation(s), skipped ${result.skipped ?? 0}.`;
+    if ((result.processed ?? 0) === 0) {
+      const scanned = result.messagesScanned ?? 0;
+      const found = result.pulseMessagesFound ?? 0;
+      const lookback = result.lookbackHours ?? 48;
+      if (scanned === 0) {
+        return `${summary} No messages in #daily-pulse for the last ${lookback}h — check SLACK_DAILY_PULSE_CHANNEL_ID.`;
+      }
+      if (found === 0) {
+        return `${summary} Scanned ${scanned} message(s) in the last ${lookback}h but none matched the Pulse recap format.`;
+      }
+    }
+    return summary;
   }
 
   if (step === "fieldReminders" && result) {
