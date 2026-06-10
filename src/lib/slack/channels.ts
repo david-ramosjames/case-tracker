@@ -37,6 +37,20 @@ export async function getSlackChannelForCaseNumber(caseNumber: string): Promise<
   return rowToChannel(data as ChannelRow);
 }
 
+export async function loadSlackChannelMapByCaseNumber() {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return new Map<string, CaseSlackChannel>();
+
+  const { data, error } = await admin.from("case_slack_channels").select("*");
+  if (error || !data) return new Map<string, CaseSlackChannel>();
+
+  const map = new Map<string, CaseSlackChannel>();
+  for (const row of data) {
+    map.set(cleanCaseNumber((row as ChannelRow).case_number), rowToChannel(row as ChannelRow));
+  }
+  return map;
+}
+
 export async function upsertSlackChannels(rows: Array<Omit<CaseSlackChannel, "syncedAt" | "updatedAt">>) {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required to sync Slack channels.");

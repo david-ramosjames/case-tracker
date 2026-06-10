@@ -4,5 +4,13 @@
       "path": "/api/cron/slack-reminders",
       "schedule": "0 14 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "src/app/api/admin/daily-jobs/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/cron/slack-reminders/route.ts": {
+      "maxDuration": 300
+    }
+  }
 }

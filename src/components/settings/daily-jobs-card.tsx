@@ -14,6 +14,14 @@ type JobRow = {
   description: string;
 };
 
+const FULL_JOB_STEPS: DailyJobStep[] = [
+  "sheetSync",
+  "settlementSync",
+  "treatmentPromotion",
+  "dailyPulse",
+  "fieldReminders",
+];
+
 const JOB_ROWS: JobRow[] = [
   {
     step: "sheetSync",
@@ -149,7 +157,7 @@ export function DailyJobsCard() {
   const [messages, setMessages] = useState<Partial<Record<DailyJobStep, string>>>({});
   const [errors, setErrors] = useState<Partial<Record<DailyJobStep, string>>>({});
 
-  async function runStep(step: DailyJobStep) {
+  async function runStep(step: DailyJobStep, options?: { keepActive?: boolean }) {
     setActiveStep(step);
     setMessages((prev) => ({ ...prev, [step]: undefined }));
     setErrors((prev) => ({ ...prev, [step]: undefined }));
@@ -161,7 +169,7 @@ export function DailyJobsCard() {
         body: JSON.stringify({
           step,
           force: true,
-          caseNumber: step === "fieldReminders" || step === "all" ? caseNumber.trim() || undefined : undefined,
+          caseNumber: step === "fieldReminders" ? caseNumber.trim() || undefined : undefined,
         }),
       });
 
@@ -173,17 +181,29 @@ export function DailyJobsCard() {
       const message = formatJobResult(step, body);
       if (body.ok === false) {
         setErrors((prev) => ({ ...prev, [step]: message }));
-      } else {
-        setMessages((prev) => ({ ...prev, [step]: message }));
+        return false;
       }
+
+      setMessages((prev) => ({ ...prev, [step]: message }));
+      return true;
     } catch (err) {
       setErrors((prev) => ({
         ...prev,
         [step]: err instanceof Error ? err.message : "Job failed.",
       }));
+      return false;
     } finally {
-      setActiveStep(null);
+      if (!options?.keepActive) setActiveStep(null);
     }
+  }
+
+  async function runFullDailyJob() {
+    setActiveStep("all");
+    for (const step of FULL_JOB_STEPS) {
+      const ok = await runStep(step, { keepActive: true });
+      if (!ok) break;
+    }
+    setActiveStep(null);
   }
 
   return (
@@ -191,8 +211,8 @@ export function DailyJobsCard() {
       <CardHeader>
         <CardTitle>Daily cron jobs</CardTitle>
         <CardDescription>
-          Manual triggers for each step in the 9:00 AM Central cron (`/api/cron/slack-reminders`). Sheet sync cards above
-          use the same imports; use these to run stage workflow and field reminders on demand.
+          Manual triggers for each step in the 9:00 AM Central cron (`/api/cron/slack-reminders`). Run full job
+          executes each step separately to avoid server timeouts. Sheet sync cards above use the same imports.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -208,7 +228,7 @@ export function DailyJobsCard() {
           <Button
             variant="default"
             disabled={activeStep !== null}
-            onClick={() => void runStep("all")}
+            onClick={() => void runFullDailyJob()}
           >
             {activeStep === "all" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Run full daily job

@@ -3,6 +3,7 @@ import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
 import {
   extractSlackMessageTextForParsing,
   fetchChannelHistorySince,
+  loadChannelIdToNameMap,
   postSlackMessage,
   resolveSlackChannelId,
 } from "@/lib/slack/client";
@@ -133,12 +134,15 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
   let recapHeadersFound = 0;
   let newestTs = lastTs;
 
+  const needsChannelResolve = messages.some((message) => (message.blocks?.length ?? 0) > 0);
+  const channelIdToName = needsChannelResolve ? await loadChannelIdToNameMap() : new Map<string, string>();
+
   for (const message of messages) {
     if (!message.ts) continue;
     messagesScanned += 1;
     if (lastTs && Number(message.ts) <= Number(lastTs)) continue;
 
-    const text = await extractSlackMessageTextForParsing(message);
+    const text = extractSlackMessageTextForParsing(message, channelIdToName);
     if (!text) continue;
 
     const normalizedText = normalizeSlackMessageMarkup(text);

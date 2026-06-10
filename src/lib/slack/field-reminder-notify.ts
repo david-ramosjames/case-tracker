@@ -1,6 +1,7 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
+import { cleanCaseNumber } from "@/lib/csv/parse";
 import { normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
-import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
+import { loadSlackChannelMapByCaseNumber } from "@/lib/slack/channels";
 import { isSlackEnabled } from "@/lib/slack/config";
 import {
   FIELD_REMINDER_COOLDOWN_DAYS,
@@ -15,10 +16,13 @@ import {
 import { type CaseRecord } from "@/lib/types";
 import { daysSince } from "@/lib/utils";
 
-async function getSlackContextForRecord(record: CaseRecord) {
+function getSlackContextForRecord(
+  record: CaseRecord,
+  channelMap: Map<string, { slackChannelId: string | null }>,
+) {
   if (!isSlackEnabled()) return null;
 
-  const mapping = await getSlackChannelForCaseNumber(record.shared.caseNumber);
+  const mapping = channelMap.get(cleanCaseNumber(record.shared.caseNumber));
   if (!mapping?.slackChannelId) return null;
 
   const channelId = normalizeSlackChannelId(mapping.slackChannelId);
@@ -36,6 +40,7 @@ export async function sendSlackFieldReminders(
   const appUrl = getAppOriginForNotifications();
   if (!appUrl) throw new Error("Set NEXT_PUBLIC_SITE_URL for Slack links.");
 
+  const channelMap = await loadSlackChannelMapByCaseNumber();
   let posted = 0;
   let skipped = 0;
   let fields = 0;
@@ -59,7 +64,7 @@ export async function sendSlackFieldReminders(
       continue;
     }
 
-    const context = await getSlackContextForRecord(record);
+    const context = getSlackContextForRecord(record, channelMap);
     if (!context) {
       skipped += 1;
       continue;

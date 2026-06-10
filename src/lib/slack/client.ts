@@ -80,7 +80,6 @@ export async function loadChannelNameMap(forceRefresh = false) {
   let page = 0;
 
   do {
-    if (page > 0) await sleep(1200);
     const payload = await slackApi<{
       ok: boolean;
       channels?: Array<{ id: string; name: string }>;
@@ -253,8 +252,10 @@ export function extractSlackMessageText(
   return blockText || plainText;
 }
 
-export async function extractSlackMessageTextForParsing(message: SlackHistoryMessage) {
-  const channelIdToName = await loadChannelIdToNameMap();
+export function extractSlackMessageTextForParsing(
+  message: SlackHistoryMessage,
+  channelIdToName: Map<string, string> = new Map(),
+) {
   let text = extractSlackMessageText(message, channelIdToName);
   text = text.replace(/<#([CGD][A-Z0-9]+)>/gi, (_, id: string) => {
     const name = channelIdToName.get(id);

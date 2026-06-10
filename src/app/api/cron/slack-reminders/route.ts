@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+
+export const maxDuration = 300;
 import { runDailyJob } from "@/lib/cron/daily-jobs";
 import { getCronSecret, isNineAmCentral } from "@/lib/slack/config";
 

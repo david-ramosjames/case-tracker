@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+
+export const maxDuration = 300;
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
 import { type DailyJobStep, runDailyJob } from "@/lib/cron/daily-jobs";
 import { errorMessage } from "@/lib/utils";

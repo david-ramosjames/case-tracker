@@ -1,5 +1,6 @@
+import { redirect } from "next/navigation";
 import { buildViewerContext, filterRecordsForViewer } from "@/lib/auth/access";
-import { requireSessionUser } from "@/lib/auth/session";
+import { getSessionUser } from "@/lib/auth/session";
 import {
   getAttorneyGoals,
   getCases,
@@ -8,7 +9,8 @@ import {
 } from "@/lib/supabase/services";
 
 export async function loadViewerCaseBundle() {
-  const sessionUser = await requireSessionUser();
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) redirect("/login");
   const [allRecords, users, settings, goals] = await Promise.all([
     getCases(),
     getUsers(),
