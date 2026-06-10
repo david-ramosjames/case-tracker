@@ -38,7 +38,7 @@ GOOGLE_SHEETS_SETTLEMENT_RANGE=RJL Cases Disbursing!A:Z
 Use your tab name in `GOOGLE_SHEETS_SETTLEMENT_RANGE` (the workbook title is often the tab name).
 
 1. Share the spreadsheet with the service account email as **Viewer**.
-2. Run migrations `013_case_disbursements.sql` and `014_disbursement_pending_remaining.sql` in Supabase.
+2. Run migrations `013` through `015` and `019_disbursement_sheet_row_key_unique.sql` in Supabase.
 
 ## Sync
 

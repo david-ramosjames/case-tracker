@@ -540,6 +540,44 @@ type SettlementSheetCasePayload = {
   }>;
 };
 
+type DisbursementRowPayload = {
+  tracker_entry_id: string;
+  case_id: string | null;
+  case_number: string;
+  label: string | null;
+  disburse_date: string | null;
+  settlement_date: string | null;
+  settlement_amount: number | null;
+  attorney_fees: number | null;
+  weight: number;
+  pending_remaining: boolean;
+  sheet_row_key: string;
+  synced_at: string;
+};
+
+/** Upsert by sheet_row_key without relying on PostgREST onConflict (partial unique indexes are unsupported). */
+async function upsertDisbursementBySheetRowKey(
+  admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
+  payload: DisbursementRowPayload,
+) {
+  const { data: existing, error: lookupError } = await admin
+    .from("case_tracker_disbursements")
+    .select("id")
+    .eq("sheet_row_key", payload.sheet_row_key)
+    .maybeSingle();
+
+  if (lookupError) throw new Error(lookupError.message);
+
+  if (existing?.id) {
+    const { error } = await admin.from("case_tracker_disbursements").update(payload).eq("id", existing.id);
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const { error } = await admin.from("case_tracker_disbursements").insert(payload);
+  if (error) throw new Error(error.message);
+}
+
 /** Apply settlement/disbursement rows from the settlements Google Sheet. */
 export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload[]) {
   const admin = createSupabaseAdminClient();
@@ -592,7 +630,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     if (pruneError) throw new Error(pruneError.message);
 
     for (const disbursement of item.disbursements) {
-      const payload = {
+      const payload: DisbursementRowPayload = {
         tracker_entry_id: trackerEntryId,
         case_id: isUuid(caseId) ? caseId : null,
         case_number: caseNumber,
@@ -606,8 +644,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
         sheet_row_key: disbursement.sheetRowKey,
         synced_at: syncedAt,
       };
-      const { error } = await admin.from("case_tracker_disbursements").upsert(payload, { onConflict: "sheet_row_key" });
-      if (error) throw new Error(error.message);
+      await upsertDisbursementBySheetRowKey(admin, payload);
       disbursementsSynced += 1;
     }
 
