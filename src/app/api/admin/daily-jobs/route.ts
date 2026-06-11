@@ -10,6 +10,7 @@ const VALID_STEPS: DailyJobStep[] = [
   "settlementSync",
   "treatmentPromotion",
   "dailyPulse",
+  "missingFields",
   "fieldReminders",
   "all",
 ];

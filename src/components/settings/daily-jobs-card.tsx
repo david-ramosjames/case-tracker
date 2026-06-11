@@ -19,6 +19,7 @@ const FULL_JOB_STEPS: DailyJobStep[] = [
   "settlementSync",
   "treatmentPromotion",
   "dailyPulse",
+  "missingFields",
   "fieldReminders",
 ];
 
@@ -44,9 +45,14 @@ const JOB_ROWS: JobRow[] = [
     description: "Parse #daily-pulse and post stage confirmation threads.",
   },
   {
+    step: "missingFields",
+    title: "Missing fields",
+    description: "One Slack post per case listing empty completeness fields (type, liability, sources, etc.).",
+  },
+  {
     step: "fieldReminders",
     title: "Field reminders",
-    description: "Post one Slack reminder per overdue tracked field (Case Tracker Score fields).",
+    description: "Post one Slack reminder per overdue validation field (quarter, minimum, policy limits, etc.).",
   },
 ];
 
@@ -77,6 +83,10 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
     }
     if (stageWorkflow?.pulse) {
       parts.push(`${stageWorkflow.pulse.posted ?? 0} pulse confirmation(s) posted`);
+    }
+    const missingFields = body.missingFields as { posted?: number } | undefined;
+    if (missingFields) {
+      parts.push(`${missingFields.posted ?? 0} missing-field notice(s)`);
     }
     const fieldReminders = body.fieldReminders as { posted?: number; fields?: number } | undefined;
     if (fieldReminders) {
@@ -142,6 +152,12 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
     return summary;
   }
 
+  if (step === "missingFields" && result) {
+    const filter = body.filter as { caseNumber?: string } | null | undefined;
+    const scope = filter?.caseNumber ? ` for case ${filter.caseNumber}` : "";
+    return `Posted ${result.posted ?? 0} missing-field notice(s)${scope} (${result.skipped ?? 0} cases skipped).`;
+  }
+
   if (step === "fieldReminders" && result) {
     const filter = body.filter as { caseNumber?: string } | null | undefined;
     const scope = filter?.caseNumber ? ` for case ${filter.caseNumber}` : "";
@@ -169,7 +185,8 @@ export function DailyJobsCard() {
         body: JSON.stringify({
           step,
           force: true,
-          caseNumber: step === "fieldReminders" ? caseNumber.trim() || undefined : undefined,
+          caseNumber:
+            step === "fieldReminders" || step === "missingFields" ? caseNumber.trim() || undefined : undefined,
         }),
       });
 
@@ -222,7 +239,7 @@ export function DailyJobsCard() {
             <Input
               value={caseNumber}
               onChange={(event) => setCaseNumber(event.target.value)}
-              placeholder="Limit field reminders to one case"
+              placeholder="Limit Slack field jobs to one case"
             />
           </label>
           <Button

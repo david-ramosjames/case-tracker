@@ -2,6 +2,7 @@ import { cleanCaseNumber } from "@/lib/csv/parse";
 import { syncSettlementsFromGoogleSheetIfConfigured } from "@/lib/google/settlements-sync";
 import { syncSlackChannelsFromGoogleSheetIfConfigured } from "@/lib/google/sheets-sync";
 import { sendSlackFieldReminders } from "@/lib/slack/field-reminder-notify";
+import { sendSlackMissingFieldNotices } from "@/lib/slack/missing-field-notify";
 import { processDailyPulseRecap } from "@/lib/slack/stage-confirmation";
 import { promoteOnboardingToTreatment, runDailyStageWorkflow } from "@/lib/slack/stage-workflow";
 import { getCases } from "@/lib/supabase/services";
@@ -12,6 +13,7 @@ export type DailyJobStep =
   | "settlementSync"
   | "treatmentPromotion"
   | "dailyPulse"
+  | "missingFields"
   | "fieldReminders"
   | "all";
 
@@ -36,19 +38,30 @@ export async function runDailyJobStep<T>(
   }
 }
 
+function filterRecordsForCaseNumber(records: Awaited<ReturnType<typeof getCases>>, caseNumberParam?: string) {
+  const trimmed = caseNumberParam?.trim();
+  if (!trimmed) return records;
+  const key = cleanCaseNumber(trimmed);
+  return records.filter((record) => cleanCaseNumber(record.shared.caseNumber) === key);
+}
+
+async function runMissingFields(options: DailyJobOptions) {
+  const force = options.force ?? true;
+  const records = filterRecordsForCaseNumber(await getCases(), options.caseNumber);
+
+  return sendSlackMissingFieldNotices(records, {
+    force,
+    forceSend: force && Boolean(options.caseNumber?.trim()),
+  });
+}
+
 async function runFieldReminders(options: DailyJobOptions) {
   const force = options.force ?? true;
-  const caseNumberParam = options.caseNumber?.trim();
-
-  let records = await getCases();
-  if (caseNumberParam) {
-    const key = cleanCaseNumber(caseNumberParam);
-    records = records.filter((record) => cleanCaseNumber(record.shared.caseNumber) === key);
-  }
+  const records = filterRecordsForCaseNumber(await getCases(), options.caseNumber);
 
   return sendSlackFieldReminders(records, {
     force,
-    forceSend: force && Boolean(caseNumberParam),
+    forceSend: force && Boolean(options.caseNumber?.trim()),
   });
 }
 
@@ -82,10 +95,13 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
     );
     if (stageWorkflowResult.error) errors.push(stageWorkflowResult.error);
 
+    const missingFieldsResult = await runDailyJobStep("missingFields", () => runMissingFields(options));
+    if (missingFieldsResult.error) errors.push(missingFieldsResult.error);
+
     const fieldRemindersResult = await runDailyJobStep("fieldReminders", () => runFieldReminders(options));
     if (fieldRemindersResult.error) errors.push(fieldRemindersResult.error);
 
-    const slackRan = Boolean(fieldRemindersResult.data || stageWorkflowResult.data);
+    const slackRan = Boolean(missingFieldsResult.data || fieldRemindersResult.data || stageWorkflowResult.data);
     const ok = errors.length === 0 || slackRan;
 
     return {
@@ -104,6 +120,9 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
           error: settlementSyncResult.error?.error,
         } as const),
       stageWorkflow: stageWorkflowResult.data ?? { error: stageWorkflowResult.error?.error },
+      missingFields:
+        missingFieldsResult.data ??
+        ({ posted: 0, skipped: 0, error: missingFieldsResult.error?.error } as const),
       fieldReminders:
         fieldRemindersResult.data ??
         ({ posted: 0, skipped: 0, fields: 0, error: fieldRemindersResult.error?.error } as const),
@@ -142,6 +161,19 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
       return { ok: false, step, error: result.error.error, errors: [result.error] };
     }
     return { ok: true, step, result: result.data };
+  }
+
+  if (step === "missingFields") {
+    const result = await runDailyJobStep("missingFields", () => runMissingFields(options));
+    if (result.error) {
+      return { ok: false, step, error: result.error.error, errors: [result.error] };
+    }
+    return {
+      ok: true,
+      step,
+      result: result.data,
+      filter: options.caseNumber ? { caseNumber: options.caseNumber, force } : null,
+    };
   }
 
   if (step === "fieldReminders") {
