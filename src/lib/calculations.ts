@@ -28,8 +28,11 @@ import {
 } from "@/lib/types";
 import { daysSince, getCurrentQuarter, getQuarterElapsedPercentage, getYearElapsedPercentage } from "@/lib/utils";
 
-import { normalizeTargetQuarter } from "@/lib/case-options";
+import { deriveResultFeePercent } from "@/lib/fee-percent";
 import { QUARTERLY_REVIEW_DAYS, SOURCES_LIT_REVIEW_DAYS } from "@/lib/slack/config";
+import { normalizeTargetQuarter } from "@/lib/target-quarter";
+
+export { deriveResultFeePercent, referralFeeToDecimal, wasEverInLitigation } from "@/lib/fee-percent";
 
 const QUARTERLY_CHECK_IN_FIELDS = ["targetResolutionQuarter", "minimumValue"] as const;
 const SOURCES_LIT_FIELDS = ["sources", "injuries", "caseDescription"] as const;
@@ -245,29 +248,6 @@ export function getAttorneyGoalProgress(records: CaseRecord[], goals: AttorneyGo
 
 export function sum(values: Array<number | null | undefined>) {
   return values.reduce<number>((total, value) => total + (value ?? 0), 0);
-}
-
-export function referralFeeToDecimal(referralFee: number | null | undefined) {
-  if (referralFee == null || !Number.isFinite(referralFee)) return 0;
-  return referralFee > 1 ? referralFee / 100 : referralFee;
-}
-
-export function wasEverInLitigation(input: {
-  caseStage: CaseStage;
-  expectedLitigation: ExpectedLitigationStatus | null;
-}) {
-  if (input.caseStage === "Lit") return true;
-  return input.expectedLitigation === "Lit" || input.expectedLitigation === "Expect";
-}
-
-/** Settlement / forecast fee rate: 40% if ever in litigation, else one-third net of referral fee. */
-export function deriveResultFeePercent(input: {
-  caseStage: CaseStage;
-  expectedLitigation: ExpectedLitigationStatus | null;
-  referralFee: number | null;
-}) {
-  if (wasEverInLitigation(input)) return 0.4;
-  return (1 / 3) * (1 - referralFeeToDecimal(input.referralFee));
 }
 
 export function getFeePercent(record: CaseRecord) {

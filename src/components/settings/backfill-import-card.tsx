@@ -9,8 +9,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   CASE_BACKFILL_ALL_HEADERS,
+  CASE_BACKFILL_CASE_NUMBER_HEADERS,
+  CASE_BACKFILL_DOL_HEADERS,
   CASE_BACKFILL_HEADER_GROUPS,
-  CASE_BACKFILL_REQUIRED_HEADERS,
   hasCaseBackfillHeaders,
 } from "@/lib/csv/case-backfill";
 import { parseCsv } from "@/lib/csv/parse";
@@ -28,15 +29,15 @@ export function BackfillImportCard() {
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
 
-  const missingRequired = useMemo(
-    () => CASE_BACKFILL_REQUIRED_HEADERS.filter((header) => !headers.some((item) => item.toLowerCase() === header.toLowerCase())),
+  const hasCaseNumberHeader = useMemo(
+    () => CASE_BACKFILL_CASE_NUMBER_HEADERS.some((header) => headers.some((item) => item.toLowerCase() === header.toLowerCase())),
     [headers],
   );
   const recognizedCount = useMemo(
     () => headers.filter((header) => CASE_BACKFILL_ALL_HEADERS.some((expected) => expected.toLowerCase() === header.toLowerCase())).length,
     [headers],
   );
-  const canImport = Boolean(csvText) && missingRequired.length === 0 && (preview?.matched ?? 0) > 0;
+  const canImport = Boolean(csvText) && hasCaseNumberHeader && (preview?.matched ?? 0) > 0;
 
   async function loadCsv(file: File | null) {
     if (!file) return;
@@ -51,7 +52,7 @@ export function BackfillImportCard() {
 
     if (!hasCaseBackfillHeaders(text)) {
       setPreview(null);
-      setErrorMessage('CSV must include a "Case #" column.');
+      setErrorMessage('CSV must include a case number column (e.g. "Case #" or "Case Number").');
       return;
     }
 
@@ -100,8 +101,9 @@ export function BackfillImportCard() {
       <CardHeader>
         <CardTitle>CSV Backfill</CardTitle>
         <CardDescription>
-          Match existing DocketFlow cases by <span className="font-medium text-navy-950">Case #</span> only. Empty cells are
-          skipped. Client, attorney, and paralegal are never changed. Optional DocketFlow updates: DOL, case status, and type.
+          Match existing cases by case number only — extra rows in the CSV are ignored. Upload just{" "}
+          <span className="font-medium text-navy-950">Case #</span> and <span className="font-medium text-navy-950">DOL</span>{" "}
+          to fill missing dates of loss. Empty cells are skipped; client, attorney, and paralegal are never changed.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -113,8 +115,13 @@ export function BackfillImportCard() {
             </div>
             <div className="flex flex-wrap gap-2">
               <Button asChild variant="outline">
+                <a href="/templates/case-dol-template.csv" download>
+                  DOL-only template
+                </a>
+              </Button>
+              <Button asChild variant="outline">
                 <a href="/templates/case-backfill-template.csv" download>
-                  Download CSV template
+                  Full template
                 </a>
               </Button>
               <Button asChild variant="pink">
@@ -140,7 +147,7 @@ export function BackfillImportCard() {
           </div>
           {fileName ? (
             <div className="mt-4 flex flex-wrap gap-2 text-sm">
-              <Badge variant={missingRequired.length ? "warning" : "success"}>{missingRequired.length ? "Missing Case #" : "Ready"}</Badge>
+              <Badge variant={hasCaseNumberHeader ? "success" : "warning"}>{hasCaseNumberHeader ? "Ready" : "Missing case # column"}</Badge>
               {isPreviewing ? <Badge variant="outline">Checking matches…</Badge> : null}
               {preview ? (
                 <>
@@ -169,9 +176,11 @@ export function BackfillImportCard() {
           <p className="text-sm font-semibold text-navy-950">CSV rules</p>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
             <li>
-              <span className="font-medium text-navy-950">Case #</span> is required and is the only match key.
+              Case number column required: {CASE_BACKFILL_CASE_NUMBER_HEADERS.join(", ")}. DOL column:{" "}
+              {CASE_BACKFILL_DOL_HEADERS.join(", ")}.
             </li>
-            <li>Leave a cell blank to keep the existing value (no overwrite).</li>
+            <li>Rows with no matching case are skipped — nothing new is created.</li>
+            <li>Leave a cell blank (or &quot;not set&quot;) to keep the existing DOL.</li>
             <li>Do not include client, attorney, or paralegal — those stay in DocketFlow.</li>
             <li>
               Overall <span className="font-medium text-navy-950">Active / Closed</span> is set automatically from{" "}

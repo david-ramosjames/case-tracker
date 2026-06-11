@@ -6,7 +6,14 @@ import {
   normalizeCaseType,
   normalizeTargetQuarter,
 } from "@/lib/case-options";
-import { cleanCaseNumber, getCsvCell, hasCsvHeader, parseCsv } from "@/lib/csv/parse";
+import {
+  cleanCaseNumber,
+  getCsvCell,
+  getCsvCellAny,
+  hasCsvHeaderAny,
+  parseCsv,
+  parseSheetDate,
+} from "@/lib/csv/parse";
 import {
   type CaseStage,
   type CheckStatus,
@@ -19,6 +26,8 @@ import {
   type TrackerUpdateInput,
 } from "@/lib/types";
 
+export const CASE_BACKFILL_CASE_NUMBER_HEADERS = ["Case #", "Case Number", "Case No", "Case No."] as const;
+export const CASE_BACKFILL_DOL_HEADERS = ["DOL", "Date of Loss", "Date of loss", "DOI", "Date of Incident"] as const;
 export const CASE_BACKFILL_REQUIRED_HEADERS = ["Case #"] as const;
 
 export const CASE_BACKFILL_HEADER_GROUPS = [
@@ -81,7 +90,7 @@ export type ParsedCaseBackfillRow = {
 
 export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
   const rows = parseCsv(csvText).filter((row) => row.some((cell) => cell.trim()));
-  const headerRowIndex = rows.findIndex((row) => hasCsvHeader(row, "Case #"));
+  const headerRowIndex = rows.findIndex((row) => hasCsvHeaderAny(row, [...CASE_BACKFILL_CASE_NUMBER_HEADERS]));
   if (headerRowIndex === -1) return [];
 
   const headers = rows[headerRowIndex].map((header) => header.trim());
@@ -89,15 +98,16 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
 
   return dataRows
     .map((row): ParsedCaseBackfillRow | null => {
-      const caseNumber = cleanCaseNumber(getCsvCell(row, headers, "Case #"));
+      const caseNumber = cleanCaseNumber(getCsvCellAny(row, headers, [...CASE_BACKFILL_CASE_NUMBER_HEADERS]));
       if (!caseNumber) return null;
 
       const shared: ParsedCaseBackfillRow["shared"] = {};
       const caseType = getCsvCell(row, headers, "Type");
-      const dol = getCsvCell(row, headers, "DOL");
+      const dol = getCsvCellAny(row, headers, [...CASE_BACKFILL_DOL_HEADERS]);
 
       if (caseType) shared.caseType = normalizeCaseType(caseType);
-      if (dol) shared.dateOfIncident = parseOptionalDate(dol);
+      const parsedDol = parseBackfillDol(dol);
+      if (parsedDol) shared.dateOfIncident = parsedDol;
 
       const stage = getCsvCell(row, headers, "Stage");
       const minimumValue = parseMoney(getCsvCell(row, headers, "Minimum Value"));
@@ -156,7 +166,7 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
 
       const result: Partial<SettlementResult> = {};
       const settlementDate = getCsvCell(row, headers, "Settlement Date");
-      if (settlementDate) result.settlementDate = parseOptionalDate(settlementDate);
+      if (settlementDate) result.settlementDate = parseSheetDate(settlementDate);
 
       const settlementAmount = getCsvCell(row, headers, "Settlement Amount");
       if (settlementAmount) result.settlementAmount = parseMoney(settlementAmount);
@@ -176,19 +186,19 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       const reductions = getCsvCell(row, headers, "Reductions");
 
       const releaseSigned = getCsvCell(row, headers, "Release Signed Date");
-      if (releaseSigned) result.releaseSignedAt = parseOptionalDate(releaseSigned);
+      if (releaseSigned) result.releaseSignedAt = parseSheetDate(releaseSigned);
 
       const closingSigned = getCsvCell(row, headers, "Closing Signed Date");
-      if (closingSigned) result.closingSignedAt = parseOptionalDate(closingSigned);
+      if (closingSigned) result.closingSignedAt = parseSheetDate(closingSigned);
 
       const checkDeposited = getCsvCell(row, headers, "Check Deposited Date");
-      if (checkDeposited) result.checkDepositedAt = parseOptionalDate(checkDeposited);
+      if (checkDeposited) result.checkDepositedAt = parseSheetDate(checkDeposited);
 
       const checkDisbursed = getCsvCell(row, headers, "Check Disbursed Date");
-      if (checkDisbursed) result.checkDisbursedAt = parseOptionalDate(checkDisbursed);
+      if (checkDisbursed) result.checkDisbursedAt = parseSheetDate(checkDisbursed);
 
       const disburseDate = getCsvCell(row, headers, "Disburse Date");
-      if (disburseDate) result.disburseDate = parseOptionalDate(disburseDate);
+      if (disburseDate) result.disburseDate = parseSheetDate(disburseDate);
 
       const resultQuarter = getCsvCell(row, headers, "Result Quarter");
       if (result.disburseDate) {
@@ -214,26 +224,30 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
 
 export function hasCaseBackfillHeaders(csvText: string) {
   const rows = parseCsv(csvText).filter((row) => row.some((cell) => cell.trim()));
-  const headerRow = rows.find((row) => hasCsvHeader(row, "Case #"));
+  const headerRow = rows.find((row) => hasCsvHeaderAny(row, [...CASE_BACKFILL_CASE_NUMBER_HEADERS]));
   return Boolean(headerRow);
+}
+
+function parseBackfillDol(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.toLowerCase().replace(/[.\s_-]+/g, "");
+  if (
+    normalized === "notset" ||
+    normalized === "na" ||
+    normalized === "n/a" ||
+    normalized === "none" ||
+    normalized === "unknown" ||
+    normalized === "tbd"
+  ) {
+    return null;
+  }
+  return parseSheetDate(trimmed);
 }
 
 function parseMoney(value: string) {
   const numeric = Number(value.replace(/[$,%\s]/g, ""));
   return Number.isFinite(numeric) ? numeric : null;
-}
-
-function parseOptionalDate(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  const numeric = Number(trimmed);
-  if (Number.isFinite(numeric) && numeric > 25000) {
-    return new Date(Date.UTC(1899, 11, 30) + numeric * 24 * 60 * 60 * 1000).toISOString();
-  }
-
-  const parsed = new Date(trimmed);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 function normalizeStage(value: string): CaseStage {

@@ -60,6 +60,19 @@ export function hasCsvHeader(row: string[], headerName: string) {
   return row.some((cell) => normalizeCsvHeader(cell) === normalizeCsvHeader(headerName));
 }
 
+export function hasCsvHeaderAny(row: string[], headerNames: string[]) {
+  return headerNames.some((headerName) => hasCsvHeader(row, headerName));
+}
+
+/** Return the first non-empty cell matching any of the given header names. */
+export function getCsvCellAny(row: string[], headers: string[], headerNames: string[]) {
+  for (const headerName of headerNames) {
+    const value = getCsvCell(row, headers, headerName);
+    if (value) return value;
+  }
+  return "";
+}
+
 export function normalizeCsvHeader(value: string) {
   return value.trim().toLowerCase().replace(/\s+/g, " ");
 }

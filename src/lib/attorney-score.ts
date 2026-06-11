@@ -1,4 +1,4 @@
-import { EXPECTED_DISBURSEMENT_QUARTER_LABEL } from "@/lib/case-options";
+import { EXPECTED_DISBURSEMENT_QUARTER_LABEL } from "@/lib/case-labels";
 import { daysSince } from "@/lib/utils";
 import { type CaseRecord } from "@/lib/types";
 
