@@ -17,10 +17,12 @@ export function SettingsView({
   settings,
   users,
   goals,
+  canDeleteGoals = false,
 }: {
   settings: CaseTrackerSettings;
   users: AppUser[];
   goals: AttorneyGoal[];
+  canDeleteGoals?: boolean;
 }) {
   return (
     <div className="grid gap-6 xl:grid-cols-[1fr_24rem]">
@@ -36,7 +38,7 @@ export function SettingsView({
         <SlackSyncCard />
         <SettlementSyncCard />
 
-        <AttorneyGoalsManager users={users} goals={goals} />
+        <AttorneyGoalsManager users={users} goals={goals} canDeleteGoals={canDeleteGoals} />
 
         <Card>
           <CardHeader>

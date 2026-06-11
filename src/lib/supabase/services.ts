@@ -937,6 +937,12 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
   };
 }
 
+export async function deleteAttorneyGoal(goalId: string): Promise<void> {
+  const client = await createTrackerClient();
+  const { error } = await client.from("attorney_goals").delete().eq("id", goalId);
+  if (error) throw error;
+}
+
 export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
   const client = await createTrackerClient();
 

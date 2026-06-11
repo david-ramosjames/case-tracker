@@ -24,7 +24,12 @@ export default async function SettingsPage() {
         title="Tracker settings"
         description="Admin screens for goals, stages, confidence levels, required fields, stale review threshold, and user roles."
       />
-      <SettingsView settings={settings} users={users} goals={goals} />
+      <SettingsView
+        settings={settings}
+        users={users}
+        goals={goals}
+        canDeleteGoals={sessionUser.role === "admin" || sessionUser.role === "super_admin"}
+      />
     </>
   );
 }

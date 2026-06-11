@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Save } from "lucide-react";
+import { Plus, Save, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,13 +33,22 @@ function sumQuarterGoals(values: Pick<GoalDraft, "q1Goal" | "q2Goal" | "q3Goal" 
   return parseGoalAmount(values.q1Goal) + parseGoalAmount(values.q2Goal) + parseGoalAmount(values.q3Goal) + parseGoalAmount(values.q4Goal);
 }
 
-export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals: AttorneyGoal[] }) {
+export function AttorneyGoalsManager({
+  users,
+  goals,
+  canDeleteGoals = false,
+}: {
+  users: AppUser[];
+  goals: AttorneyGoal[];
+  canDeleteGoals?: boolean;
+}) {
   const router = useRouter();
   const yearOptions = useMemo(() => getGoalYearOptions(), []);
   const attorneys = useMemo(() => users.filter((user) => user.role === "attorney"), [users]);
 
   const [selectedYear, setSelectedYear] = useState(yearOptions[yearOptions.length - 1] ?? new Date().getFullYear());
   const [isSaving, setIsSaving] = useState(false);
+  const [deletingGoalId, setDeletingGoalId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newAttorneyId, setNewAttorneyId] = useState(attorneys[0]?.id ?? "");
@@ -114,6 +123,37 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
       setErrorMessage(error instanceof Error ? error.message : "Unable to save goal.");
     } finally {
       setIsSaving(false);
+    }
+  }
+
+  async function handleDeleteGoal(goal: AttorneyGoal) {
+    const attorney = attorneys.find((user) => user.id === goal.attorneyId);
+    const attorneyLabel = attorney?.name ?? "this attorney";
+    if (
+      !window.confirm(
+        `Delete the ${selectedYear} goal for ${attorneyLabel}? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+
+    setDeletingGoalId(goal.id);
+    setErrorMessage(null);
+    try {
+      const response = await fetch(`/api/goals/${goal.id}`, { method: "DELETE" });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Unable to delete goal.");
+
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[goal.id];
+        return next;
+      });
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to delete goal.");
+    } finally {
+      setDeletingGoalId(null);
     }
   }
 
@@ -291,10 +331,23 @@ export function AttorneyGoalsManager({ users, goals }: { users: AppUser[]; goals
                         <GoalInput compact value={draft.q4Goal} onChange={(value) => updateDraft(goal.id, { q4Goal: value })} />
                       </TableCell>
                       <TableCell>
-                        <Button variant="outline" size="sm" onClick={() => handleSaveExisting(goal)} disabled={isSaving}>
-                          <Save className="h-4 w-4" />
-                          Save
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button variant="outline" size="sm" onClick={() => handleSaveExisting(goal)} disabled={isSaving || deletingGoalId != null}>
+                            <Save className="h-4 w-4" />
+                            Save
+                          </Button>
+                          {canDeleteGoals ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeleteGoal(goal)}
+                              disabled={isSaving || deletingGoalId === goal.id}
+                              aria-label={`Delete goal for ${attorney?.name ?? "attorney"}`}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          ) : null}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
