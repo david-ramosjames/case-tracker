@@ -13,7 +13,7 @@ import { Progress } from "@/components/ui/progress";
 import { AttorneyScoreRollupCard } from "@/components/attorney-score/attorney-score-rollup";
 import { MetricCard } from "@/components/dashboard/metric-card";
 import { type ViewerContext } from "@/lib/auth/access";
-import { getAttorneyGoalProgress, getDashboardMetrics, getDataQualityFlags } from "@/lib/calculations";
+import { getAttorneyGoalProgress, getDashboardMetrics } from "@/lib/calculations";
 import { type AppUser, type AttorneyGoal, type CaseRecord, type CaseTrackerSettings } from "@/lib/types";
 import { formatCurrency, percent } from "@/lib/utils";
 
@@ -32,10 +32,6 @@ export function DashboardView({
 }) {
   const metrics = getDashboardMetrics(records, settings);
   const goalProgress = getAttorneyGoalProgress(records, goals);
-  const flaggedCases = records
-    .map((record) => ({ record, flags: getDataQualityFlags(record, settings) }))
-    .filter((item) => item.flags.length > 0)
-    .slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -96,23 +92,23 @@ export function DashboardView({
         />
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Case Tracker Score</CardTitle>
-          <CardDescription>
-            Average case score across active matters — 40% completeness, 60% fields validated within 90 days.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <AttorneyScoreRollupCard
-            records={records}
-            users={users}
-            highlightAttorneyId={viewer.isAttorney ? viewer.contactId : null}
-          />
-        </CardContent>
-      </Card>
+      <div className="grid gap-6 xl:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Case Tracker Score</CardTitle>
+            <CardDescription>
+              Average case score across active matters — 40% completeness, 60% fields validated within 90 days.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AttorneyScoreRollupCard
+              records={records}
+              users={users}
+              highlightAttorneyId={viewer.isAttorney ? viewer.contactId : null}
+            />
+          </CardContent>
+        </Card>
 
-      <div className="grid gap-6 xl:grid-cols-[1.2fr_0.8fr]">
         <Card>
           <CardHeader>
             <CardTitle>Attorney Goal Progress</CardTitle>
@@ -151,35 +147,6 @@ export function DashboardView({
                 </div>
               );
             })}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Data Quality Watchlist</CardTitle>
-            <CardDescription>Cases needing attorney or manager attention.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {flaggedCases.map(({ record, flags }) => (
-              <div key={record.shared.id} className="rounded-lg border bg-white p-4">
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-navy-950">{record.shared.clientName}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {record.shared.caseNumber} - {record.attorney.name}
-                    </p>
-                  </div>
-                  <Badge variant="outline">{record.tracker.caseStage}</Badge>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {flags.slice(0, 3).map((flag) => (
-                    <Badge key={flag.id} variant={flag.severity}>
-                      {flag.label}
-                    </Badge>
-                  ))}
-                </div>
-              </div>
-            ))}
           </CardContent>
         </Card>
       </div>
