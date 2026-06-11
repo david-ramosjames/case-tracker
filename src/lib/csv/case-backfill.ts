@@ -28,6 +28,13 @@ import {
 
 export const CASE_BACKFILL_CASE_NUMBER_HEADERS = ["Case #", "Case Number", "Case No", "Case No."] as const;
 export const CASE_BACKFILL_DOL_HEADERS = ["DOL", "Date of Loss", "Date of loss", "DOI", "Date of Incident"] as const;
+export const CASE_BACKFILL_DATE_SIGNED_HEADERS = [
+  "Date Signed",
+  "Date signed",
+  "Date Created",
+  "Date created",
+  "Signed Date",
+] as const;
 export const CASE_BACKFILL_REQUIRED_HEADERS = ["Case #"] as const;
 
 export const CASE_BACKFILL_HEADER_GROUPS = [
@@ -36,8 +43,8 @@ export const CASE_BACKFILL_HEADER_GROUPS = [
     headers: ["Case #"],
   },
   {
-    label: "Optional DocketFlow fields (only filled cells update)",
-    headers: ["DOL", "Type"],
+    label: "Optional DocketFlow / tracker fields (only filled cells update)",
+    headers: ["DOL", "Date Signed", "Type"],
   },
   {
     label: "Tracker fields",
@@ -83,6 +90,7 @@ export type ParsedCaseBackfillRow = {
   shared: {
     caseType?: string;
     dateOfIncident?: string | null;
+    dateSigned?: string;
   };
   tracker: TrackerUpdateInput;
   result: Partial<SettlementResult>;
@@ -104,10 +112,13 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       const shared: ParsedCaseBackfillRow["shared"] = {};
       const caseType = getCsvCell(row, headers, "Type");
       const dol = getCsvCellAny(row, headers, [...CASE_BACKFILL_DOL_HEADERS]);
+      const dateSigned = getCsvCellAny(row, headers, [...CASE_BACKFILL_DATE_SIGNED_HEADERS]);
 
       if (caseType) shared.caseType = normalizeCaseType(caseType);
-      const parsedDol = parseBackfillDol(dol);
+      const parsedDol = parseBackfillDate(dol);
       if (parsedDol) shared.dateOfIncident = parsedDol;
+      const parsedDateSigned = parseBackfillDate(dateSigned);
+      if (parsedDateSigned) shared.dateSigned = parsedDateSigned.slice(0, 10);
 
       const stage = getCsvCell(row, headers, "Stage");
       const minimumValue = parseMoney(getCsvCell(row, headers, "Minimum Value"));
@@ -228,7 +239,7 @@ export function hasCaseBackfillHeaders(csvText: string) {
   return Boolean(headerRow);
 }
 
-function parseBackfillDol(value: string) {
+function parseBackfillDate(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return null;
   const normalized = trimmed.toLowerCase().replace(/[.\s_-]+/g, "");

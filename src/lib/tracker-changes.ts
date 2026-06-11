@@ -46,6 +46,7 @@ const RESULT_FIELD_LABELS: Record<keyof SettlementResult, string> = {
 const SHARED_FIELD_LABELS: Record<string, string> = {
   status: "Status",
   caseType: "Type",
+  dateSigned: "Date signed",
   dateOfIncident: "DOL",
 };
 
@@ -60,8 +61,8 @@ export function describeTrackerChanges(
   before: TrackerEntry,
   input: TrackerUpdateInput & { result?: SettlementResult },
   shared?: {
-    before?: { status?: string; caseType?: string; dateOfIncident?: string | null };
-    after?: { status?: string; caseType?: string; dateOfIncident?: string | null };
+    before?: { status?: string; caseType?: string; dateSigned?: string; dateOfIncident?: string | null };
+    after?: { status?: string; caseType?: string; dateSigned?: string; dateOfIncident?: string | null };
   },
 ): string[] {
   const labels: string[] = [];

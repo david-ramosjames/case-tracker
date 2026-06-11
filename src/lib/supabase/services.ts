@@ -235,7 +235,7 @@ export type TrackerActor = {
 
 export type TrackerUpdateOptions = {
   actor?: TrackerActor;
-  shared?: { status?: CaseStatus; caseType?: string; dateOfIncident?: string | null };
+  shared?: { status?: CaseStatus; caseType?: string; dateSigned?: string; dateOfIncident?: string | null };
   markReviewed?: boolean;
   /** When saving a partial patch, pass the patch here so activity logs only list changed fields. */
   changeInput?: TrackerUpdateInput & { result?: SettlementResult };
@@ -258,6 +258,7 @@ export async function updateTrackerEntry(
           ? {
               status: existingRecord.shared.status,
               caseType: existingRecord.shared.caseType,
+              dateSigned: existingRecord.shared.dateSigned,
               dateOfIncident: existingRecord.shared.dateOfIncident,
             }
           : undefined,
@@ -439,6 +440,7 @@ export async function importCaseBackfillCsv(
               before: {
                 status: existing.shared.status,
                 caseType: existing.shared.caseType,
+                dateSigned: existing.shared.dateSigned,
                 dateOfIncident: existing.shared.dateOfIncident,
               },
               after: row.shared,
@@ -507,7 +509,7 @@ export async function updateSharedCaseFields(
   if (input.dateSigned) {
     const { error } = await trackerClient
       .from("case_tracker_entries")
-      .update({ date_signed_override: input.dateSigned })
+      .update({ date_signed_override: toDateOnly(input.dateSigned) })
       .or(`case_id.eq.${caseId},id.eq.${caseId}`);
     if (error) throw error;
   }

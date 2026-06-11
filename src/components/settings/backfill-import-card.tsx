@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   CASE_BACKFILL_ALL_HEADERS,
   CASE_BACKFILL_CASE_NUMBER_HEADERS,
+  CASE_BACKFILL_DATE_SIGNED_HEADERS,
   CASE_BACKFILL_DOL_HEADERS,
   CASE_BACKFILL_HEADER_GROUPS,
   hasCaseBackfillHeaders,
@@ -34,7 +35,11 @@ export function BackfillImportCard() {
     [headers],
   );
   const recognizedHeaderNames = useMemo(() => {
-    const aliases = [...CASE_BACKFILL_CASE_NUMBER_HEADERS, ...CASE_BACKFILL_DOL_HEADERS];
+    const aliases = [
+      ...CASE_BACKFILL_CASE_NUMBER_HEADERS,
+      ...CASE_BACKFILL_DOL_HEADERS,
+      ...CASE_BACKFILL_DATE_SIGNED_HEADERS,
+    ];
     return headers.filter(
       (header) =>
         CASE_BACKFILL_ALL_HEADERS.some((expected) => expected.toLowerCase() === header.toLowerCase()) ||
@@ -105,9 +110,10 @@ export function BackfillImportCard() {
       <CardHeader>
         <CardTitle>CSV Backfill</CardTitle>
         <CardDescription>
-          Match existing cases by case number only — extra rows in the CSV are ignored. Upload just{" "}
-          <span className="font-medium text-navy-950">Case #</span> and <span className="font-medium text-navy-950">DOL</span>{" "}
-          to fill missing dates of loss. Empty cells are skipped; client, attorney, and paralegal are never changed.
+          Match existing cases by case number only — extra rows in the CSV are ignored. Upload{" "}
+          <span className="font-medium text-navy-950">Case #</span> with <span className="font-medium text-navy-950">DOL</span>{" "}
+          and/or <span className="font-medium text-navy-950">Date Signed</span> to overwrite those fields. Filled cells replace
+          existing values; empty cells are skipped. Client, attorney, and paralegal are never changed.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -202,11 +208,11 @@ export function BackfillImportCard() {
           <p className="text-sm font-semibold text-navy-950">CSV rules</p>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
             <li>
-              Case number column required: {CASE_BACKFILL_CASE_NUMBER_HEADERS.join(", ")}. DOL column:{" "}
-              {CASE_BACKFILL_DOL_HEADERS.join(", ")}.
+              Case number column required: {CASE_BACKFILL_CASE_NUMBER_HEADERS.join(", ")}. DOL:{" "}
+              {CASE_BACKFILL_DOL_HEADERS.join(", ")}. Date signed: {CASE_BACKFILL_DATE_SIGNED_HEADERS.join(", ")}.
             </li>
             <li>Rows with no matching case are skipped — nothing new is created.</li>
-            <li>Leave a cell blank (or &quot;not set&quot;) to keep the existing DOL.</li>
+            <li>Leave a cell blank (or &quot;not set&quot;) to keep the existing value for that field.</li>
             <li>Do not include client, attorney, or paralegal — those stay in DocketFlow.</li>
             <li>
               Overall <span className="font-medium text-navy-950">Active / Closed</span> is set automatically from{" "}
