@@ -1,6 +1,6 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
 import { cleanCaseNumber } from "@/lib/csv/parse";
-import { formatTopicUserMentions } from "@/lib/slack/channel-topic";
+import { resolveChannelUserMentions } from "@/lib/slack/channel-topic";
 import { fetchChannelTopic, normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
 import { loadSlackChannelMapByCaseNumber } from "@/lib/slack/channels";
 import { isSlackEnabled } from "@/lib/slack/config";
@@ -71,7 +71,12 @@ export async function sendSlackFieldReminders(
       continue;
     }
 
-    const topicMentions = formatTopicUserMentions(await fetchChannelTopic(context.channelId));
+    const topic = await fetchChannelTopic(context.channelId);
+    const topicMentions = await resolveChannelUserMentions({
+      topic,
+      attorneyEmail: record.attorney.email,
+      paralegalEmail: record.paralegal.email,
+    });
 
     for (const [index, fieldKey] of fieldsToPost.entries()) {
       fields += 1;

@@ -1,7 +1,9 @@
 import {
   ATTORNEY_SCORE_VALIDATION_DAYS,
+  COMPLETENESS_FIELDS,
   getCaseAttorneyScore,
   getValidationFieldLabel,
+  hasCompletenessField,
   hasValidationFieldValue,
   isValidationFieldFresh,
 } from "@/lib/attorney-score";
@@ -85,6 +87,10 @@ export function getFieldReminderAttentionSummary(record: CaseRecord) {
   return due.map((key) => FIELD_REMINDER_META[key].label);
 }
 
+export function getIncompleteCompletenessLabels(record: CaseRecord) {
+  return COMPLETENESS_FIELDS.filter((field) => !hasCompletenessField(record, field.id)).map((field) => field.label);
+}
+
 function formatFieldValue(record: CaseRecord, fieldKey: FieldReminderKey) {
   const { tracker } = record;
   switch (fieldKey) {
@@ -145,13 +151,17 @@ export function buildFieldReminderMessage(
 
   if (options?.includeCaseSummary) {
     const score = getCaseAttorneyScore(record);
-    const attention = getFieldReminderAttentionSummary(record);
+    const stillNeeded = getIncompleteCompletenessLabels(record);
+    const dueToday = getFieldReminderAttentionSummary(record);
     lines.push(`${mentionPrefix}*Case #${record.shared.caseNumber}* (${record.shared.clientName})`);
     lines.push(
       `Case Tracker Score: *${score.percent}%* (completeness ${score.completenessPercent}% · freshness ${score.freshnessPercent}%)`,
     );
-    if (attention.length > 1) {
-      lines.push(`Fields needing attention: *${attention.join(", ")}*`);
+    if (stillNeeded.length > 0) {
+      lines.push(`Still needed: *${stillNeeded.join(", ")}*`);
+    }
+    if (dueToday.length > 0) {
+      lines.push(`Due for review today: *${dueToday.join(", ")}*`);
     }
     lines.push("");
   } else {

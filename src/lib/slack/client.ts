@@ -69,6 +69,70 @@ async function ensureSlackChannelMembership(channelId: string) {
   }
 }
 
+type SlackUserListMember = {
+  id?: string;
+  deleted?: boolean;
+  is_bot?: boolean;
+  profile?: {
+    display_name?: string;
+    real_name?: string;
+    first_name?: string;
+    email?: string;
+  };
+  name?: string;
+};
+
+export async function lookupSlackUserIdByEmail(email: string) {
+  if (!isSlackEnabled()) return null;
+
+  try {
+    const payload = await slackApi<{ ok: boolean; user?: { id?: string } }>("users.lookupByEmail", {
+      email: email.trim(),
+    });
+    return payload.user?.id ?? null;
+  } catch (error) {
+    console.warn("Slack users.lookupByEmail failed", { email, error: errorMessage(error) });
+    return null;
+  }
+}
+
+export async function listSlackWorkspaceUsers() {
+  if (!isSlackEnabled()) return [];
+
+  const users: Array<{
+    id: string;
+    displayName: string;
+    realName: string;
+    firstName: string;
+  }> = [];
+  let cursor: string | undefined;
+
+  do {
+    const payload = await slackApi<{
+      ok: boolean;
+      members?: SlackUserListMember[];
+      response_metadata?: { next_cursor?: string };
+    }>("users.list", {
+      limit: 200,
+      cursor,
+    });
+
+    for (const member of payload.members ?? []) {
+      if (!member.id || member.deleted || member.is_bot) continue;
+      users.push({
+        id: member.id,
+        displayName: member.profile?.display_name?.trim() || member.name?.trim() || "",
+        realName: member.profile?.real_name?.trim() || "",
+        firstName: member.profile?.first_name?.trim() || "",
+      });
+    }
+
+    cursor = payload.response_metadata?.next_cursor || undefined;
+  } while (cursor);
+
+  return users;
+}
+
 export async function fetchChannelTopic(channelId: string) {
   if (!isSlackEnabled()) return null;
 

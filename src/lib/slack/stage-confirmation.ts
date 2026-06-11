@@ -1,5 +1,5 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
-import { formatTopicUserMentions } from "@/lib/slack/channel-topic";
+import { resolveChannelUserMentions } from "@/lib/slack/channel-topic";
 import { loadPulseChannelContext, type PulseChannelMatch } from "@/lib/slack/channels";
 import {
   extractSlackMessageTextForParsing,
@@ -86,7 +86,12 @@ export async function postStageConfirmationForSuggestion(
 
   const appUrl = getAppOriginForNotifications() ?? "";
   const topic = await fetchChannelTopic(channelId);
-  const topicMentions = formatTopicUserMentions(topic);
+  const record = await getCaseById(caseId);
+  const topicMentions = await resolveChannelUserMentions({
+    topic,
+    attorneyEmail: record?.attorney.email,
+    paralegalEmail: record?.paralegal.email,
+  });
   const text = buildStageConfirmationMessage({
     suggestedStage: item.suggestedStage,
     confidence: item.confidence,
