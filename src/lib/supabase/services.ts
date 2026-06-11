@@ -8,7 +8,11 @@ import {
   notifySlackCommentPosted,
   notifySlackTrackerSaved,
 } from "@/lib/slack/notify";
-import { describeSlackThreadAppliedLabels, parseSlackThreadUpdate } from "@/lib/slack/thread-update";
+import {
+  describeSlackThreadAppliedLabels,
+  describeSlackThreadSharedLabels,
+  parseSlackThreadUpdate,
+} from "@/lib/slack/thread-update";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildStagePatchFromConfirmation } from "@/lib/stage-triggers";
@@ -783,14 +787,35 @@ export async function applySlackThreadUpdate(caseId: string, text: string, actor
   const existing = await getCaseById(caseId);
   if (!existing) return { applied: false as const, reason: "Case not found." };
 
-  const merged = mergeTrackerImport(existing.tracker, parsed.tracker);
-  await updateTrackerEntry(caseId, merged, {
-    actor: actor ?? { userName: "Slack thread" },
-    markReviewed: true,
-    changeInput: parsed.tracker,
-  });
+  if (parsed.shared?.caseType) {
+    await updateSharedCaseFields(caseId, { caseType: parsed.shared.caseType });
+  }
 
-  return { applied: true as const, labels: describeSlackThreadAppliedLabels(parsed.tracker) };
+  const hasTrackerPatch = Object.keys(parsed.tracker).length > 0;
+  if (hasTrackerPatch) {
+    const merged = mergeTrackerImport(existing.tracker, parsed.tracker);
+    await updateTrackerEntry(caseId, merged, {
+      actor: actor ?? { userName: "Slack thread" },
+      markReviewed: true,
+      changeInput: parsed.tracker,
+      shared: parsed.shared?.caseType ? { caseType: parsed.shared.caseType } : undefined,
+    });
+  } else if (parsed.shared?.caseType) {
+    await createActivityEntry(
+      caseId,
+      "Slack thread update",
+      `Updated Case type.`,
+      actor ?? { userName: "Slack thread" },
+      { source: "slack_thread" },
+    );
+  }
+
+  const labels = [
+    ...describeSlackThreadSharedLabels(parsed.shared),
+    ...describeSlackThreadAppliedLabels(parsed.tracker),
+  ];
+
+  return { applied: true as const, labels };
 }
 
 export async function getCaseComments(caseId: string): Promise<TrackerComment[]> {

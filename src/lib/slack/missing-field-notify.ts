@@ -4,10 +4,42 @@ import { resolveChannelUserMentions } from "@/lib/slack/channel-topic";
 import { fetchChannelTopic, normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
 import { loadSlackChannelMapByCaseNumber, saveReminderThread } from "@/lib/slack/channels";
 import { SLACK_REMINDER_COOLDOWN_DAYS, isSlackEnabled } from "@/lib/slack/config";
-import { getCaseAttorneyScore } from "@/lib/attorney-score";
+import {
+  COMPLETENESS_FIELDS,
+  getCaseAttorneyScore,
+  hasCompletenessField,
+  type CompletenessFieldId,
+} from "@/lib/attorney-score";
 import { getIncompleteCompletenessLabels } from "@/lib/slack/field-reminders";
 import { type CaseRecord } from "@/lib/types";
 import { daysSince } from "@/lib/utils";
+
+function completenessFieldExampleLine(fieldId: CompletenessFieldId) {
+  switch (fieldId) {
+    case "caseType":
+      return "Type: Auto Accident";
+    case "liability":
+      return "Liability: Clear";
+    case "quarter":
+      return "Expected disbursement quarter: 2026 Q3";
+    case "minimumValue":
+      return "Minimum: 75000";
+    case "referralFee":
+      return "Referral fee: 33%";
+    case "policyLimits":
+      return "Policy limits: 100000";
+    case "expectedLit":
+      return "Expected lit: Pre";
+    case "sources":
+      return "Sources: Updated treatment status...";
+  }
+}
+
+function missingFieldExampleLines(record: CaseRecord) {
+  return COMPLETENESS_FIELDS.filter((field) => !hasCompletenessField(record, field.id))
+    .map((field) => completenessFieldExampleLine(field.id))
+    .slice(0, 6);
+}
 
 export function buildMissingFieldsMessage(
   record: CaseRecord,
@@ -16,17 +48,29 @@ export function buildMissingFieldsMessage(
 ) {
   const missing = getIncompleteCompletenessLabels(record);
   const score = getCaseAttorneyScore(record);
-  const mentionPrefix = options?.topicMentions ? `${options.topicMentions} ` : "";
   const caseLink = `${appUrl}/cases/${record.shared.id}`;
+  const lines: string[] = [];
 
-  return [
-    `${mentionPrefix}*Case #${record.shared.caseNumber}* (${record.shared.clientName})`,
+  if (options?.topicMentions) {
+    lines.push(options.topicMentions);
+  }
+
+  lines.push(
+    `*Case #${record.shared.caseNumber}* (${record.shared.clientName})`,
     `Case Tracker Score: *${score.percent}%* (completeness ${score.completenessPercent}% · freshness ${score.freshnessPercent}%)`,
     `Empty fields still needed: *${missing.join(", ")}*`,
     "",
-    "Please fill these in on Case Tracker or reply in this thread with updates.",
-    `<${caseLink}|Open in Case Tracker>`,
-  ].join("\n");
+  );
+
+  const examples = missingFieldExampleLines(record);
+  if (examples.length > 0) {
+    lines.push("_Reply in this thread with updates, for example:_", "```", ...examples, "```", "");
+  } else {
+    lines.push("Please fill these in on Case Tracker or reply in this thread with updates.", "");
+  }
+
+  lines.push(`<${caseLink}|Open in Case Tracker>`);
+  return lines.join("\n");
 }
 
 function getSlackContextForRecord(
@@ -95,7 +139,8 @@ export async function sendSlackMissingFieldNotices(
       missing.length > 0
         ? buildMissingFieldsMessage(record, appUrl, { topicMentions })
         : [
-            `${topicMentions ? `${topicMentions} ` : ""}*Case #${record.shared.caseNumber}* (${record.shared.clientName})`,
+            ...(topicMentions ? [topicMentions] : []),
+            `*Case #${record.shared.caseNumber}* (${record.shared.clientName})`,
             "_Test missing-fields notice — this case has no empty completeness fields._",
             `<${appUrl}/cases/${record.shared.id}|Open in Case Tracker>`,
           ].join("\n");

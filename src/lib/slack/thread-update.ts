@@ -1,18 +1,26 @@
-import { normalizeTargetQuarter } from "@/lib/case-options";
+import { normalizeCaseType, normalizeTargetQuarter } from "@/lib/case-options";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { type TrackerUpdateInput } from "@/lib/types";
 
 export type ParsedThreadUpdate = {
   tracker: TrackerUpdateInput;
+  shared?: { caseType?: string };
   sharedNotes?: string;
 };
 
 export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null {
   const tracker: TrackerUpdateInput = {};
+  const shared: { caseType?: string } = {};
   let sharedNotes: string | undefined;
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
   for (const line of lines) {
+    const typeMatch = line.match(/^(?:type|case\s*type)\s*:\s*(.+)$/i);
+    if (typeMatch) {
+      shared.caseType = normalizeCaseType(typeMatch[1]);
+      continue;
+    }
+
     const quarterMatch = line.match(
       /^(?:quarter|expected disbursement quarter|expected completion quarter|target quarter|disbursement quarter)\s*:\s*(.+)$/i,
     );
@@ -79,9 +87,16 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
       else if (normalized.includes("pre")) tracker.expectedLitigation = "Pre";
       continue;
     }
+
+    const referralFeeMatch = line.match(/^referral\s*fee\s*:\s*(.+)$/i);
+    if (referralFeeMatch) {
+      const value = parsePercent(referralFeeMatch[1]);
+      if (value != null) tracker.referralFee = value;
+      continue;
+    }
   }
 
-  if (Object.keys(tracker).length === 0) {
+  if (Object.keys(tracker).length === 0 && !shared.caseType) {
     const caseNumber = lines.find((line) => /^case\s*#/i.test(line));
     if (!caseNumber && lines.length >= 2) {
       sharedNotes = text.trim();
@@ -89,8 +104,15 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
     return null;
   }
 
-  tracker.lastQuarterlyCheckInAt = new Date().toISOString();
-  return { tracker, sharedNotes };
+  if (Object.keys(tracker).length > 0) {
+    tracker.lastQuarterlyCheckInAt = new Date().toISOString();
+  }
+
+  return {
+    tracker,
+    ...(shared.caseType ? { shared } : {}),
+    sharedNotes,
+  };
 }
 
 /** User-facing labels for Slack confirmation (matches reminder wording). */
@@ -108,6 +130,13 @@ export function describeSlackThreadAppliedLabels(patch: TrackerUpdateInput): str
   if (patch.policyLimits != null) labels.push("Policy limits");
   if (patch.liability != null) labels.push("Liability");
   if (patch.expectedLitigation != null) labels.push("Expected litigation");
+  if (patch.referralFee != null) labels.push("Referral fee");
+  return labels;
+}
+
+export function describeSlackThreadSharedLabels(shared?: { caseType?: string }) {
+  const labels: string[] = [];
+  if (shared?.caseType) labels.push("Case type");
   return labels;
 }
 
@@ -123,5 +152,10 @@ export function caseNumberFromSlackText(text: string) {
 
 function parseMoney(value: string) {
   const numeric = Number(value.replace(/[$,\s]/g, "").replace(/,/g, ""));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function parsePercent(value: string) {
+  const numeric = Number(value.trim().replace(/%$/, "").replace(/[,\s]/g, ""));
   return Number.isFinite(numeric) ? numeric : null;
 }
