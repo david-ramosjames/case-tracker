@@ -136,16 +136,17 @@ export function buildFieldReminderMessage(
   record: CaseRecord,
   fieldKey: FieldReminderKey,
   appUrl: string,
-  options?: { includeCaseSummary?: boolean },
+  options?: { includeCaseSummary?: boolean; topicMentions?: string },
 ) {
   const meta = FIELD_REMINDER_META[fieldKey];
   const caseLink = `${appUrl}/cases/${record.shared.id}`;
   const lines: string[] = [];
+  const mentionPrefix = options?.topicMentions ? `${options.topicMentions} ` : "";
 
   if (options?.includeCaseSummary) {
     const score = getCaseAttorneyScore(record);
     const attention = getFieldReminderAttentionSummary(record);
-    lines.push(`*Case #${record.shared.caseNumber}* (${record.shared.clientName})`);
+    lines.push(`${mentionPrefix}*Case #${record.shared.caseNumber}* (${record.shared.clientName})`);
     lines.push(
       `Case Tracker Score: *${score.percent}%* (completeness ${score.completenessPercent}% · freshness ${score.freshnessPercent}%)`,
     );

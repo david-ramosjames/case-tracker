@@ -1,6 +1,7 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
 import { cleanCaseNumber } from "@/lib/csv/parse";
-import { normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
+import { formatTopicUserMentions } from "@/lib/slack/channel-topic";
+import { fetchChannelTopic, normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
 import { loadSlackChannelMapByCaseNumber } from "@/lib/slack/channels";
 import { isSlackEnabled } from "@/lib/slack/config";
 import {
@@ -70,6 +71,8 @@ export async function sendSlackFieldReminders(
       continue;
     }
 
+    const topicMentions = formatTopicUserMentions(await fetchChannelTopic(context.channelId));
+
     for (const [index, fieldKey] of fieldsToPost.entries()) {
       fields += 1;
 
@@ -84,6 +87,7 @@ export async function sendSlackFieldReminders(
 
       const text = buildFieldReminderMessage(record, fieldKey, appUrl, {
         includeCaseSummary: index === 0,
+        topicMentions: index === 0 ? topicMentions : undefined,
       });
       const message = await postSlackMessage({ channel: context.channelId, text });
       if (!message?.ts) {
