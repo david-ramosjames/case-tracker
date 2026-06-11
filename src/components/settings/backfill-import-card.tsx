@@ -33,10 +33,14 @@ export function BackfillImportCard() {
     () => CASE_BACKFILL_CASE_NUMBER_HEADERS.some((header) => headers.some((item) => item.toLowerCase() === header.toLowerCase())),
     [headers],
   );
-  const recognizedCount = useMemo(
-    () => headers.filter((header) => CASE_BACKFILL_ALL_HEADERS.some((expected) => expected.toLowerCase() === header.toLowerCase())).length,
-    [headers],
-  );
+  const recognizedHeaderNames = useMemo(() => {
+    const aliases = [...CASE_BACKFILL_CASE_NUMBER_HEADERS, ...CASE_BACKFILL_DOL_HEADERS];
+    return headers.filter(
+      (header) =>
+        CASE_BACKFILL_ALL_HEADERS.some((expected) => expected.toLowerCase() === header.toLowerCase()) ||
+        aliases.some((expected) => expected.toLowerCase() === header.toLowerCase()),
+    );
+  }, [headers]);
   const canImport = Boolean(csvText) && hasCaseNumberHeader && (preview?.matched ?? 0) > 0;
 
   async function loadCsv(file: File | null) {
@@ -115,13 +119,8 @@ export function BackfillImportCard() {
             </div>
             <div className="flex flex-wrap gap-2">
               <Button asChild variant="outline">
-                <a href="/templates/case-dol-template.csv" download>
-                  DOL-only template
-                </a>
-              </Button>
-              <Button asChild variant="outline">
                 <a href="/templates/case-backfill-template.csv" download>
-                  Full template
+                  Download CSV template
                 </a>
               </Button>
               <Button asChild variant="pink">
@@ -153,12 +152,16 @@ export function BackfillImportCard() {
                 <>
                   <Badge variant="success">{preview.matched} matched</Badge>
                   {preview.unmatched.length ? <Badge variant="warning">{preview.unmatched.length} unmatched</Badge> : null}
+                  {preview.unlinked?.length ? <Badge variant="warning">{preview.unlinked.length} unlinked</Badge> : null}
                   {preview.skipped ? <Badge variant="outline">{preview.skipped} empty rows skipped</Badge> : null}
+                  {importResult?.failed?.length ? (
+                    <Badge variant="warning">{importResult.failed.length} failed</Badge>
+                  ) : null}
                 </>
               ) : null}
               {importResult && !importResult.dryRun ? <Badge variant="pink">{importResult.updated} updated</Badge> : null}
               <Badge variant="outline">{rowCount} rows</Badge>
-              <Badge variant="outline">{recognizedCount} recognized headers</Badge>
+              <Badge variant="outline">{recognizedHeaderNames.length} recognized headers</Badge>
               <span className="text-muted-foreground">{fileName}</span>
             </div>
           ) : null}
@@ -169,6 +172,29 @@ export function BackfillImportCard() {
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
             <p className="font-semibold">Unmatched case numbers</p>
             <p className="mt-1 text-amber-900">These rows were not found in DocketFlow and were not imported: {preview.unmatched.join(", ")}</p>
+          </div>
+        ) : null}
+
+        {preview?.unlinked.length ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+            <p className="font-semibold">Unlinked tracker rows</p>
+            <p className="mt-1 text-amber-900">
+              These case numbers only exist as detached tracker rows (no live DocketFlow case), so DOL was not updated:{" "}
+              {preview.unlinked.join(", ")}
+            </p>
+          </div>
+        ) : null}
+
+        {importResult?.failed.length ? (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-sm text-rose-950">
+            <p className="font-semibold">Import errors</p>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {importResult.failed.map((entry) => (
+                <li key={entry.caseNumber}>
+                  Case #{entry.caseNumber}: {entry.message}
+                </li>
+              ))}
+            </ul>
           </div>
         ) : null}
 

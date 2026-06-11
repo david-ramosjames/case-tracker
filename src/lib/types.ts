@@ -254,6 +254,8 @@ export type CaseBackfillImportResult = {
   updated: number;
   skipped: number;
   unmatched: string[];
+  unlinked: string[];
+  failed: Array<{ caseNumber: string; message: string }>;
   preview: Array<{ caseNumber: string; matched: boolean; fieldCount: number }>;
   dryRun: boolean;
 };
