@@ -86,6 +86,28 @@ export function recordHasDisbursementInCommissionYear(
   return legacyDate ? isDateInCommissionYear(legacyDate, commissionYear, startMonth) : false;
 }
 
+export function getWeightedGrossDisbursedInCommissionYear(
+  record: Pick<CaseRecord, "tracker">,
+  commissionYear: number,
+  startMonth: number,
+) {
+  const completed = getCompletedDisbursements(record.tracker);
+
+  if (completed.length > 0) {
+    return completed
+      .filter((item) => item.disburseDate && isDateInCommissionYear(item.disburseDate, commissionYear, startMonth))
+      .reduce((total, item) => total + getDisbursementSettlementAmount(item, record), 0);
+  }
+
+  const baseSettlement = record.tracker.result.settlementAmount ?? 0;
+  const legacyDate = getRecordDisburseDate(record.tracker.result);
+  if (legacyDate && isDateInCommissionYear(legacyDate, commissionYear, startMonth)) {
+    return baseSettlement;
+  }
+
+  return 0;
+}
+
 export function getWeightedDisbursedFeesInCommissionYear(
   record: Pick<CaseRecord, "tracker">,
   commissionYear: number,

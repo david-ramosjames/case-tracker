@@ -892,7 +892,7 @@ export type AttorneyGoalInput = {
   attorneyId: string;
   attorneyName: string;
   year: number;
-  annualFeeGoal: number;
+  annualGrossGoal: number;
   commissionThreshold: number;
   commissionYearStartMonth?: number;
   commissionMonthCount?: number;
@@ -915,7 +915,7 @@ function parseMonthlyGoalsRow(value: unknown): Record<string, number> {
 
 export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<AttorneyGoal> {
   const client = await createTrackerClient();
-  const annualFeeGoal = input.q1Goal + input.q2Goal + input.q3Goal + input.q4Goal;
+  const annualGrossGoal = input.q1Goal + input.q2Goal + input.q3Goal + input.q4Goal;
   const monthlyGoals = input.monthlyGoals ?? {};
 
   const commissionYearStartMonth = Math.min(12, Math.max(1, Number(input.commissionYearStartMonth ?? 1)));
@@ -924,7 +924,7 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
   const payload = {
     attorney_name: input.attorneyName,
     year: input.year,
-    annual_fee_goal: annualFeeGoal,
+    annual_fee_goal: annualGrossGoal,
     commission_threshold: input.commissionThreshold,
     commission_year_start_month: commissionYearStartMonth,
     commission_month_count: commissionMonthCount,
@@ -947,7 +947,7 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     id: toString(data.id, "goal"),
     attorneyId: input.attorneyId,
     year: input.year,
-    annualFeeGoal,
+    annualGrossGoal,
     commissionThreshold: Number(data.commission_threshold ?? 0),
     commissionYearStartMonth: Number(data.commission_year_start_month ?? 1),
     commissionMonthCount: Number(data.commission_month_count ?? 12) === 13 ? 13 : 12,
@@ -993,7 +993,7 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
       id: toStringOrNull(row.id) ?? "unknown-goal",
       attorneyId: matchedContact?.id ?? toStringOrNull(row.attorney_user_id) ?? attorneyName ?? "unknown-attorney",
       year: Number(row.year ?? new Date().getFullYear()),
-      annualFeeGoal: q1Goal + q2Goal + q3Goal + q4Goal,
+      annualGrossGoal: q1Goal + q2Goal + q3Goal + q4Goal,
       commissionThreshold,
       commissionYearStartMonth: Number(row.commission_year_start_month ?? 1),
       commissionMonthCount: Number(row.commission_month_count ?? 12) === 13 ? 13 : 12,

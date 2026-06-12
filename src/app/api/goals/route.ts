@@ -19,7 +19,7 @@ export async function POST(request: Request) {
       attorneyId: input.attorneyId,
       attorneyName: input.attorneyName.trim(),
       year: Number(input.year),
-      annualFeeGoal: Number(input.annualFeeGoal ?? 0),
+      annualGrossGoal: Number(input.annualGrossGoal ?? 0),
       commissionThreshold: Number(input.commissionThreshold ?? 0),
       monthlyGoals: input.monthlyGoals ?? {},
       q1Goal: Number(input.q1Goal ?? 0),

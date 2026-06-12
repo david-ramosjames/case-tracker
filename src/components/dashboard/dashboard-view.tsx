@@ -112,7 +112,7 @@ export function DashboardView({
         <Card>
           <CardHeader>
             <CardTitle>Attorney Goal Progress</CardTitle>
-            <CardDescription>Annual and quarter pacing against actual settled fees.</CardDescription>
+            <CardDescription>Annual pacing for gross settlements disbursed vs top-down goal.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             {goalProgress.map((item) => {
@@ -124,7 +124,7 @@ export function DashboardView({
                     <div>
                       <p className="font-semibold text-navy-950">{attorney?.name}</p>
                       <p className="text-sm text-muted-foreground">
-                        Forecast {formatCurrency(item.forecastedFees)} - Disbursed {formatCurrency(item.actualDisbursedFees)}
+                        Plan {formatCurrency(item.planGross)} · Gross disbursed {formatCurrency(item.actualGrossDisbursed)}
                       </p>
                     </div>
                     <Badge variant={item.pace === "ahead" ? "success" : "warning"}>
@@ -135,7 +135,7 @@ export function DashboardView({
                     <div className="flex justify-between text-xs text-muted-foreground">
                       <span>Annual goal progress</span>
                       <span>
-                        {percent(item.annualProgress)} of {formatCurrency(item.goal.annualFeeGoal)}
+                        {percent(item.annualProgress)} of {formatCurrency(item.goal.annualGrossGoal)}
                       </span>
                     </div>
                     <Progress value={item.annualProgress} />

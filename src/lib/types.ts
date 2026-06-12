@@ -210,7 +210,9 @@ export type AttorneyGoal = {
   id: string;
   attorneyId: string;
   year: number;
-  annualFeeGoal: number;
+  /** Top-down target for gross settlement dollars disbursed in the commission year. */
+  annualGrossGoal: number;
+  /** RJL attorney fees disbursed must exceed this before commissions are earned. */
   commissionThreshold: number;
   commissionYearStartMonth: number;
   commissionMonthCount: number;

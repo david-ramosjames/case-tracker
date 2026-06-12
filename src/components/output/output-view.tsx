@@ -105,8 +105,8 @@ export function OutputView({
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-6">
-        <SummaryCard label="Target (top-down)" value={formatCurrency(results.annualFeeGoal)} detail={`${commissionYearLabel} commission year fee goal`} />
-        <SummaryCard label="Plan (bottom-up)" value={formatCurrency(results.planFees)} detail="Forecast fees from active cases in this commission year" />
+        <SummaryCard label="Target (top-down)" value={formatCurrency(results.annualGrossGoal)} detail={`${commissionYearLabel} gross settlements disbursed goal`} />
+        <SummaryCard label="Plan (bottom-up)" value={formatCurrency(results.planGross)} detail="Forecast gross settlements from active cases in this commission year" />
         <SummaryCard label="Gross Settled" value={formatCurrency(results.grossSettled)} detail="Settlement amounts signed" />
         <SummaryCard label="Gross Disbursed" value={formatCurrency(results.grossDisbursed)} detail="Settlement dollars disbursed" />
         <SummaryCard label="RJL Fees Settled" value={formatCurrency(results.feesSettled)} detail="Attorney fees on settled cases" />
@@ -117,7 +117,7 @@ export function OutputView({
         <CardHeader>
           <CardTitle>Results vs Goals</CardTitle>
           <CardDescription>
-            {commissionYearLabel} commission year — full-year goal and current pacing for settlements and attorney fees
+            {commissionYearLabel} commission year — gross settlements tracked vs top-down goal; RJL fees tracked vs commission threshold
             {attorney !== "all" || paralegal !== "all" ? " (filtered)." : "."}
           </CardDescription>
         </CardHeader>
@@ -149,9 +149,10 @@ export function OutputView({
                 label="RJL Attorney Fees"
                 settled={results.feesSettled}
                 disbursed={results.feesDisbursed}
-                fullYearGoal={results.annualFeeGoal}
-                pacingGoal={results.pacingFeeGoal}
+                fullYearGoal={results.commissionThreshold}
+                pacingGoal={results.commissionThreshold}
                 yearElapsed={results.yearElapsed}
+                goalLabel="Commission threshold"
               />
             </TableBody>
           </Table>
@@ -214,8 +215,8 @@ export function OutputView({
             <CardDescription>Disbursed fees compared with the commission threshold.</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4 sm:grid-cols-2">
-            <SummaryCard label="Commission Threshold" value={formatCurrency(results.commissionThreshold)} detail="Sum of attorney commission thresholds" />
-            <SummaryCard label="Commissionable Amount" value={formatCurrency(results.commissionableAmount)} detail="Disbursed fees above threshold" />
+            <SummaryCard label="Commission Threshold" value={formatCurrency(results.commissionThreshold)} detail="RJL attorney fees disbursed before commissions start" />
+            <SummaryCard label="Commissionable Amount" value={formatCurrency(results.commissionableAmount)} detail="RJL fees disbursed above threshold" />
           </CardContent>
         </Card>
       </div>
@@ -241,6 +242,7 @@ function ResultsRow({
   fullYearGoal,
   pacingGoal,
   yearElapsed,
+  goalLabel = "Full Year Goal",
 }: {
   label: string;
   settled: number;
@@ -248,13 +250,14 @@ function ResultsRow({
   fullYearGoal: number;
   pacingGoal: number;
   yearElapsed: number;
+  goalLabel?: string;
 }) {
   return (
     <TableRow>
       <TableCell className="font-semibold">{label}</TableCell>
       <TableCell>{formatCurrency(settled)}</TableCell>
       <TableCell>{formatCurrency(disbursed)}</TableCell>
-      <TableCell>{formatCurrency(fullYearGoal)}</TableCell>
+      <TableCell title={goalLabel}>{formatCurrency(fullYearGoal)}</TableCell>
       <TableCell>{percent(fullYearGoal > 0 ? (disbursed / fullYearGoal) * 100 : 0)}</TableCell>
       <TableCell>{percent(fullYearGoal > 0 ? (settled / fullYearGoal) * 100 : 0)}</TableCell>
       <TableCell>{percent(yearElapsed)}</TableCell>

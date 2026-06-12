@@ -13,6 +13,7 @@ import {
 import {
   getWeightedDisbursedFeesInCommissionYear,
   getWeightedDisbursedFeesInCommissionQuarter,
+  getWeightedGrossDisbursedInCommissionYear,
   getWeightedSettlementInCommissionQuarter,
   recordHasDisbursementInCommissionYear,
 } from "@/lib/disbursements";
@@ -214,15 +215,13 @@ export function getAttorneyGoalProgress(records: CaseRecord[], goals: AttorneyGo
       (record) => record.shared.attorneyId === goal.attorneyId && isRecordInGoalCommissionYear(record, goal),
     );
     const yearElapsed = getCommissionYearElapsedPercentage(goal);
-    const forecastedFees = sum(
-      attorneyRecords
-        .filter((record) => record.tracker.isActive)
-        .map((record) => getProjectedFeeValue(record)),
-    );
-    const actualSettledFees = sum(
-      attorneyRecords
-        .filter((record) => record.tracker.result.settlementAmount)
-        .map((record) => record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue),
+    const activeRecords = attorneyRecords.filter((record) => record.tracker.isActive);
+    const planGross = sum(activeRecords.map((record) => record.tracker.minimumValue));
+    const planFees = sum(activeRecords.map((record) => getProjectedFeeValue(record)));
+    const actualGrossDisbursed = sum(
+      attorneyRecords.map((record) =>
+        getWeightedGrossDisbursedInCommissionYear(record, goal.year, goal.commissionYearStartMonth),
+      ),
     );
     const actualDisbursedFees = sum(
       attorneyRecords.map((record) =>
@@ -230,19 +229,23 @@ export function getAttorneyGoalProgress(records: CaseRecord[], goals: AttorneyGo
       ),
     );
     const quarterGoal = [goal.q1Goal, goal.q2Goal, goal.q3Goal, goal.q4Goal][currentQuarterNumber - 1];
-    const annualProgress = goal.annualFeeGoal > 0 ? (actualSettledFees / goal.annualFeeGoal) * 100 : 0;
-    const quarterProgress = quarterGoal > 0 ? (actualSettledFees / quarterGoal) * 100 : 0;
+    const annualProgress = goal.annualGrossGoal > 0 ? (actualGrossDisbursed / goal.annualGrossGoal) * 100 : 0;
+    const quarterProgress = quarterGoal > 0 ? (actualGrossDisbursed / quarterGoal) * 100 : 0;
+    const commissionableAmount = Math.max(actualDisbursedFees - goal.commissionThreshold, 0);
 
     return {
       goal,
-      forecastedFees,
-      actualSettledFees,
+      planGross,
+      planFees,
+      actualGrossDisbursed,
       actualDisbursedFees,
+      commissionableAmount,
       annualProgress,
       quarterProgress,
       yearElapsed,
       quarterElapsed,
       pace: annualProgress >= yearElapsed ? "ahead" : "behind",
+      thresholdMet: actualDisbursedFees >= goal.commissionThreshold,
     };
   });
 }
@@ -297,7 +300,7 @@ export function getAttorneyCommissionQuarterRows(
 ): CommissionQuarterPerformanceRow[] {
   const monthCount = goal.commissionMonthCount ?? 12;
   const windows = getCommissionYearQuarterWindows(goal.year, goal.commissionYearStartMonth, monthCount);
-  const quarterTargets = [goal.q1Goal, goal.q2Goal, goal.q3Goal, goal.q4Goal];
+  const grossQuarterTargets = [goal.q1Goal, goal.q2Goal, goal.q3Goal, goal.q4Goal];
   const attorneyRecords = records.filter(
     (record) => record.shared.attorneyId === goal.attorneyId && isRecordInGoalCommissionYear(record, goal),
   );
@@ -350,7 +353,7 @@ export function getAttorneyCommissionQuarterRows(
         window.quarter as CommissionYearQuarter,
         monthCount,
       ),
-      target: quarterTargets[window.quarter - 1] ?? 0,
+      target: mode === "gross" ? (grossQuarterTargets[window.quarter - 1] ?? 0) : 0,
       plan,
       actual,
     };
@@ -374,13 +377,11 @@ export function getFirmOutputMetrics(records: CaseRecord[], goals: AttorneyGoal[
       ? records.filter((record) => scopedGoals.some((goal) => isRecordInGoalCommissionYear(record, goal)))
       : records;
 
-  const annualFeeGoal = sum(scopedGoals.map((goal) => goal.annualFeeGoal));
+  const annualGrossGoal = sum(scopedGoals.map((goal) => goal.annualGrossGoal));
   const yearElapsed =
     scopedGoals.length === 1
       ? getCommissionYearElapsedPercentage(scopedGoals[0])
       : getYearElapsedPercentage();
-  const pacingFeeGoal = Math.round(annualFeeGoal * (yearElapsed / 100));
-  const annualGrossGoal = Math.round(annualFeeGoal / 0.36);
   const pacingGrossGoal = Math.round(annualGrossGoal * (yearElapsed / 100));
 
   const settledRecords = scopedRecords.filter((record) => record.tracker.result.settlementAmount);
@@ -401,6 +402,7 @@ export function getFirmOutputMetrics(records: CaseRecord[], goals: AttorneyGoal[
   const commissionThreshold = Math.round(sum(scopedGoals.map((goal) => goal.commissionThreshold)));
   const commissionableAmount = Math.max(feesDisbursed - commissionThreshold, 0);
   const completedDisbursementGoal = Math.max(1, Math.ceil(scopedRecords.length * 0.55));
+  const planGross = sum(planRecords.map((record) => record.tracker.minimumValue));
   const planFees = sum(planRecords.map((record) => getProjectedFeeValue(record)));
 
   return {
@@ -410,19 +412,18 @@ export function getFirmOutputMetrics(records: CaseRecord[], goals: AttorneyGoal[
       feesSettled,
       feesDisbursed,
       annualGrossGoal,
-      annualFeeGoal,
       pacingGrossGoal,
-      pacingFeeGoal,
       yearElapsed,
       commissionThreshold,
       commissionableAmount,
+      planGross,
       planFees,
       completedDisbursements: disbursedRecords.length,
       completedDisbursementGoal,
     },
     caseStatuses: getCaseStatusRollup(scopedRecords),
     grossQuarterRows: getQuarterRows(scopedRecords, annualGrossGoal, "gross", scopedGoals),
-    feeQuarterRows: getQuarterRows(scopedRecords, annualFeeGoal, "fees", scopedGoals),
+    feeQuarterRows: getQuarterRows(scopedRecords, 0, "fees", scopedGoals),
   };
 }
 

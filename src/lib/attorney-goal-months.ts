@@ -101,7 +101,7 @@ export function deriveQuarterGoalsFromMonthly(
     q2Goal: quarterSums[1] ?? 0,
     q3Goal: quarterSums[2] ?? 0,
     q4Goal: quarterSums[3] ?? 0,
-    annualFeeGoal: quarterSums.reduce((total, value) => total + value, 0),
+    annualGrossGoal: quarterSums.reduce((total, value) => total + value, 0),
   };
 }
 

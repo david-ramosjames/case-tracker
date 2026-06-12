@@ -19,7 +19,12 @@ export function QuarterPerformanceTables({
   return (
     <div className="grid gap-6 xl:grid-cols-2">
       <QuarterTable title="Gross Settlements Disbursed" rows={grossRows} description={tableDescription} />
-      <QuarterTable title="RJL Attorney Fees" rows={feeRows} description={tableDescription} />
+      <QuarterTable
+        title="RJL Attorney Fees Disbursed"
+        rows={feeRows}
+        description="Plan and actual by quarter. No top-down fee goal — commissions use the annual threshold on the Goals page."
+        hideTarget
+      />
     </div>
   );
 }
@@ -28,10 +33,12 @@ function QuarterTable({
   title,
   rows,
   description,
+  hideTarget = false,
 }: {
   title: string;
   rows: CommissionQuarterPerformanceRow[];
   description: string;
+  hideTarget?: boolean;
 }) {
   return (
     <Card>
@@ -45,7 +52,7 @@ function QuarterTable({
             <TableRow>
               <TableHead>Quarter</TableHead>
               <TableHead>Period</TableHead>
-              <TableHead>Target</TableHead>
+              {hideTarget ? null : <TableHead>Target</TableHead>}
               <TableHead>Plan</TableHead>
               <TableHead>Actual</TableHead>
             </TableRow>
@@ -55,7 +62,7 @@ function QuarterTable({
               <TableRow key={`${row.label}-${row.period}`}>
                 <TableCell className="font-medium">{row.label}</TableCell>
                 <TableCell className="text-sm text-muted-foreground">{row.period}</TableCell>
-                <TableCell>{formatCurrency(row.target)}</TableCell>
+                {hideTarget ? null : <TableCell>{formatCurrency(row.target)}</TableCell>}
                 <TableCell>{formatCurrency(row.plan)}</TableCell>
                 <TableCell>{formatCurrency(row.actual)}</TableCell>
               </TableRow>
