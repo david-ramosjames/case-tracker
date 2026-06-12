@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, ExternalLink, MessageSquarePlus, Pencil, Save, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
+import { CheckCircle2, ExternalLink, MessageSquarePlus, Pencil, RefreshCw, Save, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -96,7 +96,14 @@ export function CaseDetailView({
   const [stageActionId, setStageActionId] = useState<string | null>(null);
   const [deleteDocketflowCase, setDeleteDocketflowCase] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
+  const [sheetSyncMessage, setSheetSyncMessage] = useState<string | null>(null);
   const router = useRouter();
+
+  useEffect(() => {
+    setShared(initialRecord.shared);
+    setTracker(initialRecord.tracker);
+  }, [initialRecord]);
 
   const isAdmin = sessionUser.role === "admin" || sessionUser.role === "super_admin";
   const isOrphanTracker = initialRecord.shared.id === initialRecord.tracker.id;
@@ -128,6 +135,30 @@ export function CaseDetailView({
 
   function updateShared<K extends keyof typeof shared>(key: K, value: (typeof shared)[K]) {
     setShared((current) => ({ ...current, [key]: value }));
+  }
+
+  async function syncFromDisbursingSheet() {
+    setIsSyncingSheet(true);
+    setSheetSyncMessage(null);
+    setErrorMessage(null);
+    try {
+      const response = await fetch(`/api/cases/${shared.id}/sync-settlements`, { method: "POST" });
+      const body = (await response.json()) as {
+        error?: string;
+        disbursementsSynced?: number;
+        sheetRowsFound?: number;
+      };
+      if (!response.ok) throw new Error(body.error ?? "Unable to import from disbursing sheet.");
+
+      setSheetSyncMessage(
+        `Imported ${body.disbursementsSynced ?? 0} disbursement party row(s) from the sheet.`,
+      );
+      router.refresh();
+    } catch (error) {
+      setSheetSyncMessage(error instanceof Error ? error.message : "Unable to import from disbursing sheet.");
+    } finally {
+      setIsSyncingSheet(false);
+    }
   }
 
   function updateResult<K extends keyof SettlementResult>(key: K, value: SettlementResult[K]) {
@@ -851,14 +882,24 @@ export function CaseDetailView({
             <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
               <div>
                 <CardTitle>Results Tracking</CardTitle>
-                <CardDescription>Release, closing, deposit, and disbursement tracking from the workbook results tab.</CardDescription>
+                <CardDescription>
+                  Release, closing, deposit, and disbursement tracking. Import from the RJL Cases Disbursing sheet to pull
+                  all rows for this case # (one row per party).
+                </CardDescription>
               </div>
-              <Button variant={isResultsEditing ? "pink" : "outline"} size="sm" onClick={() => setIsResultsEditing((current) => !current)}>
-                <Pencil className="h-4 w-4" />
-                {isResultsEditing ? "View" : "Edit"}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" disabled={isSyncingSheet} onClick={() => void syncFromDisbursingSheet()}>
+                  <RefreshCw className={`h-4 w-4 ${isSyncingSheet ? "animate-spin" : ""}`} />
+                  {isSyncingSheet ? "Importing..." : "Import disbursing sheet"}
+                </Button>
+                <Button variant={isResultsEditing ? "pink" : "outline"} size="sm" onClick={() => setIsResultsEditing((current) => !current)}>
+                  <Pencil className="h-4 w-4" />
+                  {isResultsEditing ? "View" : "Edit"}
+                </Button>
+              </div>
             </div>
           </CardHeader>
+          {sheetSyncMessage ? <p className="px-6 text-sm text-muted-foreground">{sheetSyncMessage}</p> : null}
           <CardContent className="grid gap-4 md:grid-cols-3">
             {!isResultsEditing ? (
               <>
@@ -982,7 +1023,7 @@ export function CaseDetailView({
           </CardContent>
         </Card>
 
-        {(isResultsEditing || record.tracker.multipleDisbursementsEnabled || record.tracker.disbursements.length > 1) ? (
+        {(isResultsEditing || tracker.multipleDisbursementsEnabled || tracker.disbursements.length > 0) ? (
           <DisbursementPartiesCard
             record={record}
             editing={isResultsEditing}

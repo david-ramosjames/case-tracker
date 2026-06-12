@@ -1,5 +1,5 @@
 import { buildFieldValidationRowPatch } from "@/lib/attorney-score";
-import { cleanCaseNumber } from "@/lib/csv/parse";
+import { caseNumbersMatch, cleanCaseNumber } from "@/lib/csv/parse";
 import { disbursementWeight } from "@/lib/disbursements";
 import { parseCaseBackfillCsv, type ParsedCaseBackfillRow } from "@/lib/csv/case-backfill";
 import { trackerTouchesSourcesLit } from "@/lib/slack/reminders";
@@ -548,7 +548,7 @@ export async function syncDateSignedFromSheet(entries: Array<{ caseNumber: strin
   return { updated };
 }
 
-type SettlementSheetCasePayload = {
+export type SettlementSheetCasePayload = {
   caseNumber: string;
   sheetRowCount: number;
   settlementDate: string | null;
@@ -607,6 +607,30 @@ async function upsertDisbursementBySheetRowKey(
   if (error) throw new Error(error.message);
 }
 
+async function findTrackerEntryByCaseNumber(
+  admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
+  caseNumber: string,
+) {
+  const target = cleanCaseNumber(caseNumber);
+  if (!target) return null;
+
+  const { data: exactRows, error: exactError } = await admin
+    .from("case_tracker_entries")
+    .select("id,case_id,case_number,expected_disbursement_count,case_stage")
+    .eq("case_number", target);
+
+  if (exactError) throw new Error(exactError.message);
+  if (exactRows?.[0]) return exactRows[0];
+
+  const { data: allRows, error: allError } = await admin
+    .from("case_tracker_entries")
+    .select("id,case_id,case_number,expected_disbursement_count,case_stage")
+    .ilike("case_number", `%${target}%`);
+
+  if (allError) throw new Error(allError.message);
+  return allRows?.find((row) => caseNumbersMatch(toString(row.case_number, ""), target)) ?? null;
+}
+
 /** Apply settlement/disbursement rows from the settlements Google Sheet. */
 export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload[]) {
   const admin = createSupabaseAdminClient();
@@ -623,18 +647,13 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     const caseNumber = cleanCaseNumber(item.caseNumber);
     if (!caseNumber) continue;
 
-    const { data: trackerRows, error: trackerError } = await admin
-      .from("case_tracker_entries")
-      .select("id,case_id,case_number,expected_disbursement_count,case_stage")
-      .eq("case_number", caseNumber);
-
-    if (trackerError) throw new Error(trackerError.message);
-    const trackerRow = trackerRows?.[0];
+    const trackerRow = await findTrackerEntryByCaseNumber(admin, caseNumber);
     if (!trackerRow) {
       skippedNoTracker += 1;
       continue;
     }
 
+    const resolvedCaseNumber = cleanCaseNumber(toString(trackerRow.case_number, caseNumber));
     const trackerEntryId = toString(trackerRow.id, "");
     const caseId = toStringOrNull(trackerRow.case_id) ?? trackerEntryId;
 
@@ -654,7 +673,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     const { error: pruneError } = await admin
       .from("case_tracker_disbursements")
       .delete()
-      .eq("case_number", caseNumber)
+      .eq("case_number", resolvedCaseNumber)
       .not("sheet_row_key", "is", null);
     if (pruneError) throw new Error(pruneError.message);
 
@@ -662,7 +681,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
       const payload: DisbursementRowPayload = {
         tracker_entry_id: trackerEntryId,
         case_id: isUuid(caseId) ? caseId : null,
-        case_number: caseNumber,
+        case_number: resolvedCaseNumber,
         label: disbursement.partyLabel,
         disburse_date: disbursement.disburseDate ? toDateOnly(disbursement.disburseDate) : null,
         settlement_date: disbursement.settlementDate ? toDateOnly(disbursement.settlementDate) : null,

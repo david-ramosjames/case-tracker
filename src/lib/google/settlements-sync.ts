@@ -1,11 +1,11 @@
-import { cleanCaseNumber, parseSheetDate } from "@/lib/csv/parse";
+import { caseNumbersMatch, cleanCaseNumber, parseSheetDate } from "@/lib/csv/parse";
 import { fetchGoogleSheetValues, findSheetColumnIndex } from "@/lib/google/client";
 import {
   getGoogleSheetsCredentials,
   getGoogleSheetsSettlementConfig,
   isGoogleSheetsSettlementSyncConfigured,
 } from "@/lib/slack/config";
-import { syncSettlementsFromSheet } from "@/lib/supabase/services";
+import { syncSettlementsFromSheet, type SettlementSheetCasePayload } from "@/lib/supabase/services";
 
 export type SettlementSheetSyncResult = {
   configured: boolean;
@@ -14,6 +14,8 @@ export type SettlementSheetSyncResult = {
   settlementsUpdated: number;
   stagesAutoSettled: number;
   skippedNoTracker: number;
+  sheetRowsFound?: number;
+  caseNumber?: string;
 };
 
 type ParsedSettlementRow = {
@@ -38,39 +40,8 @@ function isPendingDisbursementCountCell(value: string) {
   return value.trim().length > 0;
 }
 
-export async function syncSettlementsFromGoogleSheetIfConfigured(): Promise<SettlementSheetSyncResult> {
-  if (!isGoogleSheetsSettlementSyncConfigured()) {
-    return {
-      configured: false,
-      casesProcessed: 0,
-      disbursementsSynced: 0,
-      settlementsUpdated: 0,
-      stagesAutoSettled: 0,
-      skippedNoTracker: 0,
-    };
-  }
-  return { configured: true, ...(await syncSettlementsFromGoogleSheet()) };
-}
-
-export async function syncSettlementsFromGoogleSheet() {
-  const config = getGoogleSheetsSettlementConfig();
-  const credentials = getGoogleSheetsCredentials();
-  if (!config || !credentials) {
-    throw new Error(
-      "Settlement sheet sync is not configured. Set GOOGLE_SHEETS_SETTLEMENT_SPREADSHEET_ID, GOOGLE_SHEETS_SETTLEMENT_RANGE, and service account env vars.",
-    );
-  }
-
-  const rows = await fetchGoogleSheetValues(config.spreadsheetId, config.range, credentials);
-  if (rows.length < 2) {
-    return {
-      casesProcessed: 0,
-      disbursementsSynced: 0,
-      settlementsUpdated: 0,
-      stagesAutoSettled: 0,
-      skippedNoTracker: 0,
-    };
-  }
+export function parseSettlementSheetRows(rows: string[][], spreadsheetId: string) {
+  if (rows.length < 2) return [];
 
   const header = rows[0].map((cell) => cell.trim().toLowerCase());
   const countIdx = findSheetColumnIndex(header, [
@@ -82,7 +53,10 @@ export async function syncSettlementsFromGoogleSheet() {
     (cell) => /case\s*(#|no|number)/.test(cell),
     (cell) => cell === "case no" || cell === "case #" || cell === "case",
   ]);
-  const clientIdx = findSheetColumnIndex(header, [(cell) => cell === "client"]);
+  const clientIdx = findSheetColumnIndex(header, [
+    (cell) => cell.includes("client"),
+    (cell) => cell.includes("party"),
+  ]);
   const settlementIdx = findSheetColumnIndex(header, [
     (cell) => cell.includes("settlement") && cell.includes("date"),
     (cell) => cell === "settlement date",
@@ -117,11 +91,10 @@ export async function syncSettlementsFromGoogleSheet() {
     const countCell = (row[resolvedCountIdx] ?? "").trim();
     const settlementDate = parseSheetDate(row[resolvedSettlementIdx] ?? "");
     const disburseDate = parseSheetDate(row[resolvedDisbursedIdx] ?? "");
-
     const partyLabel = (row[resolvedClientIdx] ?? "").trim() || null;
 
     parsed.push({
-      sheetRowKey: `${config.spreadsheetId}:${sheetRowNumber}`,
+      sheetRowKey: `${spreadsheetId}:${sheetRowNumber}`,
       caseNumber,
       partyLabel,
       pendingRemaining: isPendingDisbursementCountCell(countCell),
@@ -132,48 +105,117 @@ export async function syncSettlementsFromGoogleSheet() {
     });
   });
 
+  return parsed;
+}
+
+export function buildSettlementCasePayloads(parsed: ParsedSettlementRow[]): SettlementSheetCasePayload[] {
   const byCase = new Map<string, ParsedSettlementRow[]>();
   for (const row of parsed) {
     byCase.set(row.caseNumber, [...(byCase.get(row.caseNumber) ?? []), row]);
   }
 
-  const payload = [...byCase.entries()].map(([caseNumber, caseRows]) => {
-    const sheetRowCount = caseRows.length;
-    const settlementDate = caseRows.map((row) => row.settlementDate).find(Boolean) ?? null;
-    const disbursements = caseRows.map((row) => ({
-      sheetRowKey: row.sheetRowKey,
-      partyLabel: row.partyLabel,
-      disburseDate: row.disburseDate,
-      settlementDate: row.settlementDate ?? settlementDate,
-      settlementAmount: row.settlementAmount,
-      attorneyFees: row.attorneyFees,
-      pendingRemaining: row.pendingRemaining,
-    }));
-    const disbursedDates = disbursements.map((item) => item.disburseDate).filter(Boolean) as string[];
-    const latestDisburseDate = disbursedDates.length
-      ? disbursedDates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0]
-      : null;
-    const pendingCount = disbursements.filter((item) => item.pendingRemaining).length;
-    const completedCount = disbursements.filter((item) => !item.pendingRemaining).length;
+  return [...byCase.entries()].map(([caseNumber, caseRows]) => buildSettlementCasePayload(caseNumber, caseRows));
+}
 
-    const totalSettlementAmount = sumMoney(caseRows.map((row) => row.settlementAmount));
-    const totalAttorneyFees = sumMoney(caseRows.map((row) => row.attorneyFees));
+function buildSettlementCasePayload(caseNumber: string, caseRows: ParsedSettlementRow[]): SettlementSheetCasePayload {
+  const sheetRowCount = caseRows.length;
+  const settlementDate = caseRows.map((row) => row.settlementDate).find(Boolean) ?? null;
+  const disbursements = caseRows.map((row) => ({
+    sheetRowKey: row.sheetRowKey,
+    partyLabel: row.partyLabel,
+    disburseDate: row.disburseDate,
+    settlementDate: row.settlementDate ?? settlementDate,
+    settlementAmount: row.settlementAmount,
+    attorneyFees: row.attorneyFees,
+    pendingRemaining: row.pendingRemaining,
+  }));
+  const disbursedDates = disbursements.map((item) => item.disburseDate).filter(Boolean) as string[];
+  const latestDisburseDate = disbursedDates.length
+    ? disbursedDates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0]
+    : null;
+  const pendingCount = disbursements.filter((item) => item.pendingRemaining).length;
 
+  return {
+    caseNumber,
+    sheetRowCount,
+    settlementDate,
+    totalSettlementAmount: sumMoney(caseRows.map((row) => row.settlementAmount)),
+    totalAttorneyFees: sumMoney(caseRows.map((row) => row.attorneyFees)),
+    latestDisburseDate,
+    allDisbursed: pendingCount === 0,
+    pendingDisbursementCount: pendingCount,
+    completedDisbursementCount: disbursements.filter((item) => !item.pendingRemaining).length,
+    disbursements,
+  };
+}
+
+export async function syncSettlementsFromGoogleSheetIfConfigured(): Promise<SettlementSheetSyncResult> {
+  if (!isGoogleSheetsSettlementSyncConfigured()) {
     return {
-      caseNumber,
-      sheetRowCount,
-      settlementDate,
-      totalSettlementAmount,
-      totalAttorneyFees,
-      latestDisburseDate,
-      allDisbursed: pendingCount === 0,
-      pendingDisbursementCount: pendingCount,
-      completedDisbursementCount: completedCount,
-      disbursements,
+      configured: false,
+      casesProcessed: 0,
+      disbursementsSynced: 0,
+      settlementsUpdated: 0,
+      stagesAutoSettled: 0,
+      skippedNoTracker: 0,
     };
-  });
+  }
+  return { configured: true, ...(await syncSettlementsFromGoogleSheet()) };
+}
 
+export async function syncSettlementsFromGoogleSheet() {
+  const config = getGoogleSheetsSettlementConfig();
+  const credentials = getGoogleSheetsCredentials();
+  if (!config || !credentials) {
+    throw new Error(
+      "Settlement sheet sync is not configured. Set GOOGLE_SHEETS_SETTLEMENT_SPREADSHEET_ID, GOOGLE_SHEETS_SETTLEMENT_RANGE, and service account env vars.",
+    );
+  }
+
+  const rows = await fetchGoogleSheetValues(config.spreadsheetId, config.range, credentials);
+  const parsed = parseSettlementSheetRows(rows, config.spreadsheetId);
+  const payload = buildSettlementCasePayloads(parsed);
   return syncSettlementsFromSheet(payload);
+}
+
+export async function syncSettlementsFromGoogleSheetForCaseNumber(caseNumber: string) {
+  const config = getGoogleSheetsSettlementConfig();
+  const credentials = getGoogleSheetsCredentials();
+  if (!config || !credentials) {
+    throw new Error(
+      "Settlement sheet sync is not configured. Set GOOGLE_SHEETS_SETTLEMENT_SPREADSHEET_ID, GOOGLE_SHEETS_SETTLEMENT_RANGE, and service account env vars.",
+    );
+  }
+
+  const targetCaseNumber = cleanCaseNumber(caseNumber);
+  if (!targetCaseNumber) {
+    throw new Error("A valid case number is required.");
+  }
+
+  const rows = await fetchGoogleSheetValues(config.spreadsheetId, config.range, credentials);
+  const parsed = parseSettlementSheetRows(rows, config.spreadsheetId).filter((row) =>
+    caseNumbersMatch(row.caseNumber, targetCaseNumber),
+  );
+
+  if (parsed.length === 0) {
+    return {
+      casesProcessed: 0,
+      disbursementsSynced: 0,
+      settlementsUpdated: 0,
+      stagesAutoSettled: 0,
+      skippedNoTracker: 0,
+      sheetRowsFound: 0,
+      caseNumber: targetCaseNumber,
+    };
+  }
+
+  const payload = [buildSettlementCasePayload(targetCaseNumber, parsed)];
+  const result = await syncSettlementsFromSheet(payload);
+  return {
+    ...result,
+    sheetRowsFound: parsed.length,
+    caseNumber: targetCaseNumber,
+  };
 }
 
 function sumMoney(values: Array<number | null>) {

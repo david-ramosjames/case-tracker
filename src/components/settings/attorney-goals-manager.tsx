@@ -117,23 +117,32 @@ export function AttorneyGoalsManager({
   const endYearOptions = useMemo(() => [...yearOptions, yearOptions[yearOptions.length - 1] + 1], [yearOptions]);
   const attorneys = useMemo(() => users.filter((user) => user.role === "attorney"), [users]);
 
-  const [selectedYear, setSelectedYear] = useState(yearOptions[yearOptions.length - 1] ?? new Date().getFullYear());
+  const defaultEndYear = yearOptions[yearOptions.length - 1] ?? new Date().getFullYear();
+  const [yearFilter, setYearFilter] = useState<number | "all">("all");
   const [isSaving, setIsSaving] = useState(false);
   const [deletingGoalId, setDeletingGoalId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newAttorneyId, setNewAttorneyId] = useState(attorneys[0]?.id ?? "");
-  const [newDraft, setNewDraft] = useState(() => createEmptyDraft(attorneys[0]?.id ?? "", selectedYear));
+  const [newDraft, setNewDraft] = useState(() => createEmptyDraft(attorneys[0]?.id ?? "", defaultEndYear));
   const [drafts, setDrafts] = useState<Record<string, GoalDraft>>({});
 
-  const goalsForYear = useMemo(() => goals.filter((goal) => goal.year === selectedYear), [goals, selectedYear]);
+  const displayedGoals = useMemo(() => {
+    const filtered = yearFilter === "all" ? goals : goals.filter((goal) => goal.year === yearFilter);
+    return [...filtered].sort((left, right) => {
+      if (right.year !== left.year) return right.year - left.year;
+      const leftName = attorneys.find((user) => user.id === left.attorneyId)?.name ?? "";
+      const rightName = attorneys.find((user) => user.id === right.attorneyId)?.name ?? "";
+      return leftName.localeCompare(rightName);
+    });
+  }, [attorneys, goals, yearFilter]);
 
   function getDraft(goal: AttorneyGoal): GoalDraft {
     return drafts[goal.id] ?? buildDraftFromGoal(goal);
   }
 
   function updateDraft(goalId: string, patch: Partial<GoalDraft> | ((current: GoalDraft) => GoalDraft)) {
-    const goal = goalsForYear.find((item) => item.id === goalId);
+    const goal = displayedGoals.find((item) => item.id === goalId);
     if (!goal) return;
     setDrafts((current) => {
       const existing = current[goalId] ?? buildDraftFromGoal(goal);
@@ -175,8 +184,8 @@ export function AttorneyGoalsManager({
     const body = (await response.json()) as { error?: string };
     if (!response.ok) throw new Error(body.error ?? "Unable to save goal.");
 
-    if (period.commissionYear !== selectedYear) {
-      setSelectedYear(period.commissionYear);
+    if (yearFilter !== "all" && period.commissionYear !== yearFilter) {
+      setYearFilter(period.commissionYear);
     }
   }
 
@@ -201,7 +210,7 @@ export function AttorneyGoalsManager({
   async function handleDeleteGoal(goal: AttorneyGoal) {
     const attorney = attorneys.find((user) => user.id === goal.attorneyId);
     const attorneyLabel = attorney?.name ?? "this attorney";
-    if (!window.confirm(`Delete the ${selectedYear} goal for ${attorneyLabel}? This cannot be undone.`)) {
+    if (!window.confirm(`Delete the ${goal.year} goal for ${attorneyLabel}? This cannot be undone.`)) {
       return;
     }
 
@@ -236,7 +245,7 @@ export function AttorneyGoalsManager({
     try {
       await saveGoal(attorney.id, attorney.name, { ...newDraft, attorneyId: attorney.id });
       setShowAddForm(false);
-      setNewDraft(createEmptyDraft(newAttorneyId, selectedYear));
+      setNewDraft(createEmptyDraft(newAttorneyId, defaultEndYear));
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to add goal.");
@@ -260,7 +269,15 @@ export function AttorneyGoalsManager({
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-sm font-medium text-navy-950">
               Commission year
-              <Select className="min-w-[6rem]" value={String(selectedYear)} onChange={(event) => setSelectedYear(Number(event.target.value))}>
+              <Select
+                className="min-w-[6rem]"
+                value={String(yearFilter)}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setYearFilter(value === "all" ? "all" : Number(value));
+                }}
+              >
+                <option value="all">All</option>
                 {yearOptions.map((year) => (
                   <option key={year} value={year}>
                     {year}
@@ -316,20 +333,32 @@ export function AttorneyGoalsManager({
           </div>
         ) : null}
 
-        {goalsForYear.length === 0 ? (
+        {displayedGoals.length === 0 ? (
           <p className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
-            No goals for commission year {selectedYear}. Click <strong>Add goal</strong> or import from the CSV template.
+            {yearFilter === "all" ? (
+              <>
+                No attorney goals saved yet. Click <strong>Add goal</strong> or import from the CSV template.
+              </>
+            ) : (
+              <>
+                No goals for commission year {yearFilter}. Click <strong>Add goal</strong> or import from the CSV template.
+              </>
+            )}
           </p>
         ) : (
           <div className="space-y-4">
-            {goalsForYear.map((goal) => {
+            {displayedGoals.map((goal) => {
               const attorney = attorneys.find((user) => user.id === goal.attorneyId);
               const draft = getDraft(goal);
+              const title =
+                yearFilter === "all"
+                  ? `${attorney?.name ?? "Unknown attorney"} · ${goal.year}`
+                  : (attorney?.name ?? "Unknown attorney");
 
               return (
                 <GoalEditorCard
                   key={goal.id}
-                  title={attorney?.name ?? "Unknown attorney"}
+                  title={title}
                   draft={draft}
                   endYearOptions={endYearOptions}
                   onDraftChange={(next) => updateDraft(goal.id, next)}
@@ -359,9 +388,9 @@ export function AttorneyGoalsManager({
         )}
 
         <p className="text-xs text-muted-foreground">
-          Saved total for {selectedYear}:{" "}
+          Saved total{yearFilter === "all" ? "" : ` for ${yearFilter}`}:{" "}
           <Badge variant="outline">
-            {formatCurrency(goalsForYear.reduce((sum, goal) => sum + goal.annualGrossGoal, 0))} gross disbursed
+            {formatCurrency(displayedGoals.reduce((sum, goal) => sum + goal.annualGrossGoal, 0))} gross disbursed
           </Badge>
         </p>
       </CardContent>

@@ -44,8 +44,8 @@ export function DisbursementPartiesCard({
       <CardHeader>
         <CardTitle>Multiple disbursement parties</CardTitle>
         <CardDescription>
-          Most cases have a single disbursement. Enable this only when one case number will pay out to multiple parties
-          (e.g. parent + minor) — each with its own settlement amount and disburse date on the disbursing sheet.
+          Each row on the RJL Cases Disbursing sheet with this case # becomes a party (column D = client name). Use
+          Import disbursing sheet on Results to pull all matching rows automatically.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

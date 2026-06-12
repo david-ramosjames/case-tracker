@@ -1,0 +1,43 @@
+import { NextResponse } from "next/server";
+import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
+import { syncSettlementsFromGoogleSheetForCaseNumber } from "@/lib/google/settlements-sync";
+import { getCaseById } from "@/lib/supabase/services";
+
+export async function POST(_request: Request, { params }: { params: Promise<{ caseId: string }> }) {
+  try {
+    const sessionUser = await requireApiSession();
+    if (!sessionUser) return unauthorizedResponse();
+
+    const { caseId } = await params;
+    const record = await getCaseById(caseId);
+    if (!record) {
+      return NextResponse.json({ error: "Case not found." }, { status: 404 });
+    }
+
+    const result = await syncSettlementsFromGoogleSheetForCaseNumber(record.shared.caseNumber);
+    if (result.sheetRowsFound === 0) {
+      return NextResponse.json(
+        {
+          error: `No rows found on the disbursing sheet for case ${result.caseNumber}.`,
+          ...result,
+        },
+        { status: 404 },
+      );
+    }
+    if (result.casesProcessed === 0) {
+      return NextResponse.json(
+        {
+          error: `Found ${result.sheetRowsFound} sheet row(s) but could not match tracker entry for case ${result.caseNumber}.`,
+          ...result,
+        },
+        { status: 404 },
+      );
+    }
+
+    return NextResponse.json(result);
+  } catch (error) {
+    console.error("Case settlement sheet sync failed", error);
+    const message = error instanceof Error ? error.message : "Settlement sheet sync failed.";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

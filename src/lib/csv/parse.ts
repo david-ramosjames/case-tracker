@@ -92,11 +92,22 @@ export function parseSheetDate(value: string): string | null {
 }
 
 export function cleanCaseNumber(value: string) {
-  const trimmed = value.trim();
+  const trimmed = value.trim().replace(/^#+/, "");
   if (!trimmed) return "";
+  const digitsOnly = trimmed.replace(/[^\d]/g, "");
+  if (digitsOnly) {
+    const parsed = Number.parseInt(digitsOnly, 10);
+    if (Number.isFinite(parsed)) return String(parsed);
+  }
   const numeric = Number(trimmed);
   if (Number.isFinite(numeric)) return String(Math.trunc(numeric));
   return trimmed;
+}
+
+export function caseNumbersMatch(left: string, right: string) {
+  const a = cleanCaseNumber(left);
+  const b = cleanCaseNumber(right);
+  return Boolean(a && b && a === b);
 }
 
 /** Numeric sort key for firm case numbers (strips non-digits). */

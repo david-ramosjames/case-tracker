@@ -47,7 +47,9 @@ function hasSettlementDate(record: CaseRecord) {
 
 export function ResultsTable({
   records,
+  users,
   settings,
+  viewer,
 }: {
   records: CaseRecord[];
   users: AppUser[];
@@ -56,6 +58,7 @@ export function ResultsTable({
 }) {
   const [workingRecords, setWorkingRecords] = useState(() => records.filter(hasSettlementDate));
   const [search, setSearch] = useState("");
+  const [attorney, setAttorney] = useState("all");
   const [release, setRelease] = useState("all");
   const [closing, setClosing] = useState("all");
   const [check, setCheck] = useState("all");
@@ -65,9 +68,18 @@ export function ResultsTable({
   const [sortKey, setSortKey] = useState<SortKey>("caseNumber");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
+  const attorneys = users.filter((user) => user.role === "attorney");
   const quarters = Array.from(new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.result.resultQuarter).filter(Boolean)]));
 
-  const activeFilterCount = [release, closing, check, disbursed, reductions, quarter].filter((value) => value !== "all").length;
+  const activeFilterCount = [
+    viewer.canViewAllCases && attorney !== "all",
+    release,
+    closing,
+    check,
+    disbursed,
+    reductions,
+    quarter,
+  ].filter((value) => value !== "all").length;
 
   const filteredRecords = useMemo(() => {
     const normalizedSearch = search.toLowerCase();
@@ -81,6 +93,7 @@ export function ResultsTable({
           record.shared.clientName.toLowerCase().includes(normalizedSearch);
 
         if (!matchesSearch) return false;
+        if (attorney !== "all" && record.shared.attorneyId !== attorney) return false;
         if (release !== "all" && result.releaseStatus !== release) return false;
         if (closing !== "all" && result.closingStatus !== closing) return false;
         if (check !== "all" && result.checkStatus !== check) return false;
@@ -135,9 +148,10 @@ export function ResultsTable({
         const cmp = aFees - bFees;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [check, closing, disbursed, quarter, reductions, release, search, settings, sortDirection, sortKey, workingRecords]);
+  }, [attorney, check, closing, disbursed, quarter, reductions, release, search, settings, sortDirection, sortKey, workingRecords]);
 
   function clearFilters() {
+    setAttorney("all");
     setRelease("all");
     setClosing("all");
     setCheck("all");
@@ -226,7 +240,21 @@ export function ResultsTable({
                 <SortableHead label="% Complete" sortKey="completion" active={sortKey} direction={sortDirection} onSort={requestSort} />
                 <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} direction={sortDirection} onSort={requestSort} />
                 <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} />
-                <TableHead>Attorney</TableHead>
+                <TableHead className="align-top">
+                  {viewer.canViewAllCases ? (
+                    <HeaderFilter
+                      label="Attorney"
+                      value={attorney}
+                      onChange={setAttorney}
+                      options={[
+                        { value: "all", label: "All" },
+                        ...attorneys.map((item) => ({ value: item.id, label: item.name })),
+                      ]}
+                    />
+                  ) : (
+                    <span className="text-xs font-semibold uppercase text-muted-foreground">Attorney</span>
+                  )}
+                </TableHead>
                 <TableHead>Paralegal</TableHead>
                 <SortableHead label="Settlement Date" sortKey="settlementDate" active={sortKey} direction={sortDirection} onSort={requestSort} />
                 <SortableHead label="Settlement Amount" sortKey="settlementAmount" active={sortKey} direction={sortDirection} onSort={requestSort} />
