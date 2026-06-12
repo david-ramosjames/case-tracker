@@ -94,13 +94,23 @@ export function parseSheetDate(value: string): string | null {
 export function cleanCaseNumber(value: string) {
   const trimmed = value.trim().replace(/^#+/, "");
   if (!trimmed) return "";
+
+  const withoutSeparators = trimmed.replace(/[$,\s]/g, "");
+  if (/^\d+(\.0+)?$/.test(withoutSeparators)) {
+    return String(Math.trunc(Number(withoutSeparators)));
+  }
+
+  const numeric = Number(withoutSeparators);
+  if (Number.isFinite(numeric) && /^[\d#.,\s$+-]+$/.test(trimmed)) {
+    return String(Math.trunc(numeric));
+  }
+
   const digitsOnly = trimmed.replace(/[^\d]/g, "");
   if (digitsOnly) {
     const parsed = Number.parseInt(digitsOnly, 10);
     if (Number.isFinite(parsed)) return String(parsed);
   }
-  const numeric = Number(trimmed);
-  if (Number.isFinite(numeric)) return String(Math.trunc(numeric));
+
   return trimmed;
 }
 

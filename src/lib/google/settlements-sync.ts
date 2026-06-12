@@ -178,7 +178,15 @@ export async function syncSettlementsFromGoogleSheet() {
   return syncSettlementsFromSheet(payload);
 }
 
-export async function syncSettlementsFromGoogleSheetForCaseNumber(caseNumber: string) {
+export type SettlementSheetCaseSyncOptions = {
+  trackerEntryId?: string;
+  docketflowCaseId?: string;
+};
+
+export async function syncSettlementsFromGoogleSheetForCaseNumber(
+  caseNumber: string,
+  options?: SettlementSheetCaseSyncOptions,
+) {
   const config = getGoogleSheetsSettlementConfig();
   const credentials = getGoogleSheetsCredentials();
   if (!config || !credentials) {
@@ -209,7 +217,13 @@ export async function syncSettlementsFromGoogleSheetForCaseNumber(caseNumber: st
     };
   }
 
-  const payload = [buildSettlementCasePayload(targetCaseNumber, parsed)];
+  const payload = [
+    {
+      ...buildSettlementCasePayload(targetCaseNumber, parsed),
+      trackerEntryId: options?.trackerEntryId,
+      docketflowCaseId: options?.docketflowCaseId,
+    },
+  ];
   const result = await syncSettlementsFromSheet(payload);
   return {
     ...result,

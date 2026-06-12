@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
 import { syncSettlementsFromGoogleSheetForCaseNumber } from "@/lib/google/settlements-sync";
-import { getCaseById } from "@/lib/supabase/services";
+import { getCaseById, isOrphanTrackerRecord } from "@/lib/supabase/services";
 
 export async function POST(_request: Request, { params }: { params: Promise<{ caseId: string }> }) {
   try {
@@ -14,7 +14,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ca
       return NextResponse.json({ error: "Case not found." }, { status: 404 });
     }
 
-    const result = await syncSettlementsFromGoogleSheetForCaseNumber(record.shared.caseNumber);
+    const result = await syncSettlementsFromGoogleSheetForCaseNumber(record.shared.caseNumber, {
+      trackerEntryId: record.tracker.id,
+      docketflowCaseId: isOrphanTrackerRecord(record) ? undefined : record.shared.id,
+    });
     if (result.sheetRowsFound === 0) {
       return NextResponse.json(
         {
