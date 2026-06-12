@@ -1,3 +1,4 @@
+import { getAggregatedResultFromDisbursements } from "@/lib/disbursements";
 import { deriveResultFeePercent } from "@/lib/fee-percent";
 import {
   type CaseStage,
@@ -9,6 +10,7 @@ import {
   type ReductionsStatus,
   type ReleaseStatus,
   type SettlementResult,
+  type TrackerEntry,
 } from "@/lib/types";
 import { getCalculatedAttorneyFees } from "@/lib/utils";
 
@@ -174,9 +176,41 @@ export function applyDerivedResultFields<
 
 export function applyDerivedSettlementResult<
   TResult extends SettlementResult,
-  TTracker extends { caseStage: CaseStage; expectedLitigation: ExpectedLitigationStatus | null; referralFee: number | null },
+  TTracker extends {
+    caseStage: CaseStage;
+    expectedLitigation: ExpectedLitigationStatus | null;
+    referralFee: number | null;
+    disbursements?: TrackerEntry["disbursements"];
+    multipleDisbursementsEnabled?: boolean;
+    expectedDisbursementCount?: number;
+  },
 >(result: TResult, tracker: TTracker): TResult {
   const withWorkflow = applyDerivedResultFields(result);
+  const aggregated =
+    tracker.disbursements && tracker.disbursements.length > 0
+      ? getAggregatedResultFromDisbursements({
+          disbursements: tracker.disbursements,
+          multipleDisbursementsEnabled: tracker.multipleDisbursementsEnabled ?? false,
+          expectedDisbursementCount: tracker.expectedDisbursementCount ?? 1,
+          result: withWorkflow,
+        })
+      : null;
+
+  if (aggregated) {
+    return applyDerivedResultFields({
+      ...withWorkflow,
+      settlementAmount: aggregated.settlementAmount ?? withWorkflow.settlementAmount,
+      attorneyFees: aggregated.attorneyFees ?? withWorkflow.attorneyFees,
+      feePercent: aggregated.feePercent ?? withWorkflow.feePercent,
+      settlementDate: aggregated.settlementDate,
+      disburseDate: aggregated.disburseDate,
+      disbursedStatus: aggregated.disbursedStatus,
+      checkDisbursedAt: aggregated.checkDisbursedAt,
+      resultQuarter: aggregated.resultQuarter,
+      reductionsStatus: aggregated.reductionsStatus,
+    });
+  }
+
   const feePercent = deriveResultFeePercent(tracker);
   return {
     ...withWorkflow,

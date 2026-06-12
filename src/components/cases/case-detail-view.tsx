@@ -905,11 +905,8 @@ export function CaseDetailView({
               <>
                 <Info label="Settlement Date" value={formatDate(tracker.result.settlementDate)} />
                 <Info label="Settlement Amount" value={formatCurrency(tracker.result.settlementAmount)} />
-                <Info label="Fee Percent" value={`${Math.round(deriveResultFeePercent(tracker) * 100)}%`} />
-                <Info
-                  label="RJL Attorney Fees"
-                  value={formatCurrency(getCalculatedAttorneyFees(tracker.result.settlementAmount, tracker.result.feePercent))}
-                />
+                <Info label="Fee Percent" value={`${Math.round((tracker.result.feePercent ?? 0) * 100)}%`} />
+                <Info label="RJL Attorney Fees" value={formatCurrency(tracker.result.attorneyFees)} />
                 <Info label="Release" value={tracker.result.releaseStatus} />
                 <Info label="Closing" value={tracker.result.closingStatus} />
                 <Info label="Check" value={tracker.result.checkStatus} />
@@ -933,12 +930,12 @@ export function CaseDetailView({
                 <Field label="Fee Percent">
                   <FormattedNumberInput
                     suffix="%"
-                    value={Math.round(deriveResultFeePercent(tracker) * 100)}
+                    value={Math.round((tracker.result.feePercent ?? 0) * 100)}
                     readOnly
                   />
                 </Field>
                 <Field label="RJL Attorney Fees">
-                  <FormattedNumberInput prefix="$" value={getCalculatedAttorneyFees(tracker.result.settlementAmount, tracker.result.feePercent)} readOnly />
+                  <FormattedNumberInput prefix="$" value={tracker.result.attorneyFees} readOnly />
                 </Field>
                 <Field label="Release">
                   <Select value={tracker.result.releaseStatus} onChange={(event) => updateResultWorkflow("releaseStatus", event.target.value as ReleaseStatus)}>

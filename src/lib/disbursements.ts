@@ -4,7 +4,7 @@ import {
   getRecordDisburseDate,
   isDateInCommissionYear,
 } from "@/lib/commission-year";
-import { type CaseDisbursement, type CaseRecord, type TrackerEntry } from "@/lib/types";
+import { type CaseDisbursement, type CaseRecord, type DisbursedStatus, type ReductionsStatus, type TrackerEntry } from "@/lib/types";
 
 export function disbursementWeight(expectedCount: number) {
   const count = Math.max(1, Math.trunc(expectedCount));
@@ -46,6 +46,108 @@ export function hasMultipleDisbursements(tracker: Pick<TrackerEntry, "multipleDi
     tracker.disbursements.length > 1 ||
     getExpectedDisbursementCount(tracker) > 1
   );
+}
+
+function sumDefinedAmounts(values: Array<number | null | undefined>) {
+  let total = 0;
+  let seen = false;
+  for (const value of values) {
+    if (value == null) continue;
+    total += value;
+    seen = true;
+  }
+  return seen ? total : null;
+}
+
+/** When multiple sheet-synced parties exist, roll their amounts up into case-level results. */
+export function shouldAggregateResultsFromDisbursements(
+  tracker: Pick<TrackerEntry, "multipleDisbursementsEnabled" | "disbursements" | "expectedDisbursementCount">,
+) {
+  return hasMultipleDisbursements(tracker) && tracker.disbursements.length > 0;
+}
+
+function deriveResultQuarterFromDisburseDate(disburseDate: string | null) {
+  if (!disburseDate?.trim()) return null;
+  const parsed = new Date(disburseDate);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const quarter = Math.floor(parsed.getMonth() / 3) + 1;
+  return `${parsed.getFullYear()} Q${quarter}`;
+}
+
+export function areAllDisbursementPartiesOnSheet(
+  tracker: Pick<TrackerEntry, "disbursements" | "expectedDisbursementCount">,
+) {
+  return tracker.disbursements.length >= getExpectedDisbursementCount(tracker);
+}
+
+export function areAllDisbursementPartiesSettled(
+  tracker: Pick<TrackerEntry, "disbursements" | "expectedDisbursementCount">,
+) {
+  if (!areAllDisbursementPartiesOnSheet(tracker)) return false;
+  return tracker.disbursements.every((item) => Boolean(item.settlementDate));
+}
+
+export function areAllDisbursementPartiesDisbursed(
+  tracker: Pick<TrackerEntry, "disbursements" | "expectedDisbursementCount">,
+) {
+  if (!areAllDisbursementPartiesOnSheet(tracker)) return false;
+  return tracker.disbursements.every((item) => Boolean(item.disburseDate) && !item.pendingRemaining);
+}
+
+export function getAggregatedResultFromDisbursements(
+  tracker: Pick<TrackerEntry, "multipleDisbursementsEnabled" | "disbursements" | "expectedDisbursementCount" | "result">,
+) {
+  if (!shouldAggregateResultsFromDisbursements(tracker)) return null;
+
+  const record = { tracker } as Pick<CaseRecord, "tracker">;
+  const settlementAmount = sumDefinedAmounts(
+    tracker.disbursements.map((item) =>
+      item.settlementAmount != null ? item.settlementAmount : getDisbursementSettlementAmount(item, record),
+    ),
+  );
+  const attorneyFees = sumDefinedAmounts(
+    tracker.disbursements.map((item) =>
+      item.attorneyFees != null ? item.attorneyFees : getDisbursementAttorneyFees(item, record),
+    ),
+  );
+
+  if (settlementAmount == null && attorneyFees == null) return null;
+
+  const feePercent =
+    settlementAmount != null && attorneyFees != null && settlementAmount > 0 ? attorneyFees / settlementAmount : null;
+
+  const allSettled = areAllDisbursementPartiesSettled(tracker);
+  const allDisbursed = areAllDisbursementPartiesDisbursed(tracker);
+
+  const settlementDates = tracker.disbursements.map((item) => item.settlementDate).filter(Boolean) as string[];
+  const settlementDate = allSettled && settlementDates.length
+    ? settlementDates.sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0]
+    : null;
+
+  const disburseDates = getCompletedDisbursements(tracker)
+    .map((item) => item.disburseDate)
+    .filter(Boolean) as string[];
+  const disburseDate =
+    allDisbursed && disburseDates.length
+      ? disburseDates.sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0]
+      : null;
+
+  const disbursedStatus: DisbursedStatus = allDisbursed ? "Yes" : "No";
+  const checkDisbursedAt = allDisbursed && disburseDate ? new Date(disburseDate).toISOString() : null;
+  const resultQuarter = disburseDate ? deriveResultQuarterFromDisburseDate(disburseDate) : null;
+  const reductionsStatus: ReductionsStatus = allDisbursed ? "Deposited" : "Not Complete";
+
+  return {
+    settlementAmount,
+    attorneyFees,
+    feePercent,
+    settlementDate,
+    disburseDate,
+    disbursedStatus,
+    checkDisbursedAt,
+    resultQuarter,
+    reductionsStatus,
+  };
 }
 
 export function getDisbursementSyncStatus(tracker: Pick<TrackerEntry, "disbursements" | "expectedDisbursementCount">) {
@@ -182,8 +284,7 @@ export function getWeightedSettlementInCommissionQuarter(
 }
 
 export function isRecordFullyDisbursed(tracker: Pick<TrackerEntry, "disbursements" | "expectedDisbursementCount">) {
-  if (tracker.disbursements.length === 0) return false;
-  return getPendingDisbursements(tracker).length === 0;
+  return areAllDisbursementPartiesDisbursed(tracker);
 }
 
 /** Attorney visibility when a case can have multiple partial disbursements. */

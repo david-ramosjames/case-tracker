@@ -34,7 +34,6 @@ import {
   type ReleaseStatus,
   type SettlementResult,
 } from "@/lib/types";
-import { deriveResultFeePercent } from "@/lib/calculations";
 import { formatCurrency, getCalculatedAttorneyFees } from "@/lib/utils";
 import { useEffect, useMemo, useState } from "react";
 
@@ -352,9 +351,9 @@ export function ResultsTable({
                       <InlineNumberInput prefix="$" value={result.settlementAmount} onCommit={(value) => updateResult(record.shared.id, (current) => ({ ...current, settlementAmount: value }))} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {Math.round(deriveResultFeePercent(record.tracker) * 100)}%
+                      {Math.round((result.feePercent ?? 0) * 100)}%
                     </TableCell>
-                    <TableCell>{formatCurrency(getCalculatedAttorneyFees(result.settlementAmount, result.feePercent))}</TableCell>
+                    <TableCell>{formatCurrency(result.attorneyFees)}</TableCell>
                     <TableCell>
                       <InlineSelect value={result.releaseStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "releaseStatus", value as ReleaseStatus)}>
                         {RELEASE_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}

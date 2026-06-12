@@ -794,17 +794,30 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
 
     const settlementDate = item.settlementDate ? toDateOnly(item.settlementDate) : null;
     const disburseDate = item.latestDisburseDate ? toDateOnly(item.latestDisburseDate) : null;
+    const allPartiesSettled = item.disbursements.every((row) => Boolean(row.settlementDate));
+    const allPartiesDisbursed =
+      item.disbursements.length >= totalSlots &&
+      item.disbursements.every((row) => Boolean(row.disburseDate) && !row.pendingRemaining);
+    const totalSettlementAmount = item.totalSettlementAmount ?? toNumber(existingResult?.settlement_amount);
+    const totalAttorneyFees = item.totalAttorneyFees ?? toNumber(existingResult?.attorney_fees);
+    const feePercent =
+      totalSettlementAmount != null && totalAttorneyFees != null && totalSettlementAmount > 0
+        ? totalAttorneyFees / totalSettlementAmount
+        : toNumber(existingResult?.fee_percent);
+    const resolvedSettlementDate = allPartiesSettled && settlementDate ? settlementDate : null;
+    const resolvedDisburseDate = allPartiesDisbursed && disburseDate ? disburseDate : null;
     const resultPayload = {
       case_id: isUuid(caseId) ? caseId : null,
       tracker_entry_id: trackerEntryId,
-      settlement_date: settlementDate ?? existingResult?.settlement_date ?? null,
-      settlement_amount: item.totalSettlementAmount ?? existingResult?.settlement_amount ?? null,
-      attorney_fees: item.totalAttorneyFees ?? existingResult?.attorney_fees ?? null,
-      disburse_date: disburseDate,
-      check_disbursed_at: disburseDate ? new Date(disburseDate).toISOString() : existingResult?.check_disbursed_at ?? null,
-      disbursed_status: item.allDisbursed ? "Yes" : disburseDate ? existingResult?.disbursed_status ?? "No" : "No",
-      result_quarter: disburseDate ? deriveResultQuarterFromDisburseDate(disburseDate) : existingResult?.result_quarter ?? null,
-      reductions_status: disburseDate ? "Deposited" : existingResult?.reductions_status ?? "Not Complete",
+      settlement_date: resolvedSettlementDate,
+      settlement_amount: totalSettlementAmount,
+      attorney_fees: totalAttorneyFees,
+      fee_percent: feePercent,
+      disburse_date: resolvedDisburseDate,
+      check_disbursed_at: resolvedDisburseDate ? new Date(resolvedDisburseDate).toISOString() : null,
+      disbursed_status: allPartiesDisbursed ? "Yes" : "No",
+      result_quarter: resolvedDisburseDate ? deriveResultQuarterFromDisburseDate(resolvedDisburseDate) : null,
+      reductions_status: allPartiesDisbursed ? "Deposited" : "Not Complete",
     };
 
     if (existingResult) {
@@ -1400,7 +1413,12 @@ function rowToTrackerEntry(
     actualFeeValue: toNumber(resultRow?.attorney_fees),
     updatedAt: toString(row.updated_at, new Date().toISOString()),
   };
-  return { ...entry, result: applyDerivedSettlementResult(entry.result, entry) };
+  const result = applyDerivedSettlementResult(entry.result, entry);
+  return {
+    ...entry,
+    result,
+    actualFeeValue: result.attorneyFees ?? entry.actualFeeValue,
+  };
 }
 
 function rowToResult(row: ResultRow | null): SettlementResult {

@@ -139,7 +139,7 @@ export function DisbursementPartiesCard({
                         <dd>{formatCurrency(getDisbursementSettlementAmount(item, record))}</dd>
                       </div>
                       <div>
-                        <dt className="text-muted-foreground">Attorney fees</dt>
+                        <dt className="text-muted-foreground">RJL Attorney Fees</dt>
                         <dd>{formatCurrency(getDisbursementAttorneyFees(item, record))}</dd>
                       </div>
                       <div>
