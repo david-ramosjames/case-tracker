@@ -1,5 +1,5 @@
 import { cleanCaseNumber } from "@/lib/csv/parse";
-import { normalizePulseChannelRef } from "@/lib/slack/pulse";
+import { caseNumberFromPulseChannelRef, normalizePulseChannelRef } from "@/lib/slack/pulse";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { type CaseSlackChannel } from "@/lib/types";
 import { daysSince } from "@/lib/utils";
@@ -17,6 +17,7 @@ export async function loadPulseChannelContext() {
   if (!admin) {
     return {
       matchByChannelRef: new Map<string, PulseChannelMatch>(),
+      matchByCaseNumber: new Map<string, PulseChannelMatch>(),
       channelIdToName: new Map<string, string>(),
     };
   }
@@ -48,6 +49,7 @@ export async function loadPulseChannelContext() {
   }
 
   const matchByChannelRef = new Map<string, PulseChannelMatch>();
+  const matchByCaseNumber = new Map<string, PulseChannelMatch>();
   const channelIdToName = new Map<string, string>();
 
   for (const row of channels ?? []) {
@@ -60,19 +62,27 @@ export async function loadPulseChannelContext() {
     if (!tracker) continue;
 
     const slackChannelId = (row.slack_channel_id as string | null) ?? null;
-    matchByChannelRef.set(normalized, {
+    const match: PulseChannelMatch = {
       caseId: tracker.caseId,
       caseNumber: tracker.caseNumber,
       slackChannelId,
       slackChannelName: channelName,
-    });
+    };
+
+    matchByChannelRef.set(normalized, match);
+    matchByCaseNumber.set(caseNumber, match);
+
+    const caseNumberFromChannel = caseNumberFromPulseChannelRef(channelName);
+    if (caseNumberFromChannel) {
+      matchByCaseNumber.set(caseNumberFromChannel, match);
+    }
 
     if (slackChannelId) {
       channelIdToName.set(slackChannelId, normalized);
     }
   }
 
-  return { matchByChannelRef, channelIdToName };
+  return { matchByChannelRef, matchByCaseNumber, channelIdToName };
 }
 
 function trackerCaseId(row: { case_id: string | null; id?: string | null }) {

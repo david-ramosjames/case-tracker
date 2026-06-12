@@ -36,7 +36,7 @@ import {
   type TrackerEntry,
 } from "@/lib/types";
 import { cn, formatDate, formatOptionalDate } from "@/lib/utils";
-import { compareCaseNumbers } from "@/lib/csv/parse";
+import { cleanCaseNumber, compareCaseNumbers } from "@/lib/csv/parse";
 import { type ReactNode, type RefObject, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type SortKey = "completion" | "attorneyScore" | "caseNumber" | "clientName" | "dateSigned" | "dol" | "minimumValue" | "policyLimits";
@@ -48,16 +48,18 @@ export function CaseTable({
   settings,
   goals,
   viewer,
+  initialSearch = "",
 }: {
   records: CaseRecord[];
   users: AppUser[];
   settings: CaseTrackerSettings;
   goals: AttorneyGoal[];
   viewer: ViewerContext;
+  initialSearch?: string;
 }) {
   const [workingRecords, setWorkingRecords] = useState(records);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(initialSearch);
   const [attorney, setAttorney] = useState("all");
   const [paralegal, setParalegal] = useState("all");
   const [stage, setStage] = useState("all");
@@ -106,13 +108,22 @@ export function CaseTable({
     expectedLitigation !== "all",
   ].filter(Boolean).length;
 
+  useEffect(() => {
+    if (initialSearch) setSearch(initialSearch);
+  }, [initialSearch]);
+
   const filteredRecords = useMemo(() => {
-    const normalizedSearch = search.toLowerCase();
+    const normalizedSearch = search.trim().toLowerCase().replace(/^#/, "");
+    const searchCaseNumber = normalizedSearch ? cleanCaseNumber(normalizedSearch) : "";
 
     return workingRecords
       .filter((record) => {
+        const recordCaseNumber = cleanCaseNumber(record.shared.caseNumber);
         const matchesSearch =
+          !normalizedSearch ||
           record.shared.caseNumber.toLowerCase().includes(normalizedSearch) ||
+          recordCaseNumber.includes(searchCaseNumber) ||
+          (searchCaseNumber && recordCaseNumber === searchCaseNumber) ||
           record.shared.clientName.toLowerCase().includes(normalizedSearch) ||
           record.attorney.name.toLowerCase().includes(normalizedSearch);
 

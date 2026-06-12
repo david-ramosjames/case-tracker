@@ -149,6 +149,13 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
         return `${summary} Scanned ${scanned} message(s) in the last ${lookback}h but none matched the Pulse recap format.`;
       }
     }
+    const skipReasons = result.skipReasons as Record<string, number> | undefined;
+    if (skipReasons && Object.keys(skipReasons).length > 0) {
+      const detail = Object.entries(skipReasons)
+        .map(([reason, count]) => `${reason.replace(/^skipped_/, "")} ${count}`)
+        .join(", ");
+      return `${summary} Skipped: ${detail}.`;
+    }
     return summary;
   }
 

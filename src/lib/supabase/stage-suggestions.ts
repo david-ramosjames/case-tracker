@@ -114,6 +114,24 @@ export async function findStageSuggestionByConfirmationThread(threadTs: string) 
   return rowToSuggestion(data as SuggestionRow);
 }
 
+export async function findPulseLineSuggestion(caseId: string, pulseMessageTs: string, channelRef: string) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return null;
+
+  const normalizedRef = normalizePulseChannelRef(channelRef);
+  const { data, error } = await admin
+    .from("case_tracker_stage_suggestions")
+    .select("*")
+    .eq("case_id", caseId)
+    .contains("metadata", { pulse_message_ts: pulseMessageTs, channel_ref: normalizedRef })
+    .order("detected_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  return rowToSuggestion(data as SuggestionRow);
+}
+
 export async function wasPulseItemHandled(caseId: string, pulseMessageTs: string, suggestedStage: CaseStage) {
   const admin = createSupabaseAdminClient();
   if (!admin) return false;

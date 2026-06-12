@@ -1,4 +1,5 @@
-import { normalizePulseStageLabel } from "@/lib/stage-triggers";
+import { cleanCaseNumber } from "@/lib/csv/parse";
+import { parsePulseStageLabel } from "@/lib/stage-triggers";
 import { type CaseStage, type ConfidenceLevel } from "@/lib/types";
 
 export type ParsedPulseItem = {
@@ -17,7 +18,17 @@ const PULSE_ARROW = /(?:→|->|➜|➔|—>)/;
 const DEFAULT_IGNORED_PULSE_CHANNELS = new Set(["lead-calls", "daily-pulse"]);
 
 export function normalizePulseChannelRef(channelRef: string) {
-  return channelRef.trim().toLowerCase().replace(/^#/, "");
+  return channelRef.trim().toLowerCase().replace(/^#/, "").replace(/^<|>$/g, "");
+}
+
+/** Case number suffix from pulse channel refs like `nicolasmacdonald-1208`. */
+export function caseNumberFromPulseChannelRef(channelRef: string) {
+  const normalized = normalizePulseChannelRef(channelRef);
+  if (!normalized) return null;
+  const hyphenSuffix = normalized.match(/-(\d+)$/);
+  if (hyphenSuffix) return cleanCaseNumber(hyphenSuffix[1]);
+  if (/^\d+$/.test(normalized)) return cleanCaseNumber(normalized);
+  return null;
 }
 
 function getIgnoredPulseChannelRefs() {
@@ -95,17 +106,29 @@ function parseExcerptFromLine(line: string) {
   return null;
 }
 
-function parsePulseItemLine(line: string) {
+function parsePulseItemLine(line: string, nextLine?: string) {
   const normalized = stripPulseLinePrefix(line);
-  const arrowPattern = new RegExp(`^#?([\\w.-]+)\\s*${PULSE_ARROW.source}\\s*(.+)$`, "i");
+  const arrowPattern = new RegExp(`^#?([\\w<>.|@-]+)\\s*${PULSE_ARROW.source}\\s*(.*)$`, "i");
   const headerMatch = normalized.match(arrowPattern);
   if (!headerMatch) return null;
 
-  const channelRef = headerMatch[1].replace(/^#/, "").trim();
+  const channelRef = headerMatch[1].replace(/^#/, "").replace(/^<|>$/g, "").trim();
   if (isIgnoredPulseChannelRef(channelRef)) return null;
 
   const inline = parseConfidenceAndReason(headerMatch[2]);
-  return { channelRef, inline };
+  let consumedNextLine = false;
+
+  if (!inline.remainder.trim() && nextLine) {
+    const continuation = parseConfidenceAndReason(stripPulseLinePrefix(nextLine));
+    if (continuation.remainder.trim()) {
+      inline.remainder = continuation.remainder;
+      inline.confidence = inline.confidence ?? continuation.confidence;
+      inline.reason = inline.reason || continuation.reason;
+      consumedNextLine = true;
+    }
+  }
+
+  return { channelRef, inline, consumedNextLine };
 }
 
 function extractPulseItemsFromLines(lines: string[]) {
@@ -113,45 +136,52 @@ function extractPulseItemsFromLines(lines: string[]) {
   let index = 0;
 
   while (index < lines.length) {
-    const parsedLine = parsePulseItemLine(lines[index]);
+    const parsedLine = parsePulseItemLine(lines[index], lines[index + 1]);
     if (!parsedLine) {
       index += 1;
       continue;
     }
 
-    const { channelRef, inline } = parsedLine;
+    const { channelRef, inline, consumedNextLine } = parsedLine;
+    const suggestedStage = parsePulseStageLabel(inline.remainder);
+    if (!suggestedStage) {
+      index += consumedNextLine ? 2 : 1;
+      continue;
+    }
+
     let confidence: ConfidenceLevel = inline.confidence ?? "Medium";
     let reason = inline.reason;
     let excerpt = "";
+    let lineOffset = consumedNextLine ? 1 : 0;
 
-    if (!inline.confidence) {
+    if (!inline.confidence && !consumedNextLine) {
       const nextLine = stripPulseLinePrefix(lines[index + 1] ?? "");
       const confidenceMatch = nextLine.match(/\((\w+)\s+confidence\)/i);
       if (confidenceMatch) {
         confidence = parseConfidenceLevel(confidenceMatch[1]);
         const reasonMatch = nextLine.match(/\(\*([^*]+)\*\)/) ?? nextLine.match(/\(([^)]+)\)/);
         if (reasonMatch) reason = reasonMatch[1].trim();
-        index += 1;
+        lineOffset += 1;
       }
     }
 
-    const excerptLine = stripPulseLinePrefix(lines[index + 1] ?? "");
+    const excerptLine = stripPulseLinePrefix(lines[index + lineOffset + 1] ?? "");
     const parsedExcerpt = parseExcerptFromLine(excerptLine);
     if (parsedExcerpt) {
       excerpt = parsedExcerpt;
-      index += 1;
+      lineOffset += 1;
     }
 
     if (!excerpt && reason) excerpt = reason;
 
     items.push({
       channelRef,
-      suggestedStage: normalizePulseStageLabel(inline.remainder),
+      suggestedStage,
       confidence,
       reason,
       excerpt,
     });
-    index += 1;
+    index += lineOffset + 1;
   }
 
   return items;

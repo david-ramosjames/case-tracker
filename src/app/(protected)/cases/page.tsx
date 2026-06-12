@@ -4,7 +4,12 @@ import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 
 export const dynamic = "force-dynamic";
 
-export default async function CasesPage() {
+export default async function CasesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
+  const { q } = await searchParams;
   const { records, users, settings, goals, viewer } = await loadViewerCaseBundle();
 
   return (
@@ -18,7 +23,14 @@ export default async function CasesPage() {
             : "Sort and filter shared case records with tracker-specific forecasts, review freshness, missing info flags, and quick access to case detail."
         }
       />
-      <CaseTable records={records} users={users} settings={settings} goals={goals} viewer={viewer} />
+      <CaseTable
+        records={records}
+        users={users}
+        settings={settings}
+        goals={goals}
+        viewer={viewer}
+        initialSearch={q?.trim() ?? ""}
+      />
     </>
   );
 }

@@ -17,8 +17,18 @@ export function deriveExpectedLitigationForStage(stage: CaseStage): ExpectedLiti
   return "Pre";
 }
 
-export function normalizePulseStageLabel(raw: string): CaseStage {
-  const normalized = raw.trim().toLowerCase();
+function stripSlackMarkdown(text: string) {
+  return text
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/_([^_]+)_/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
+}
+
+/** Parse a stage label from daily-pulse text — returns null when unrecognized. */
+export function parsePulseStageLabel(raw: string): CaseStage | null {
+  const normalized = stripSlackMarkdown(raw).toLowerCase();
+  if (!normalized) return null;
   if (normalized.includes("disengaged")) return "Disengaged";
   if (normalized.includes("terminated")) return "Terminated";
   if (normalized.includes("referred")) return "Referred";
@@ -27,7 +37,12 @@ export function normalizePulseStageLabel(raw: string): CaseStage {
   if (normalized.includes("demand") || normalized === "dmd") return "Dmd";
   if (normalized.includes("treatment") || normalized === "txt") return "Txt";
   if (normalized.includes("onboarding") || normalized.includes("intake")) return "Onboarding";
-  return "Onboarding";
+  return null;
+}
+
+/** Lenient stage label parsing for Slack thread replies. */
+export function normalizePulseStageLabel(raw: string): CaseStage {
+  return parsePulseStageLabel(raw) ?? "Onboarding";
 }
 
 export function shouldSkipPulseSuggestion(record: CaseRecord, suggestedStage: CaseStage) {

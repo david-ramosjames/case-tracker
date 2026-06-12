@@ -1,8 +1,8 @@
-import { Bell, LogOut, Search } from "lucide-react";
+import { Bell, LogOut } from "lucide-react";
+import { GlobalCaseSearch } from "@/components/layout/global-case-search";
 import { AppMobileNav, AppTopNav } from "@/components/layout/app-top-nav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { type SessionUser } from "@/lib/auth/types";
 
 export function AppShell({ children, sessionUser }: { children: React.ReactNode; sessionUser: SessionUser }) {
@@ -14,10 +14,7 @@ export function AppShell({ children, sessionUser }: { children: React.ReactNode;
             <AppTopNav sessionUser={sessionUser} />
           </div>
           <div className="ml-auto hidden items-center gap-2 xl:flex">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input className="w-72 pl-9" placeholder="Search cases, clients, attorneys..." />
-            </div>
+            <GlobalCaseSearch />
             <Button variant="ghost" size="icon" aria-label="Notifications">
               <Bell className="h-4 w-4" />
             </Button>
