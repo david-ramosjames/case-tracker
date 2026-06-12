@@ -213,6 +213,8 @@ export type AttorneyGoal = {
   annualFeeGoal: number;
   commissionThreshold: number;
   commissionYearStartMonth: number;
+  commissionMonthCount: number;
+  monthlyGoals: Record<string, number>;
   q1Goal: number;
   q2Goal: number;
   q3Goal: number;

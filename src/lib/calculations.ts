@@ -3,7 +3,7 @@ import { getAttorneyCommissionStartMonth } from "@/lib/auth/access";
 import {
   formatCommissionQuarterPeriod,
   getCommissionQuarterForDate,
-  getCommissionYearEndDate,
+  getCommissionPeriodEndDate,
   getCommissionYearQuarterWindows,
   getCommissionYearStartDate,
   getCurrentCommissionYear,
@@ -171,8 +171,9 @@ function isRecordInGoalCommissionYear(record: CaseRecord, goal: AttorneyGoal) {
 }
 
 function getCommissionYearElapsedPercentage(goal: AttorneyGoal, refDate = new Date()) {
+  const monthCount = goal.commissionMonthCount ?? 12;
   const start = getCommissionYearStartDate(goal.year, goal.commissionYearStartMonth);
-  const end = getCommissionYearEndDate(goal.year, goal.commissionYearStartMonth);
+  const end = getCommissionPeriodEndDate(goal.year, goal.commissionYearStartMonth, monthCount);
   if (refDate <= start) return 0;
   if (refDate >= end) return 100;
   const total = end.getTime() - start.getTime();
@@ -294,7 +295,8 @@ export function getAttorneyCommissionQuarterRows(
   goal: AttorneyGoal,
   mode: "gross" | "fees",
 ): CommissionQuarterPerformanceRow[] {
-  const windows = getCommissionYearQuarterWindows(goal.year, goal.commissionYearStartMonth);
+  const monthCount = goal.commissionMonthCount ?? 12;
+  const windows = getCommissionYearQuarterWindows(goal.year, goal.commissionYearStartMonth, monthCount);
   const quarterTargets = [goal.q1Goal, goal.q2Goal, goal.q3Goal, goal.q4Goal];
   const attorneyRecords = records.filter(
     (record) => record.shared.attorneyId === goal.attorneyId && isRecordInGoalCommissionYear(record, goal),
@@ -305,13 +307,16 @@ export function getAttorneyCommissionQuarterRows(
       if (!record.tracker.isActive || !record.tracker.targetResolutionQuarter) return false;
       const anchor = calendarQuarterAnchorDate(record.tracker.targetResolutionQuarter);
       if (!anchor) return false;
-      return getCommissionQuarterForDate(anchor, goal.year, goal.commissionYearStartMonth) === window.quarter;
+      return getCommissionQuarterForDate(anchor, goal.year, goal.commissionYearStartMonth, monthCount) === window.quarter;
     });
 
     const plan =
       mode === "gross"
         ? sum(planRecords.map((record) => record.tracker.minimumValue))
         : sum(planRecords.map((record) => getProjectedFeeValue(record)));
+    const getQuarterForDate = (dateValue: string, year: number, month: number) =>
+      getCommissionQuarterForDate(dateValue, year, month, monthCount);
+
     const actual =
       mode === "gross"
         ? sum(
@@ -321,7 +326,7 @@ export function getAttorneyCommissionQuarterRows(
                 goal.year,
                 goal.commissionYearStartMonth,
                 window.quarter,
-                getCommissionQuarterForDate,
+                getQuarterForDate,
               ),
             ),
           )
@@ -332,14 +337,19 @@ export function getAttorneyCommissionQuarterRows(
                 goal.year,
                 goal.commissionYearStartMonth,
                 window.quarter,
-                getCommissionQuarterForDate,
+                getQuarterForDate,
               ),
             ),
           );
 
     return {
       label: `CY Q${window.quarter}` as const,
-      period: formatCommissionQuarterPeriod(goal.year, goal.commissionYearStartMonth, window.quarter as CommissionYearQuarter),
+      period: formatCommissionQuarterPeriod(
+        goal.year,
+        goal.commissionYearStartMonth,
+        window.quarter as CommissionYearQuarter,
+        monthCount,
+      ),
       target: quarterTargets[window.quarter - 1] ?? 0,
       plan,
       actual,
@@ -450,9 +460,9 @@ function calendarQuartersForYear(calendarYear: number) {
   return ([1, 2, 3, 4] as const).map((quarter) => toCalendarQuarterLabel(calendarYear, quarter));
 }
 
-function calendarQuartersInCommissionYear(commissionYear: number, startMonth: number) {
+function calendarQuartersInCommissionYear(commissionYear: number, startMonth: number, monthCount = 12) {
   const start = getCommissionYearStartDate(commissionYear, startMonth);
-  const end = getCommissionYearEndDate(commissionYear, startMonth);
+  const end = getCommissionPeriodEndDate(commissionYear, startMonth, monthCount);
   const labels = new Set<string>();
   const cursor = new Date(start.getFullYear(), start.getMonth(), 1);
   const endCursor = new Date(end.getFullYear(), end.getMonth(), 1);
@@ -470,7 +480,11 @@ function calendarQuartersInCommissionYear(commissionYear: number, startMonth: nu
 export function getOutputQuarterLabels(goals: AttorneyGoal[], refDate = new Date()) {
   const labels = new Set(calendarQuartersForYear(refDate.getFullYear()));
   for (const goal of goals) {
-    for (const quarter of calendarQuartersInCommissionYear(goal.year, goal.commissionYearStartMonth)) {
+    for (const quarter of calendarQuartersInCommissionYear(
+      goal.year,
+      goal.commissionYearStartMonth,
+      goal.commissionMonthCount ?? 12,
+    )) {
       labels.add(quarter);
     }
   }

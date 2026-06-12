@@ -1,27 +1,40 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Save, Trash2 } from "lucide-react";
+import {
+  deriveQuarterGoalsFromMonthly,
+  formatGoalPeriodLabel,
+  formatMonthKeyLabel,
+  getCommissionPeriodEndFromStart,
+  getCommissionPeriodFromEnd,
+  getCommissionQuarterSummaries,
+  inferCommissionMonthCount,
+  monthlyGoalInputFromResolved,
+  parseMonthlyGoalsInput,
+  resolveMonthlyGoals,
+  spreadEvenMonthlyGoals,
+} from "@/lib/attorney-goal-months";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getGoalYearOptions } from "@/lib/case-options";
-import { COMMISSION_YEAR_MONTH_OPTIONS } from "@/lib/commission-year";
+import { COMMISSION_PERIOD_MONTH_OPTIONS, COMMISSION_YEAR_MONTH_OPTIONS } from "@/lib/commission-year";
 import { type AppUser, type AttorneyGoal } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 
 type GoalDraft = {
   attorneyId: string;
   commissionThreshold: string;
-  commissionYearStartMonth: string;
-  q1Goal: string;
-  q2Goal: string;
-  q3Goal: string;
-  q4Goal: string;
+  endMonth: string;
+  endYear: string;
+  monthCount: string;
+  annualCommissionTotal: string;
+  monthKeys: string[];
+  monthlyValues: Record<string, string>;
 };
 
 function parseGoalAmount(value: string) {
@@ -29,8 +42,65 @@ function parseGoalAmount(value: string) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function sumQuarterGoals(values: Pick<GoalDraft, "q1Goal" | "q2Goal" | "q3Goal" | "q4Goal">) {
-  return parseGoalAmount(values.q1Goal) + parseGoalAmount(values.q2Goal) + parseGoalAmount(values.q3Goal) + parseGoalAmount(values.q4Goal);
+function sumDraftMonthlyGoals(draft: Pick<GoalDraft, "monthKeys" | "monthlyValues">) {
+  return draft.monthKeys.reduce((total, monthKey) => total + parseGoalAmount(draft.monthlyValues[monthKey] ?? ""), 0);
+}
+
+function getPeriodFromDraft(draft: GoalDraft) {
+  return getCommissionPeriodFromEnd(
+    Number(draft.endMonth || 12),
+    Number(draft.endYear || new Date().getFullYear()),
+    Number(draft.monthCount || 12),
+  );
+}
+
+function applyPeriodChange(draft: GoalDraft, patch: Partial<Pick<GoalDraft, "endMonth" | "endYear" | "monthCount">>) {
+  const nextDraft = { ...draft, ...patch };
+  const period = getPeriodFromDraft(nextDraft);
+  const monthlyValues = spreadEvenMonthlyGoals(parseGoalAmount(nextDraft.annualCommissionTotal), period.monthKeys);
+  return {
+    ...nextDraft,
+    monthKeys: period.monthKeys,
+    monthlyValues,
+  };
+}
+
+function buildDraftFromGoal(goal: AttorneyGoal): GoalDraft {
+  const monthCount = inferCommissionMonthCount(goal);
+  const startMonth = goal.commissionYearStartMonth ?? 1;
+  const { endYear, endMonth } = getCommissionPeriodEndFromStart(goal.year, startMonth, monthCount);
+  const resolved =
+    goal.monthlyGoals && Object.keys(goal.monthlyGoals).length > 0 ? goal.monthlyGoals : resolveMonthlyGoals(goal);
+  const period = getCommissionPeriodFromEnd(endMonth, endYear, monthCount);
+  const annualTotal = Object.values(resolved).reduce((sum, value) => sum + value, 0);
+
+  return {
+    attorneyId: goal.attorneyId,
+    commissionThreshold: String(goal.commissionThreshold),
+    endMonth: String(endMonth),
+    endYear: String(endYear),
+    monthCount: String(monthCount),
+    annualCommissionTotal: annualTotal > 0 ? String(annualTotal) : "",
+    monthKeys: period.monthKeys,
+    monthlyValues: monthlyGoalInputFromResolved(
+      Object.fromEntries(period.monthKeys.map((monthKey) => [monthKey, resolved[monthKey] ?? 0])),
+    ),
+  };
+}
+
+function createEmptyDraft(attorneyId: string, endYear: number): GoalDraft {
+  const endMonth = 12;
+  const period = getCommissionPeriodFromEnd(endMonth, endYear, 12);
+  return {
+    attorneyId,
+    commissionThreshold: "",
+    endMonth: String(endMonth),
+    endYear: String(endYear),
+    monthCount: "12",
+    annualCommissionTotal: "",
+    monthKeys: period.monthKeys,
+    monthlyValues: {},
+  };
 }
 
 export function AttorneyGoalsManager({
@@ -44,6 +114,7 @@ export function AttorneyGoalsManager({
 }) {
   const router = useRouter();
   const yearOptions = useMemo(() => getGoalYearOptions(), []);
+  const endYearOptions = useMemo(() => [...yearOptions, yearOptions[yearOptions.length - 1] + 1], [yearOptions]);
   const attorneys = useMemo(() => users.filter((user) => user.role === "attorney"), [users]);
 
   const [selectedYear, setSelectedYear] = useState(yearOptions[yearOptions.length - 1] ?? new Date().getFullYear());
@@ -52,60 +123,61 @@ export function AttorneyGoalsManager({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newAttorneyId, setNewAttorneyId] = useState(attorneys[0]?.id ?? "");
-  const [newGoals, setNewGoals] = useState({
-    commissionThreshold: "",
-    commissionYearStartMonth: "1",
-    q1Goal: "",
-    q2Goal: "",
-    q3Goal: "",
-    q4Goal: "",
-  });
+  const [newDraft, setNewDraft] = useState(() => createEmptyDraft(attorneys[0]?.id ?? "", selectedYear));
   const [drafts, setDrafts] = useState<Record<string, GoalDraft>>({});
 
   const goalsForYear = useMemo(() => goals.filter((goal) => goal.year === selectedYear), [goals, selectedYear]);
 
   function getDraft(goal: AttorneyGoal): GoalDraft {
-    return (
-      drafts[goal.id] ?? {
-        attorneyId: goal.attorneyId,
-        commissionThreshold: String(goal.commissionThreshold),
-        commissionYearStartMonth: String(goal.commissionYearStartMonth ?? 1),
-        q1Goal: String(goal.q1Goal || ""),
-        q2Goal: String(goal.q2Goal || ""),
-        q3Goal: String(goal.q3Goal || ""),
-        q4Goal: String(goal.q4Goal || ""),
-      }
-    );
+    return drafts[goal.id] ?? buildDraftFromGoal(goal);
   }
 
-  function updateDraft(goalId: string, patch: Partial<GoalDraft>) {
+  function updateDraft(goalId: string, patch: Partial<GoalDraft> | ((current: GoalDraft) => GoalDraft)) {
     const goal = goalsForYear.find((item) => item.id === goalId);
     if (!goal) return;
-    setDrafts((current) => ({
-      ...current,
-      [goalId]: { ...getDraft(goal), ...patch },
-    }));
+    setDrafts((current) => {
+      const existing = current[goalId] ?? buildDraftFromGoal(goal);
+      const next = typeof patch === "function" ? patch(existing) : { ...existing, ...patch };
+      return { ...current, [goalId]: next };
+    });
   }
 
-  async function saveGoal(attorneyId: string, attorneyName: string, values: GoalDraft) {
+  async function saveGoal(attorneyId: string, attorneyName: string, draft: GoalDraft) {
+    const period = getPeriodFromDraft(draft);
+    const monthlyGoals = parseMonthlyGoalsInput(
+      Object.fromEntries(period.monthKeys.map((monthKey) => [monthKey, draft.monthlyValues[monthKey] ?? ""])),
+    );
+    const derived = deriveQuarterGoalsFromMonthly(
+      monthlyGoals,
+      period.commissionYear,
+      period.startMonth,
+      period.monthCount,
+    );
+
     const response = await fetch("/api/goals", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         attorneyId,
         attorneyName,
-        year: selectedYear,
-        annualFeeGoal: sumQuarterGoals(values),
-        commissionThreshold: parseGoalAmount(values.commissionThreshold),
-        commissionYearStartMonth: Number(values.commissionYearStartMonth || 1),
-        q1Goal: parseGoalAmount(values.q1Goal),
-        q2Goal: parseGoalAmount(values.q2Goal),
-        q3Goal: parseGoalAmount(values.q3Goal),
-        q4Goal: parseGoalAmount(values.q4Goal),
+        year: period.commissionYear,
+        annualFeeGoal: derived.annualFeeGoal,
+        commissionThreshold: parseGoalAmount(draft.commissionThreshold),
+        commissionYearStartMonth: period.startMonth,
+        commissionMonthCount: period.monthCount,
+        monthlyGoals,
+        q1Goal: derived.q1Goal,
+        q2Goal: derived.q2Goal,
+        q3Goal: derived.q3Goal,
+        q4Goal: derived.q4Goal,
       }),
     });
     const body = (await response.json()) as { error?: string };
     if (!response.ok) throw new Error(body.error ?? "Unable to save goal.");
+
+    if (period.commissionYear !== selectedYear) {
+      setSelectedYear(period.commissionYear);
+    }
   }
 
   async function handleSaveExisting(goal: AttorneyGoal) {
@@ -129,11 +201,7 @@ export function AttorneyGoalsManager({
   async function handleDeleteGoal(goal: AttorneyGoal) {
     const attorney = attorneys.find((user) => user.id === goal.attorneyId);
     const attorneyLabel = attorney?.name ?? "this attorney";
-    if (
-      !window.confirm(
-        `Delete the ${selectedYear} goal for ${attorneyLabel}? This cannot be undone.`,
-      )
-    ) {
+    if (!window.confirm(`Delete the ${selectedYear} goal for ${attorneyLabel}? This cannot be undone.`)) {
       return;
     }
 
@@ -166,17 +234,9 @@ export function AttorneyGoalsManager({
     setIsSaving(true);
     setErrorMessage(null);
     try {
-      await saveGoal(attorney.id, attorney.name, {
-        attorneyId: attorney.id,
-        commissionThreshold: newGoals.commissionThreshold,
-        commissionYearStartMonth: newGoals.commissionYearStartMonth,
-        q1Goal: newGoals.q1Goal,
-        q2Goal: newGoals.q2Goal,
-        q3Goal: newGoals.q3Goal,
-        q4Goal: newGoals.q4Goal,
-      });
+      await saveGoal(attorney.id, attorney.name, { ...newDraft, attorneyId: attorney.id });
       setShowAddForm(false);
-      setNewGoals({ commissionThreshold: "", commissionYearStartMonth: "1", q1Goal: "", q2Goal: "", q3Goal: "", q4Goal: "" });
+      setNewDraft(createEmptyDraft(newAttorneyId, selectedYear));
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to add goal.");
@@ -192,12 +252,13 @@ export function AttorneyGoalsManager({
           <div>
             <CardTitle>Attorney Goals</CardTitle>
             <CardDescription>
-              Enter quarterly fee goals (Target, top-down) per commission year. Set each attorney&apos;s commission year start month — Plan (bottom-up) rolls up cases forecast to disburse in that year.
+              Pick when each attorney&apos;s commission year ends, set the period length (12 or 13 months), enter a total
+              commission goal to spread evenly, then tweak individual months if needed.
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex items-center gap-2 text-sm font-medium text-navy-950">
-              Year
+              Commission year
               <Select className="min-w-[6rem]" value={String(selectedYear)} onChange={(event) => setSelectedYear(Number(event.target.value))}>
                 {yearOptions.map((year) => (
                   <option key={year} value={year}>
@@ -222,147 +283,84 @@ export function AttorneyGoalsManager({
         {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
 
         {showAddForm ? (
-          <div className="rounded-lg border bg-muted/30 p-4">
-            <p className="mb-3 text-sm font-medium text-navy-950">New goal for {selectedYear}</p>
-            <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-6">
-              <label>
-                <span className="mb-1 block text-xs font-medium text-muted-foreground">Attorney</span>
-                <Select value={newAttorneyId} onChange={(event) => setNewAttorneyId(event.target.value)}>
-                  {attorneys.map((attorney) => (
-                    <option key={attorney.id} value={attorney.id}>
-                      {attorney.name}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <AnnualTotal label="Annual (sum)" amount={sumQuarterGoals(newGoals)} />
-              <label>
-                <span className="mb-1 block text-xs font-medium text-muted-foreground">Commission year starts</span>
-                <Select
-                  value={newGoals.commissionYearStartMonth}
-                  onChange={(event) => setNewGoals((c) => ({ ...c, commissionYearStartMonth: event.target.value }))}
-                >
-                  {COMMISSION_YEAR_MONTH_OPTIONS.map((month) => (
-                    <option key={month.value} value={month.value}>
-                      {month.label}
-                    </option>
-                  ))}
-                </Select>
-              </label>
-              <GoalInput
-                label="Commission Threshold"
-                value={newGoals.commissionThreshold}
-                onChange={(value) => setNewGoals((c) => ({ ...c, commissionThreshold: value }))}
-              />
-              <GoalInput label={`Q1 ${selectedYear}`} value={newGoals.q1Goal} onChange={(value) => setNewGoals((c) => ({ ...c, q1Goal: value }))} />
-              <GoalInput label={`Q2 ${selectedYear}`} value={newGoals.q2Goal} onChange={(value) => setNewGoals((c) => ({ ...c, q2Goal: value }))} />
-              <GoalInput label={`Q3 ${selectedYear}`} value={newGoals.q3Goal} onChange={(value) => setNewGoals((c) => ({ ...c, q3Goal: value }))} />
-              <GoalInput label={`Q4 ${selectedYear}`} value={newGoals.q4Goal} onChange={(value) => setNewGoals((c) => ({ ...c, q4Goal: value }))} />
-            </div>
-            <Button className="mt-3" variant="pink" size="sm" onClick={handleAddGoal} disabled={isSaving}>
-              Save new goal
-            </Button>
+          <div className="space-y-3">
+            <label className="block max-w-xs">
+              <span className="mb-1 block text-xs font-medium text-muted-foreground">Attorney</span>
+              <Select
+                value={newAttorneyId}
+                onChange={(event) => {
+                  const attorneyId = event.target.value;
+                  setNewAttorneyId(attorneyId);
+                  setNewDraft((current) => ({ ...current, attorneyId }));
+                }}
+              >
+                {attorneys.map((attorney) => (
+                  <option key={attorney.id} value={attorney.id}>
+                    {attorney.name}
+                  </option>
+                ))}
+              </Select>
+            </label>
+            <GoalEditorCard
+              title="New commission goal"
+              draft={newDraft}
+              endYearOptions={endYearOptions}
+              onDraftChange={setNewDraft}
+              actions={
+                <Button variant="pink" size="sm" onClick={handleAddGoal} disabled={isSaving}>
+                  Save new goal
+                </Button>
+              }
+            />
           </div>
         ) : null}
 
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Attorney</TableHead>
-                <TableHead>Annual ({selectedYear})</TableHead>
-                <TableHead>Commission year starts</TableHead>
-                <TableHead>Commission Threshold</TableHead>
-                <TableHead>Q1 {selectedYear}</TableHead>
-                <TableHead>Q2 {selectedYear}</TableHead>
-                <TableHead>Q3 {selectedYear}</TableHead>
-                <TableHead>Q4 {selectedYear}</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {goalsForYear.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={9} className="text-sm text-muted-foreground">
-                    No goals for {selectedYear}. Click <strong>Add goal</strong> or import from the CSV template.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                goalsForYear.map((goal) => {
-                  const attorney = attorneys.find((user) => user.id === goal.attorneyId);
-                  const draft = getDraft(goal);
+        {goalsForYear.length === 0 ? (
+          <p className="rounded-lg border border-dashed p-6 text-sm text-muted-foreground">
+            No goals for commission year {selectedYear}. Click <strong>Add goal</strong> or import from the CSV template.
+          </p>
+        ) : (
+          <div className="space-y-4">
+            {goalsForYear.map((goal) => {
+              const attorney = attorneys.find((user) => user.id === goal.attorneyId);
+              const draft = getDraft(goal);
 
-                  return (
-                    <TableRow key={goal.id}>
-                      <TableCell className="font-semibold">{attorney?.name ?? "Unknown attorney"}</TableCell>
-                      <TableCell>
-                        <AnnualTotal compact amount={sumQuarterGoals(draft)} />
-                      </TableCell>
-                      <TableCell>
-                        <Select
-                          className="h-9 min-w-[8.5rem] text-xs"
-                          value={draft.commissionYearStartMonth}
-                          onChange={(event) => updateDraft(goal.id, { commissionYearStartMonth: event.target.value })}
+              return (
+                <GoalEditorCard
+                  key={goal.id}
+                  title={attorney?.name ?? "Unknown attorney"}
+                  draft={draft}
+                  endYearOptions={endYearOptions}
+                  onDraftChange={(next) => updateDraft(goal.id, next)}
+                  actions={
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={() => handleSaveExisting(goal)} disabled={isSaving || deletingGoalId != null}>
+                        <Save className="h-4 w-4" />
+                        Save
+                      </Button>
+                      {canDeleteGoals ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDeleteGoal(goal)}
+                          disabled={isSaving || deletingGoalId === goal.id}
+                          aria-label={`Delete goal for ${attorney?.name ?? "attorney"}`}
                         >
-                          {COMMISSION_YEAR_MONTH_OPTIONS.map((month) => (
-                            <option key={month.value} value={month.value}>
-                              {month.label}
-                            </option>
-                          ))}
-                        </Select>
-                      </TableCell>
-                      <TableCell>
-                        <GoalInput
-                          compact
-                          value={draft.commissionThreshold}
-                          onChange={(value) => updateDraft(goal.id, { commissionThreshold: value })}
-                        />
-                      </TableCell>
-                      <TableCell>
-                        <GoalInput compact value={draft.q1Goal} onChange={(value) => updateDraft(goal.id, { q1Goal: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <GoalInput compact value={draft.q2Goal} onChange={(value) => updateDraft(goal.id, { q2Goal: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <GoalInput compact value={draft.q3Goal} onChange={(value) => updateDraft(goal.id, { q3Goal: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <GoalInput compact value={draft.q4Goal} onChange={(value) => updateDraft(goal.id, { q4Goal: value })} />
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Button variant="outline" size="sm" onClick={() => handleSaveExisting(goal)} disabled={isSaving || deletingGoalId != null}>
-                            <Save className="h-4 w-4" />
-                            Save
-                          </Button>
-                          {canDeleteGoals ? (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleDeleteGoal(goal)}
-                              disabled={isSaving || deletingGoalId === goal.id}
-                              aria-label={`Delete goal for ${attorney?.name ?? "attorney"}`}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  }
+                />
+              );
+            })}
+          </div>
+        )}
 
         <p className="text-xs text-muted-foreground">
           Saved total for {selectedYear}:{" "}
           <Badge variant="outline">
-            {formatCurrency(goalsForYear.reduce((sum, goal) => sum + goal.q1Goal + goal.q2Goal + goal.q3Goal + goal.q4Goal, 0))} annual
-            {" "}
-            (sum of quarters)
+            {formatCurrency(goalsForYear.reduce((sum, goal) => sum + goal.annualFeeGoal, 0))} annual
           </Badge>
         </p>
       </CardContent>
@@ -370,45 +368,151 @@ export function AttorneyGoalsManager({
   );
 }
 
-function AnnualTotal({ label, amount, compact }: { label?: string; amount: number; compact?: boolean }) {
-  return (
-    <div>
-      {label ? <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span> : null}
-      <div
-        className={
-          compact
-            ? "flex h-9 min-w-[6rem] items-center rounded-md border border-input bg-muted/40 px-2 text-xs font-semibold text-navy-950"
-            : "flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm font-semibold text-navy-950"
-        }
-        title="Sum of Q1–Q4"
-      >
-        {formatCurrency(amount)}
-      </div>
-    </div>
-  );
-}
-
-function GoalInput({
-  label,
-  value,
-  onChange,
-  compact,
+function GoalEditorCard({
+  title,
+  draft,
+  endYearOptions,
+  onDraftChange,
+  actions,
 }: {
-  label?: string;
-  value: string;
-  onChange: (value: string) => void;
-  compact?: boolean;
+  title: string;
+  draft: GoalDraft;
+  endYearOptions: number[];
+  onDraftChange: (draft: GoalDraft) => void;
+  actions: ReactNode;
 }) {
+  const period = getPeriodFromDraft(draft);
+  const periodLabel = formatGoalPeriodLabel(period.commissionYear, period.startMonth, period.monthCount);
+  const monthlyGoals = parseMonthlyGoalsInput(
+    Object.fromEntries(draft.monthKeys.map((monthKey) => [monthKey, draft.monthlyValues[monthKey] ?? ""])),
+  );
+  const quarterSummaries = getCommissionQuarterSummaries(
+    period.commissionYear,
+    period.startMonth,
+    monthlyGoals,
+    period.monthCount,
+  );
+  const annualTotal = sumDraftMonthlyGoals(draft);
+
+  function spreadTotal() {
+    onDraftChange({
+      ...draft,
+      monthlyValues: spreadEvenMonthlyGoals(parseGoalAmount(draft.annualCommissionTotal), draft.monthKeys),
+    });
+  }
+
   return (
-    <label>
-      {label ? <span className="mb-1 block text-xs font-medium text-muted-foreground">{label}</span> : null}
-      <Input
-        className={compact ? "h-9 min-w-[6rem] text-xs" : undefined}
-        inputMode="decimal"
-        placeholder="0"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      />
-    </label>
+    <div className="rounded-lg border bg-muted/20 p-4">
+      <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-start">
+        <div>
+          <p className="text-sm font-semibold text-navy-950">{title}</p>
+          <p className="text-xs text-muted-foreground">
+            Commission period: {periodLabel}
+            <span className="ml-2 text-muted-foreground/80">(starts {formatMonthKeyLabel(draft.monthKeys[0] ?? "")})</span>
+          </p>
+        </div>
+        <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm font-semibold text-navy-950">
+          Annual total: {formatCurrency(annualTotal)}
+        </div>
+      </div>
+
+      <div className="mb-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
+        <label>
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">Ends in month</span>
+          <Select
+            value={draft.endMonth}
+            onChange={(event) => onDraftChange(applyPeriodChange(draft, { endMonth: event.target.value }))}
+          >
+            {COMMISSION_YEAR_MONTH_OPTIONS.map((month) => (
+              <option key={month.value} value={month.value}>
+                {month.label}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label>
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">Ends in year</span>
+          <Select
+            value={draft.endYear}
+            onChange={(event) => onDraftChange(applyPeriodChange(draft, { endYear: event.target.value }))}
+          >
+            {endYearOptions.map((year) => (
+              <option key={year} value={year}>
+                {year}
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label>
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">Months in period</span>
+          <Select
+            value={draft.monthCount}
+            onChange={(event) => onDraftChange(applyPeriodChange(draft, { monthCount: event.target.value }))}
+          >
+            {COMMISSION_PERIOD_MONTH_OPTIONS.map((count) => (
+              <option key={count} value={count}>
+                {count} months
+              </option>
+            ))}
+          </Select>
+        </label>
+        <label>
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">Commission threshold</span>
+          <Input
+            inputMode="decimal"
+            placeholder="0"
+            value={draft.commissionThreshold}
+            onChange={(event) => onDraftChange({ ...draft, commissionThreshold: event.target.value })}
+          />
+        </label>
+      </div>
+
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end">
+        <label className="flex-1">
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">Total commission goal</span>
+          <Input
+            inputMode="decimal"
+            placeholder="0"
+            value={draft.annualCommissionTotal}
+            onChange={(event) => onDraftChange({ ...draft, annualCommissionTotal: event.target.value })}
+          />
+        </label>
+        <Button variant="outline" size="sm" onClick={spreadTotal} disabled={!draft.annualCommissionTotal.trim()}>
+          Spread evenly across {draft.monthKeys.length} months
+        </Button>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground">Monthly fee targets</p>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {draft.monthKeys.map((monthKey) => (
+            <label key={monthKey}>
+              <span className="mb-1 block text-xs text-muted-foreground">{formatMonthKeyLabel(monthKey)}</span>
+              <Input
+                inputMode="decimal"
+                placeholder="0"
+                value={draft.monthlyValues[monthKey] ?? ""}
+                onChange={(event) =>
+                  onDraftChange({
+                    ...draft,
+                    monthlyValues: { ...draft.monthlyValues, [monthKey]: event.target.value },
+                  })
+                }
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {quarterSummaries.map((summary) => (
+          <Badge key={summary.quarter} variant="outline" className="text-xs">
+            CY Q{summary.quarter} ({summary.period}): {formatCurrency(summary.total)}
+          </Badge>
+        ))}
+      </div>
+
+      <div className="mt-4">{actions}</div>
+    </div>
   );
 }

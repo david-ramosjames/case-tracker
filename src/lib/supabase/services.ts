@@ -895,17 +895,31 @@ export type AttorneyGoalInput = {
   annualFeeGoal: number;
   commissionThreshold: number;
   commissionYearStartMonth?: number;
+  commissionMonthCount?: number;
+  monthlyGoals?: Record<string, number>;
   q1Goal: number;
   q2Goal: number;
   q3Goal: number;
   q4Goal: number;
 };
 
+function parseMonthlyGoalsRow(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object") return {};
+  const monthlyGoals: Record<string, number> = {};
+  for (const [monthKey, raw] of Object.entries(value as Record<string, unknown>)) {
+    const amount = Number(raw);
+    if (Number.isFinite(amount)) monthlyGoals[monthKey] = amount;
+  }
+  return monthlyGoals;
+}
+
 export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<AttorneyGoal> {
   const client = await createTrackerClient();
   const annualFeeGoal = input.q1Goal + input.q2Goal + input.q3Goal + input.q4Goal;
+  const monthlyGoals = input.monthlyGoals ?? {};
 
   const commissionYearStartMonth = Math.min(12, Math.max(1, Number(input.commissionYearStartMonth ?? 1)));
+  const commissionMonthCount = Number(input.commissionMonthCount ?? 12) === 13 ? 13 : 12;
 
   const payload = {
     attorney_name: input.attorneyName,
@@ -913,6 +927,8 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     annual_fee_goal: annualFeeGoal,
     commission_threshold: input.commissionThreshold,
     commission_year_start_month: commissionYearStartMonth,
+    commission_month_count: commissionMonthCount,
+    monthly_goals: monthlyGoals,
     q1_goal: input.q1Goal,
     q2_goal: input.q2Goal,
     q3_goal: input.q3Goal,
@@ -934,6 +950,8 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     annualFeeGoal,
     commissionThreshold: Number(data.commission_threshold ?? 0),
     commissionYearStartMonth: Number(data.commission_year_start_month ?? 1),
+    commissionMonthCount: Number(data.commission_month_count ?? 12) === 13 ? 13 : 12,
+    monthlyGoals: parseMonthlyGoalsRow(data.monthly_goals),
     q1Goal: Number(data.q1_goal ?? 0),
     q2Goal: Number(data.q2_goal ?? 0),
     q3Goal: Number(data.q3_goal ?? 0),
@@ -969,6 +987,8 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
     const q3Goal = Number(row.q3_goal ?? 0);
     const q4Goal = Number(row.q4_goal ?? 0);
 
+    const monthlyGoals = parseMonthlyGoalsRow(row.monthly_goals);
+
     return {
       id: toStringOrNull(row.id) ?? "unknown-goal",
       attorneyId: matchedContact?.id ?? toStringOrNull(row.attorney_user_id) ?? attorneyName ?? "unknown-attorney",
@@ -976,6 +996,8 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
       annualFeeGoal: q1Goal + q2Goal + q3Goal + q4Goal,
       commissionThreshold,
       commissionYearStartMonth: Number(row.commission_year_start_month ?? 1),
+      commissionMonthCount: Number(row.commission_month_count ?? 12) === 13 ? 13 : 12,
+      monthlyGoals,
       q1Goal,
       q2Goal,
       q3Goal,

@@ -21,11 +21,13 @@ export async function POST(request: Request) {
       year: Number(input.year),
       annualFeeGoal: Number(input.annualFeeGoal ?? 0),
       commissionThreshold: Number(input.commissionThreshold ?? 0),
+      monthlyGoals: input.monthlyGoals ?? {},
       q1Goal: Number(input.q1Goal ?? 0),
       q2Goal: Number(input.q2Goal ?? 0),
       q3Goal: Number(input.q3Goal ?? 0),
       q4Goal: Number(input.q4Goal ?? 0),
       commissionYearStartMonth: Number(input.commissionYearStartMonth ?? 1),
+      commissionMonthCount: Number(input.commissionMonthCount ?? 12),
     });
 
     return NextResponse.json({ goal });
