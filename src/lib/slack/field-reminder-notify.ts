@@ -76,6 +76,8 @@ export async function sendSlackFieldReminders(
       topic,
       attorneyEmail: record.attorney.email,
       paralegalEmail: record.paralegal.email,
+      attorneyName: record.attorney.name,
+      paralegalName: record.paralegal.name,
     });
 
     for (const [index, fieldKey] of fieldsToPost.entries()) {

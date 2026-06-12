@@ -133,6 +133,8 @@ export async function sendSlackMissingFieldNotices(
       topic,
       attorneyEmail: record.attorney.email,
       paralegalEmail: record.paralegal.email,
+      attorneyName: record.attorney.name,
+      paralegalName: record.paralegal.name,
     });
 
     const text =

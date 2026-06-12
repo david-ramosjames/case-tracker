@@ -60,16 +60,20 @@ export function buildStageConfirmationMessage(input: {
   caseId: string;
   topicMentions?: string;
 }) {
-  const mentionPrefix = input.topicMentions ? `${input.topicMentions} ` : "";
   const stage = stageDisplay(input.suggestedStage);
   const confidence = input.confidence.toLowerCase();
+  const lines: string[] = [];
 
-  const lines = [
-    `${mentionPrefix}Bot suggests case status is: ${stage} (${confidence} confidence)`,
+  if (input.topicMentions) {
+    lines.push(input.topicMentions);
+  }
+
+  lines.push(
+    `Bot suggests case status is: *${stage}* (${confidence} confidence)`,
     "",
     "Reply in this thread with ✅, `confirmed`, or the correct stage (e.g. `Stage: Demand`).",
     `<${input.appUrl}/cases/${input.caseId}|Open in Case Tracker>`,
-  ];
+  );
   return lines.join("\n");
 }
 
@@ -93,6 +97,8 @@ export async function postStageConfirmationForSuggestion(
     topic,
     attorneyEmail: record?.attorney.email,
     paralegalEmail: record?.paralegal.email,
+    attorneyName: record?.attorney.name,
+    paralegalName: record?.paralegal.name,
   });
   const text = buildStageConfirmationMessage({
     suggestedStage: item.suggestedStage,

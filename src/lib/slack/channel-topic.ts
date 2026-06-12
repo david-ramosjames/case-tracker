@@ -73,26 +73,41 @@ export async function resolveChannelUserMentions(input: {
   topic: string | null | undefined;
   attorneyEmail?: string | null;
   paralegalEmail?: string | null;
+  attorneyName?: string | null;
+  paralegalName?: string | null;
 }) {
   const ids = new Set(extractSlackUserIdsFromTopic(input.topic));
+  let directory: SlackUserDirectoryEntry[] | null = null;
 
-  if (ids.size === 0 && input.topic?.trim()) {
+  async function getDirectory() {
+    directory ??= await loadSlackUserDirectory();
+    return directory;
+  }
+
+  if (input.topic?.trim()) {
     const handles = extractAtHandlesFromTopic(input.topic);
     if (handles.length > 0) {
-      const directory = await loadSlackUserDirectory();
+      const users = await getDirectory();
       for (const handle of handles) {
-        const userId = matchUserIdByHandle(directory, handle);
+        const userId = matchUserIdByHandle(users, handle);
         if (userId) ids.add(userId);
       }
     }
   }
 
-  if (ids.size === 0) {
-    for (const email of [input.attorneyEmail, input.paralegalEmail]) {
-      if (!isResolvableEmail(email)) continue;
-      const userId = await lookupSlackUserIdByEmail(email!);
-      if (userId) ids.add(userId);
-    }
+  for (const email of [input.attorneyEmail, input.paralegalEmail]) {
+    if (!isResolvableEmail(email)) continue;
+    const userId = await lookupSlackUserIdByEmail(email!);
+    if (userId) ids.add(userId);
+  }
+
+  const users = await getDirectory();
+  for (const name of [input.attorneyName, input.paralegalName]) {
+    const trimmed = name?.trim();
+    if (!trimmed) continue;
+    const firstName = trimmed.split(/\s+/)[0];
+    const userId = matchUserIdByHandle(users, firstName) ?? matchUserIdByHandle(users, trimmed);
+    if (userId) ids.add(userId);
   }
 
   return [...ids].map((id) => `<@${id}>`).join(" ");
