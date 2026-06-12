@@ -53,11 +53,18 @@ export function GlobalCaseSearch() {
       return;
     }
 
+    setResults([]);
+    setTotal(0);
+    setActiveIndex(-1);
     setIsLoading(true);
+
+    const controller = new AbortController();
     const timeout = window.setTimeout(() => {
       void (async () => {
         try {
-          const response = await fetch(`/api/cases/search?q=${encodeURIComponent(trimmed)}&limit=8`);
+          const response = await fetch(`/api/cases/search?q=${encodeURIComponent(trimmed)}&limit=8`, {
+            signal: controller.signal,
+          });
           if (!response.ok) {
             setResults([]);
             setTotal(0);
@@ -67,16 +74,20 @@ export function GlobalCaseSearch() {
           setResults(body.results ?? []);
           setTotal(body.total ?? 0);
           setActiveIndex(body.results?.length ? 0 : -1);
-        } catch {
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") return;
           setResults([]);
           setTotal(0);
         } finally {
-          setIsLoading(false);
+          if (!controller.signal.aborted) setIsLoading(false);
         }
       })();
     }, 200);
 
-    return () => window.clearTimeout(timeout);
+    return () => {
+      window.clearTimeout(timeout);
+      controller.abort();
+    };
   }, [query]);
 
   useEffect(() => {
