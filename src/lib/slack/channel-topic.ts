@@ -64,9 +64,28 @@ async function loadSlackUserDirectory() {
     return userDirectoryCache.users;
   }
 
-  const users = await listSlackWorkspaceUsers();
-  userDirectoryCache = { fetchedAt: Date.now(), users };
-  return users;
+  try {
+    const users = await listSlackWorkspaceUsers();
+    userDirectoryCache = { fetchedAt: Date.now(), users };
+    return users;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("missing_scope")) {
+      console.warn("Slack users.list unavailable; using topic mention tokens and email lookup only.");
+      userDirectoryCache = { fetchedAt: Date.now(), users: [] };
+      return [];
+    }
+    throw error;
+  }
+}
+
+/** Attorney / paralegal segment from topics like `Attorney @Arielle | Paralegal @Adrian (Settled)`. */
+export function extractTopicMentionPrefix(topic: string | null | undefined) {
+  if (!topic?.trim()) return null;
+  const trimmed = topic.trim();
+  const withoutStage = trimmed.replace(/\s*\([^)]+\)\s*$/, "").trim();
+  if (!withoutStage.includes("@")) return null;
+  return withoutStage;
 }
 
 export async function resolveChannelUserMentions(input: {
@@ -76,7 +95,12 @@ export async function resolveChannelUserMentions(input: {
   attorneyName?: string | null;
   paralegalName?: string | null;
 }) {
-  const ids = new Set(extractSlackUserIdsFromTopic(input.topic));
+  const topicUserIds = extractSlackUserIdsFromTopic(input.topic);
+  if (topicUserIds.length > 0) {
+    return topicUserIds.map((id) => `<@${id}>`).join(" ");
+  }
+
+  const ids = new Set<string>();
   let directory: SlackUserDirectoryEntry[] | null = null;
 
   async function getDirectory() {
@@ -101,14 +125,20 @@ export async function resolveChannelUserMentions(input: {
     if (userId) ids.add(userId);
   }
 
-  const users = await getDirectory();
-  for (const name of [input.attorneyName, input.paralegalName]) {
-    const trimmed = name?.trim();
-    if (!trimmed) continue;
-    const firstName = trimmed.split(/\s+/)[0];
-    const userId = matchUserIdByHandle(users, firstName) ?? matchUserIdByHandle(users, trimmed);
-    if (userId) ids.add(userId);
+  if (ids.size === 0) {
+    const users = await getDirectory();
+    for (const name of [input.attorneyName, input.paralegalName]) {
+      const trimmed = name?.trim();
+      if (!trimmed) continue;
+      const firstName = trimmed.split(/\s+/)[0];
+      const userId = matchUserIdByHandle(users, firstName) ?? matchUserIdByHandle(users, trimmed);
+      if (userId) ids.add(userId);
+    }
   }
 
-  return [...ids].map((id) => `<@${id}>`).join(" ");
+  if (ids.size > 0) {
+    return [...ids].map((id) => `<@${id}>`).join(" ");
+  }
+
+  return extractTopicMentionPrefix(input.topic) ?? "";
 }
