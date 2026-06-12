@@ -408,7 +408,11 @@ export async function importCaseBackfillCsv(
 
     try {
       if (Object.keys(row.shared).length > 0) {
-        await updateSharedCaseFields(caseId, row.shared);
+        await updateSharedCaseFields(
+          caseId,
+          row.shared,
+          row.shared.status ? { explicitStatus: row.shared.status } : undefined,
+        );
       }
 
       const trackerPatch = row.tracker;

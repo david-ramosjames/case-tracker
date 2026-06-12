@@ -9,10 +9,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   CASE_BACKFILL_ALL_HEADERS,
+  CASE_BACKFILL_ATTORNEY_FEES_HEADERS,
   CASE_BACKFILL_CASE_NUMBER_HEADERS,
   CASE_BACKFILL_DATE_SIGNED_HEADERS,
   CASE_BACKFILL_DOL_HEADERS,
   CASE_BACKFILL_HEADER_GROUPS,
+  CASE_BACKFILL_REFERRAL_FEE_HEADERS,
+  CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS,
+  CASE_BACKFILL_STATUS_HEADERS,
   hasCaseBackfillHeaders,
 } from "@/lib/csv/case-backfill";
 import { parseCsv } from "@/lib/csv/parse";
@@ -39,6 +43,10 @@ export function BackfillImportCard() {
       ...CASE_BACKFILL_CASE_NUMBER_HEADERS,
       ...CASE_BACKFILL_DOL_HEADERS,
       ...CASE_BACKFILL_DATE_SIGNED_HEADERS,
+      ...CASE_BACKFILL_STATUS_HEADERS,
+      ...CASE_BACKFILL_REFERRAL_FEE_HEADERS,
+      ...CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS,
+      ...CASE_BACKFILL_ATTORNEY_FEES_HEADERS,
     ];
     return headers.filter(
       (header) =>
@@ -215,9 +223,11 @@ export function BackfillImportCard() {
             <li>Leave a cell blank (or &quot;not set&quot;) to keep the existing value for that field.</li>
             <li>Do not include client, attorney, or paralegal — those stay in DocketFlow.</li>
             <li>
-              Overall <span className="font-medium text-navy-950">Active / Closed</span> is set automatically from{" "}
-              <span className="font-medium text-navy-950">Stage</span> and <span className="font-medium text-navy-950">Disbursed</span>.
-              Use <span className="font-medium text-navy-950">Status Notes</span> for narrative notes on the case detail page.
+              <span className="font-medium text-navy-950">Status</span> — <span className="font-medium text-navy-950">Active</span> or{" "}
+              <span className="font-medium text-navy-950">Closed</span> (optional; otherwise derived from stage and disbursed).
+              <span className="font-medium text-navy-950"> Referral Fee</span> is a percent (e.g. <span className="font-medium text-navy-950">33%</span>).
+              <span className="font-medium text-navy-950"> Settlement Amount</span> and{" "}
+              <span className="font-medium text-navy-950">RJL Attorney Fees</span> update the Results section.
             </li>
           </ul>
         </div>

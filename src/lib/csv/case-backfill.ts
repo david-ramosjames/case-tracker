@@ -16,6 +16,7 @@ import {
 } from "@/lib/csv/parse";
 import {
   type CaseStage,
+  type CaseStatus,
   type CheckStatus,
   type ClosingStatus,
   type DisbursedStatus,
@@ -35,6 +36,10 @@ export const CASE_BACKFILL_DATE_SIGNED_HEADERS = [
   "Date created",
   "Signed Date",
 ] as const;
+export const CASE_BACKFILL_STATUS_HEADERS = ["Status", "Case Status"] as const;
+export const CASE_BACKFILL_REFERRAL_FEE_HEADERS = ["Referral Fee", "Referral fee"] as const;
+export const CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS = ["Settlement Amount", "Settlement amount"] as const;
+export const CASE_BACKFILL_ATTORNEY_FEES_HEADERS = ["RJL Attorney Fees", "Attorney Fees", "RJL Fees"] as const;
 export const CASE_BACKFILL_REQUIRED_HEADERS = ["Case #"] as const;
 
 export const CASE_BACKFILL_HEADER_GROUPS = [
@@ -44,7 +49,7 @@ export const CASE_BACKFILL_HEADER_GROUPS = [
   },
   {
     label: "Optional DocketFlow / tracker fields (only filled cells update)",
-    headers: ["DOL", "Date Signed", "Type"],
+    headers: ["DOL", "Date Signed", "Type", "Status"],
   },
   {
     label: "Tracker fields",
@@ -68,6 +73,7 @@ export const CASE_BACKFILL_HEADER_GROUPS = [
     headers: [
       "Settlement Date",
       "Settlement Amount",
+      "RJL Attorney Fees",
       "Fee Percent",
       "Release",
       "Closing",
@@ -91,6 +97,7 @@ export type ParsedCaseBackfillRow = {
     caseType?: string;
     dateOfIncident?: string | null;
     dateSigned?: string;
+    status?: CaseStatus;
   };
   tracker: TrackerUpdateInput;
   result: Partial<SettlementResult>;
@@ -119,6 +126,10 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       if (parsedDol) shared.dateOfIncident = parsedDol;
       const parsedDateSigned = parseBackfillDate(dateSigned);
       if (parsedDateSigned) shared.dateSigned = parsedDateSigned.slice(0, 10);
+
+      const status = getCsvCellAny(row, headers, [...CASE_BACKFILL_STATUS_HEADERS]);
+      const normalizedStatus = status ? normalizeCaseStatus(status) : null;
+      if (normalizedStatus) shared.status = normalizedStatus;
 
       const stage = getCsvCell(row, headers, "Stage");
       const minimumValue = parseMoney(getCsvCell(row, headers, "Minimum Value"));
@@ -150,10 +161,13 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       const liability = getCsvCell(row, headers, "Liability");
       if (liability) tracker.liability = liability;
 
-      const referralFee = getCsvCell(row, headers, "Referral Fee");
+      const referralFee = getCsvCellAny(row, headers, [...CASE_BACKFILL_REFERRAL_FEE_HEADERS]);
       if (referralFee) {
-        tracker.referralFee = parseMoney(referralFee);
-        tracker.referralFeeArrangement = `Imported referral fee: ${referralFee}`;
+        const parsedReferralFee = parsePercent(referralFee);
+        if (parsedReferralFee != null) {
+          tracker.referralFee = parsedReferralFee;
+          tracker.referralFeeArrangement = `Imported referral fee: ${referralFee.trim()}`;
+        }
       }
 
       const policyLimits = getCsvCell(row, headers, "Policy Limits");
@@ -179,8 +193,19 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       const settlementDate = getCsvCell(row, headers, "Settlement Date");
       if (settlementDate) result.settlementDate = parseSheetDate(settlementDate);
 
-      const settlementAmount = getCsvCell(row, headers, "Settlement Amount");
+      const settlementAmount = getCsvCellAny(row, headers, [...CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS]);
       if (settlementAmount) result.settlementAmount = parseMoney(settlementAmount);
+
+      const attorneyFees = getCsvCellAny(row, headers, [...CASE_BACKFILL_ATTORNEY_FEES_HEADERS]);
+      if (attorneyFees) result.attorneyFees = parseMoney(attorneyFees);
+
+      const feePercent = getCsvCell(row, headers, "Fee Percent");
+      if (feePercent) {
+        const parsedFeePercent = parsePercent(feePercent);
+        if (parsedFeePercent != null) {
+          result.feePercent = parsedFeePercent > 1 ? parsedFeePercent / 100 : parsedFeePercent;
+        }
+      }
 
       const release = getCsvCell(row, headers, "Release");
       if (release) result.releaseStatus = normalizeReleaseStatus(release);
@@ -220,7 +245,7 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
         if (reductions) result.reductionsStatus = normalizeReductionsStatus(reductions);
       }
 
-      if (result.settlementAmount != null || result.settlementDate) {
+      if (result.feePercent == null && (result.settlementAmount != null || result.settlementDate)) {
         result.feePercent = deriveResultFeePercent({
           caseStage: tracker.caseStage ?? "Onboarding",
           expectedLitigation: tracker.expectedLitigation ?? null,
@@ -259,6 +284,18 @@ function parseBackfillDate(value: string) {
 function parseMoney(value: string) {
   const numeric = Number(value.replace(/[$,%\s]/g, ""));
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+function parsePercent(value: string) {
+  const numeric = Number(value.trim().replace(/%$/, "").replace(/[,\s]/g, ""));
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeCaseStatus(value: string): CaseStatus | null {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "active" || normalized === "open") return "Active";
+  if (normalized === "closed" || normalized === "archived" || normalized === "archive") return "Closed";
+  return null;
 }
 
 function normalizeStage(value: string): CaseStage {
