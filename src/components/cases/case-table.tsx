@@ -5,7 +5,7 @@ import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { ArrowDown, ArrowUp, ArrowUpDown, Eye } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { HeaderFilter } from "@/components/ui/header-filter";
+import { HeaderFilter, HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -21,6 +21,7 @@ import {
   EXPECTED_LITIGATION_OPTIONS,
   LIABILITY_OPTIONS,
   getTargetPeriodOptions,
+  getTargetPeriodSelectOptions,
 } from "@/lib/case-options";
 import { CaseAttorneyScoreCell } from "@/components/attorney-score/attorney-score";
 import { getCaseAttorneyScore } from "@/lib/attorney-score";
@@ -60,7 +61,7 @@ export function CaseTable({
   const [workingRecords, setWorkingRecords] = useState(records);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [search, setSearch] = useState(initialSearch);
-  const [attorney, setAttorney] = useState("all");
+  const [attorneyIds, setAttorneyIds] = useState<string[]>([]);
   const [paralegal, setParalegal] = useState("all");
   const [stage, setStage] = useState("all");
   const [status, setStatus] = useState<CasePipelineFilter>("Active");
@@ -97,7 +98,7 @@ export function CaseTable({
   }, [viewer.canViewHistorical]);
 
   const activeFilterCount = [
-    viewer.canViewAllCases && attorney !== "all",
+    viewer.canViewAllCases && attorneyIds.length > 0,
     paralegal !== "all",
     status !== "Active",
     caseType !== "all",
@@ -128,7 +129,7 @@ export function CaseTable({
           record.attorney.name.toLowerCase().includes(normalizedSearch);
 
         if (!matchesSearch) return false;
-        if (attorney !== "all" && record.shared.attorneyId !== attorney) return false;
+        if (attorneyIds.length > 0 && !attorneyIds.includes(record.shared.attorneyId)) return false;
         if (paralegal !== "all" && record.shared.paralegalId !== paralegal) return false;
         if (stage !== "all" && record.tracker.caseStage !== stage) return false;
         const pipeline = getCasePipelineFilter(record, goals);
@@ -195,7 +196,7 @@ export function CaseTable({
         const cmp = aValue - bValue;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [attorney, caseSize, caseType, expectedLitigation, goals, liability, paralegal, quarter, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
+  }, [attorneyIds, caseSize, caseType, expectedLitigation, goals, liability, paralegal, quarter, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
 
   function requestSort(nextKey: SortKey) {
     if (nextKey === sortKey) {
@@ -223,7 +224,7 @@ export function CaseTable({
   }
 
   function clearFilters() {
-    setAttorney("all");
+    setAttorneyIds([]);
     setParalegal("all");
     setStage("all");
     setStatus("Active");
@@ -375,14 +376,11 @@ export function CaseTable({
                 <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-56 z-40 w-44 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
                 <TableHead className="sticky left-[25rem] z-40 w-40 bg-slate-50 align-top shadow-[1px_0_0_0_hsl(var(--border))]">
                   {viewer.canViewAllCases ? (
-                    <HeaderFilter
+                    <HeaderMultiFilter
                       label="Attorney"
-                      value={attorney}
-                      onChange={setAttorney}
-                      options={[
-                        { value: "all", label: "All" },
-                        ...attorneys.map((item) => ({ value: item.id, label: item.name })),
-                      ]}
+                      selected={attorneyIds}
+                      onChange={setAttorneyIds}
+                      options={attorneys.map((item) => ({ value: item.id, label: item.name }))}
                     />
                   ) : (
                     <span className="text-xs font-semibold uppercase text-muted-foreground">Attorney</span>
@@ -520,8 +518,8 @@ export function CaseTable({
                     <TableCell>
                       <InlineSelect value={record.tracker.targetResolutionQuarter ?? ""} onChange={(value) => updateTrackerField(record.shared.id, "targetResolutionQuarter", value || null)}>
                         <option value="">Not set</option>
-                        {quarters.map((option) => (
-                          <option key={option} value={option ?? ""}>{option}</option>
+                        {getTargetPeriodSelectOptions(record.tracker.targetResolutionQuarter).map((option) => (
+                          <option key={option} value={option}>{option}</option>
                         ))}
                       </InlineSelect>
                     </TableCell>
@@ -559,8 +557,10 @@ export function CaseTable({
                     <TableCell>
                       <div className="flex flex-col gap-1">
                         <InlineSelect value={record.tracker.expectedLitigation ?? ""} onChange={(value) => updateTrackerField(record.shared.id, "expectedLitigation", (value || null) as TrackerEntry["expectedLitigation"])}>
-                          <option value="">Not set</option>
-                          {EXPECTED_LITIGATION_OPTIONS.map((option) => (
+                          <option value="">Needs info</option>
+                          {EXPECTED_LITIGATION_OPTIONS.filter(
+                            (option) => option !== "Lit" || record.tracker.caseStage === "Lit",
+                          ).map((option) => (
                             <option key={option} value={option}>{option}</option>
                           ))}
                         </InlineSelect>

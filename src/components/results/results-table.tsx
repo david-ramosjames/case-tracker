@@ -9,7 +9,7 @@ import { getCaseCompletionScore } from "@/lib/calculations";
 import { compareCaseNumbers } from "@/lib/csv/parse";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { HeaderFilter } from "@/components/ui/header-filter";
+import { HeaderFilter, HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -34,8 +34,8 @@ import {
   type ReleaseStatus,
   type SettlementResult,
 } from "@/lib/types";
-import { formatCurrency, getCalculatedAttorneyFees } from "@/lib/utils";
-import { useEffect, useMemo, useState } from "react";
+import { cn, formatCurrency, getCalculatedAttorneyFees } from "@/lib/utils";
+import { useEffect, useMemo, useRef, useState, type RefObject, type UIEvent } from "react";
 
 type SortKey = "completion" | "caseNumber" | "clientName" | "settlementDate" | "settlementAmount" | "attorneyFees";
 type SortDirection = "asc" | "desc";
@@ -57,7 +57,7 @@ export function ResultsTable({
 }) {
   const [workingRecords, setWorkingRecords] = useState(() => records.filter(hasSettlementDate));
   const [search, setSearch] = useState("");
-  const [attorney, setAttorney] = useState("all");
+  const [attorneyIds, setAttorneyIds] = useState<string[]>([]);
   const [release, setRelease] = useState("all");
   const [closing, setClosing] = useState("all");
   const [check, setCheck] = useState("all");
@@ -66,19 +66,23 @@ export function ResultsTable({
   const [quarter, setQuarter] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("caseNumber");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [scrollWidth, setScrollWidth] = useState(1800);
 
   const attorneys = users.filter((user) => user.role === "attorney");
   const quarters = Array.from(new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.result.resultQuarter).filter(Boolean)]));
 
   const activeFilterCount = [
-    viewer.canViewAllCases && attorney !== "all",
+    viewer.canViewAllCases && attorneyIds.length > 0,
     release,
     closing,
     check,
     disbursed,
     reductions,
     quarter,
-  ].filter((value) => value !== "all").length;
+  ].filter((value) => value !== "all" && value !== false).length;
 
   const filteredRecords = useMemo(() => {
     const normalizedSearch = search.toLowerCase();
@@ -92,7 +96,7 @@ export function ResultsTable({
           record.shared.clientName.toLowerCase().includes(normalizedSearch);
 
         if (!matchesSearch) return false;
-        if (attorney !== "all" && record.shared.attorneyId !== attorney) return false;
+        if (attorneyIds.length > 0 && !attorneyIds.includes(record.shared.attorneyId)) return false;
         if (release !== "all" && result.releaseStatus !== release) return false;
         if (closing !== "all" && result.closingStatus !== closing) return false;
         if (check !== "all" && result.checkStatus !== check) return false;
@@ -147,10 +151,26 @@ export function ResultsTable({
         const cmp = aFees - bFees;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [attorney, check, closing, disbursed, quarter, reductions, release, search, settings, sortDirection, sortKey, workingRecords]);
+  }, [attorneyIds, check, closing, disbursed, quarter, reductions, release, search, settings, sortDirection, sortKey, workingRecords]);
+
+  useEffect(() => {
+    function updateScrollWidth() {
+      setScrollWidth(tableRef.current?.scrollWidth ?? 1800);
+    }
+
+    updateScrollWidth();
+    window.addEventListener("resize", updateScrollWidth);
+    return () => window.removeEventListener("resize", updateScrollWidth);
+  }, [filteredRecords.length]);
+
+  function syncScroll(event: UIEvent<HTMLDivElement>, targetRef: RefObject<HTMLDivElement | null>) {
+    if (targetRef.current && targetRef.current.scrollLeft !== event.currentTarget.scrollLeft) {
+      targetRef.current.scrollLeft = event.currentTarget.scrollLeft;
+    }
+  }
 
   function clearFilters() {
-    setAttorney("all");
+    setAttorneyIds([]);
     setRelease("all");
     setClosing("all");
     setCheck("all");
@@ -232,23 +252,36 @@ export function ResultsTable({
           </p>
         </div>
 
-        <div className="mt-4 overflow-x-auto rounded-lg border bg-white">
-          <Table>
-            <TableHeader>
+        <div className="mt-4 rounded-lg border bg-white">
+          <div className="border-b bg-muted/40 px-4 py-2">
+            <div
+              ref={topScrollRef}
+              className="overflow-x-auto rounded-full border bg-white"
+              onScroll={(event) => syncScroll(event, tableScrollRef)}
+            >
+              <div style={{ width: scrollWidth, height: 12 }} />
+            </div>
+          </div>
+          <div className="relative">
+            <div className="pointer-events-none absolute right-0 top-0 z-30 h-full w-12 bg-gradient-to-l from-white to-transparent" />
+            <div
+              ref={tableScrollRef}
+              className="max-h-[calc(100vh-23rem)] min-h-[28rem] overflow-auto"
+              onScroll={(event) => syncScroll(event, topScrollRef)}
+            >
+          <Table ref={tableRef} className="min-w-[1800px] table-fixed">
+            <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
               <TableRow>
-                <SortableHead label="% Complete" sortKey="completion" active={sortKey} direction={sortDirection} onSort={requestSort} />
-                <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} direction={sortDirection} onSort={requestSort} />
-                <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} />
-                <TableHead className="align-top">
+                <SortableHead label="% Complete" sortKey="completion" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-0 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
+                <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-28 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
+                <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-56 z-40 w-44 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
+                <TableHead className="sticky left-[25rem] z-40 w-40 bg-slate-50 align-top shadow-[1px_0_0_0_hsl(var(--border))]">
                   {viewer.canViewAllCases ? (
-                    <HeaderFilter
+                    <HeaderMultiFilter
                       label="Attorney"
-                      value={attorney}
-                      onChange={setAttorney}
-                      options={[
-                        { value: "all", label: "All" },
-                        ...attorneys.map((item) => ({ value: item.id, label: item.name })),
-                      ]}
+                      selected={attorneyIds}
+                      onChange={setAttorneyIds}
+                      options={attorneys.map((item) => ({ value: item.id, label: item.name }))}
                     />
                   ) : (
                     <span className="text-xs font-semibold uppercase text-muted-foreground">Attorney</span>
@@ -335,14 +368,14 @@ export function ResultsTable({
 
                 return (
                   <TableRow key={record.shared.id}>
-                    <TableCell className="w-28">
+                    <TableCell className="sticky left-0 z-10 w-28 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
                       <CaseCompletionCell record={record} settings={settings} />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="sticky left-28 z-10 w-28 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
                       <CaseNumberLink caseId={record.shared.id} caseNumber={record.shared.caseNumber} />
                     </TableCell>
-                    <TableCell>{record.shared.clientName}</TableCell>
-                    <TableCell>{record.attorney.name}</TableCell>
+                    <TableCell className="sticky left-56 z-10 w-44 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.shared.clientName}</TableCell>
+                    <TableCell className="sticky left-[25rem] z-10 w-40 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.attorney.name}</TableCell>
                     <TableCell>{record.paralegal.name}</TableCell>
                     <TableCell>
                       <Input className="h-9 min-w-32 text-xs" type="date" value={toDateInput(result.settlementDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, settlementDate: fromDateInput(event.target.value) }))} />
@@ -411,6 +444,8 @@ export function ResultsTable({
               })}
             </TableBody>
           </Table>
+            </div>
+          </div>
         </div>
       </CardContent>
     </Card>
@@ -423,18 +458,20 @@ function SortableHead({
   active,
   direction,
   onSort,
+  className,
 }: {
   label: string;
   sortKey: SortKey;
   active: SortKey;
   direction: SortDirection;
   onSort: (key: SortKey) => void;
+  className?: string;
 }) {
   const isActive = active === sortKey;
   const Icon = !isActive ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
 
   return (
-    <TableHead>
+    <TableHead className={cn("align-middle", className)}>
       <button
         type="button"
         className="inline-flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground"

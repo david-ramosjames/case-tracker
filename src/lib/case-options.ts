@@ -128,6 +128,42 @@ export function getTargetPeriodOptions(date = new Date()) {
   return years.flatMap((year) => [`Q1-${year}`, `Q2-${year}`, `Q3-${year}`, `Q4-${year}`]);
 }
 
+export function parseTargetPeriodLabel(label: string): { year: number; quarter: number } | null {
+  const match = label.trim().match(/^Q([1-4])-(\d{2})$/i);
+  if (!match) return null;
+  return { quarter: Number(match[1]), year: 2000 + Number(match[2]) };
+}
+
+export function getCurrentTargetPeriodLabel(date = new Date()) {
+  const yy = String(date.getFullYear() % 100).padStart(2, "0");
+  const quarter = Math.floor(date.getMonth() / 3) + 1;
+  return `Q${quarter}-${yy}`;
+}
+
+export function isTargetPeriodCurrentOrFuture(label: string | null | undefined, date = new Date()) {
+  if (!label?.trim()) return false;
+  const parsed = parseTargetPeriodLabel(label);
+  if (!parsed) return true;
+  const current = parseTargetPeriodLabel(getCurrentTargetPeriodLabel(date));
+  if (!current) return true;
+  return parsed.year * 10 + parsed.quarter >= current.year * 10 + current.quarter;
+}
+
+/** Expected disbursement quarters attorneys can pick (current quarter and later). */
+export function getSelectableTargetPeriodOptions(date = new Date()) {
+  return getTargetPeriodOptions(date).filter((label) => isTargetPeriodCurrentOrFuture(label, date));
+}
+
+/** Dropdown options for a case, keeping an existing past quarter visible when already set. */
+export function getTargetPeriodSelectOptions(currentValue: string | null | undefined, date = new Date()) {
+  const selectable = getSelectableTargetPeriodOptions(date);
+  const normalized = currentValue?.trim();
+  if (normalized && !selectable.includes(normalized) && parseTargetPeriodLabel(normalized)) {
+    return [normalized, ...selectable];
+  }
+  return selectable;
+}
+
 /** Calendar quarter label (`YYYY Q#`) from a disburse / settlement date. */
 export function deriveResultQuarterFromDisburseDate(disburseDate: string | null | undefined): string | null {
   const trimmed = disburseDate?.trim().slice(0, 10) ?? "";

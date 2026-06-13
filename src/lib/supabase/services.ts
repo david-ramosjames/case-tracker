@@ -291,13 +291,6 @@ export async function updateTrackerEntry(
   if (nextStage === "Lit" || existingTracker?.hasEverBeenLitigation || existingTracker?.caseStage === "Lit") {
     litigationPatch.has_ever_been_litigation = true;
   }
-  if (nextStage === "Lit") {
-    litigationPatch.expected_litigation = toDatabaseExpectedLitigation("Lit");
-    litigationPatch.expected_litigation_validated_at = now;
-    if (input.expectedLitigation === undefined && existingTracker?.expectedLitigation !== "Lit") {
-      inputWithSourcesLit.expectedLitigation = "Lit";
-    }
-  }
 
   const payload = {
     ...trackerUpdateToRow(inputWithSourcesLit, markReviewed),
@@ -1449,7 +1442,7 @@ function makeEmptyTrackerRow(caseRow: DocketFlowCaseRow): TrackerEntryRow {
     id: `pending-${caseRow.id}`,
     case_id: caseRow.id,
     case_stage: "Onboarding",
-    expected_litigation: "Pre",
+    expected_litigation: null,
     case_number: caseRow.case_number,
     client_name_snapshot: caseRow.client_name,
     sources: "",
@@ -1611,7 +1604,7 @@ function suggestionRowToSuggestion(row: SuggestionRow): StageSuggestion {
     id: toString(row.id, "stage-suggestion"),
     source: normalizeStageSignalSource(toStringOrNull(row.source)),
     suggestedStage: normalizeStage(toStringOrNull(row.suggested_stage)),
-    suggestedExpectedLitigation: normalizeExpectedLitigation(toStringOrNull(row.suggested_expected_litigation)),
+    suggestedExpectedLitigation: normalizeExpectedLitigation(toStringOrNull(row.suggested_expected_litigation)) ?? "Pre",
     confidence: normalizeConfidence(toStringOrNull(row.confidence)) ?? "Medium",
     excerpt: toString(row.excerpt, ""),
     detectedAt: toString(row.detected_at, toString(row.created_at, new Date().toISOString())),
@@ -1700,11 +1693,14 @@ function normalizeConfidence(value: string | null | undefined): ConfidenceLevel 
   return null;
 }
 
-export function normalizeExpectedLitigation(value: string | null | undefined): ExpectedLitigationStatus {
-  const normalized = value?.toLowerCase();
+export function normalizeExpectedLitigation(value: string | null | undefined): ExpectedLitigationStatus | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.toLowerCase();
   if (normalized === "lit" || normalized === "litigation") return "Lit";
   if (normalized === "expect" || normalized === "expected litigation" || normalized === "expected") return "Expect";
-  return "Pre";
+  if (normalized === "pre" || normalized === "pre-lit" || normalized === "prelit") return "Pre";
+  return null;
 }
 
 function normalizeReleaseStatus(value: string | null | undefined, signedAt: string | null): ReleaseStatus {

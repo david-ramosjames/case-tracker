@@ -65,20 +65,15 @@ export function recordsEligibleForTreatmentPromotion(records: CaseRecord[], minD
 export function buildStagePatchFromConfirmation(
   record: CaseRecord,
   stage: CaseStage,
-): { caseStage: CaseStage; expectedLitigation: ExpectedLitigationStatus; estimatedFeeValue?: number } {
-  const expectedLitigation = deriveExpectedLitigationForStage(stage);
-  const patch: {
-    caseStage: CaseStage;
-    expectedLitigation: ExpectedLitigationStatus;
-    estimatedFeeValue?: number;
-  } = { caseStage: stage, expectedLitigation };
+): { caseStage: CaseStage; estimatedFeeValue?: number } {
+  const patch: { caseStage: CaseStage; estimatedFeeValue?: number } = { caseStage: stage };
 
   if (record.tracker.minimumValue) {
     patch.estimatedFeeValue = Math.round(
       record.tracker.minimumValue *
         deriveResultFeePercent({
           caseStage: stage,
-          expectedLitigation,
+          expectedLitigation: record.tracker.expectedLitigation,
           referralFee: record.tracker.referralFee,
         }),
     );

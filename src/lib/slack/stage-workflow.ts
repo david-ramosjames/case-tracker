@@ -9,6 +9,8 @@ export async function promoteOnboardingToTreatment(records?: CaseRecord[]) {
   let promoted = 0;
 
   for (const record of eligible) {
+    if (record.tracker.caseStage !== "Onboarding") continue;
+
     await updateTrackerEntry(
       record.shared.id,
       { caseStage: "Txt" },

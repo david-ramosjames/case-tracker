@@ -27,7 +27,7 @@ function rowToSuggestion(row: SuggestionRow): StageSuggestion {
     id: String(row.id ?? "stage-suggestion"),
     source: (row.source as StageSuggestion["source"]) ?? "manual",
     suggestedStage: normalizeStage(String(row.suggested_stage ?? "")),
-    suggestedExpectedLitigation: normalizeExpectedLitigation(String(row.suggested_expected_litigation ?? "")),
+    suggestedExpectedLitigation: normalizeExpectedLitigation(String(row.suggested_expected_litigation ?? "")) ?? "Pre",
     confidence: (row.confidence as ConfidenceLevel) ?? "Medium",
     excerpt: String(row.excerpt ?? ""),
     detectedAt: String(row.detected_at ?? row.created_at ?? new Date().toISOString()),

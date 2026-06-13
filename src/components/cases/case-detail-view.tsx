@@ -27,7 +27,7 @@ import {
   EXPECTED_LITIGATION_OPTIONS,
   LIABILITY_OPTIONS,
   RELEASE_STATUS_OPTIONS,
-  getTargetPeriodOptions,
+  getTargetPeriodSelectOptions,
 } from "@/lib/case-options";
 import { AttorneyScoreBreakdown } from "@/components/attorney-score/attorney-score";
 import { getCaseAttorneyScore, getValidationFieldLabel } from "@/lib/attorney-score";
@@ -108,7 +108,7 @@ export function CaseDetailView({
   const isAdmin = sessionUser.role === "admin" || sessionUser.role === "super_admin";
   const isOrphanTracker = initialRecord.shared.id === initialRecord.tracker.id;
 
-  const quarterOptions = useMemo(() => getTargetPeriodOptions(), []);
+  const quarterOptions = useMemo(() => getTargetPeriodSelectOptions(tracker.targetResolutionQuarter), [tracker.targetResolutionQuarter]);
   const record = useMemo(() => ({ ...initialRecord, shared, tracker }), [initialRecord, shared, tracker]);
   const flags = getDataQualityFlags(record, settings);
   const attorneyScore = getCaseAttorneyScore(record);
@@ -730,8 +730,10 @@ export function CaseDetailView({
                           }
                         }}
                       >
-                        <option value="">Select expected litigation</option>
-                        {EXPECTED_LITIGATION_OPTIONS.map((status) => (
+                        <option value="">Needs info</option>
+                        {EXPECTED_LITIGATION_OPTIONS.filter(
+                          (status) => status !== "Lit" || tracker.caseStage === "Lit",
+                        ).map((status) => (
                           <option key={status} value={status}>
                             {status}
                           </option>
