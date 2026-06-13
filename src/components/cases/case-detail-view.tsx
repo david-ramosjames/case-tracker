@@ -25,6 +25,8 @@ import {
   CLOSING_STATUS_OPTIONS,
   DISBURSED_STATUS_OPTIONS,
   EXPECTED_LITIGATION_OPTIONS,
+  coerceExpectedLitigationForStage,
+  formatExpectedLitigationLabel,
   LIABILITY_OPTIONS,
   RELEASE_STATUS_OPTIONS,
   getTargetPeriodSelectOptions,
@@ -122,6 +124,7 @@ export function CaseDetailView({
     setTracker((current) => {
       const next = { ...current, [key]: value };
       if (key === "caseStage") {
+        next.expectedLitigation = coerceExpectedLitigationForStage(next.caseStage, next.expectedLitigation);
         setShared((s) => ({
           ...s,
           status: deriveCaseStatusFromTracker(next.caseStage, next.result.disbursedStatus),
@@ -650,7 +653,12 @@ export function CaseDetailView({
                       <p className="mt-1 text-sm font-medium text-navy-950">{tracker.caseSize ?? "Not set"}</p>
                       <p className="mt-1 text-xs text-muted-foreground">Calculated from minimum value.</p>
                     </div>
-                    <Info label="Expected Lit" value={tracker.expectedLitigation ?? "Not set"} />
+                    <Info
+                      label="Expected Lit"
+                      value={formatExpectedLitigationLabel(
+                        coerceExpectedLitigationForStage(tracker.caseStage, tracker.expectedLitigation),
+                      )}
+                    />
                     <Info label="Policy Source" value={tracker.policyInfoSource ?? "Not set"} />
                     <Info label="Projected firm fee" value={formatCurrency(tracker.estimatedFeeValue)} />
                   </div>
@@ -712,7 +720,8 @@ export function CaseDetailView({
                     </Field>
                     <Field label="Expected Lit">
                       <Select
-                        value={tracker.expectedLitigation ?? ""}
+                        value={coerceExpectedLitigationForStage(tracker.caseStage, tracker.expectedLitigation) ?? ""}
+                        disabled={tracker.caseStage === "Lit"}
                         onChange={(event) => {
                           const expectedLitigation = event.target.value as TrackerEntry["expectedLitigation"];
                           updateField("expectedLitigation", expectedLitigation || null);
@@ -731,14 +740,18 @@ export function CaseDetailView({
                           }
                         }}
                       >
-                        <option value="">Needs info</option>
-                        {EXPECTED_LITIGATION_OPTIONS.filter(
-                          (status) => status !== "Lit" || tracker.caseStage === "Lit",
-                        ).map((status) => (
-                          <option key={status} value={status}>
-                            {status}
-                          </option>
-                        ))}
+                        {tracker.caseStage === "Lit" ? (
+                          <option value="Lit">{formatExpectedLitigationLabel("Lit")}</option>
+                        ) : (
+                          <>
+                            <option value="">{formatExpectedLitigationLabel(null)}</option>
+                            {EXPECTED_LITIGATION_OPTIONS.filter((status) => status !== "Lit").map((status) => (
+                              <option key={status} value={status}>
+                                {formatExpectedLitigationLabel(status)}
+                              </option>
+                            ))}
+                          </>
+                        )}
                       </Select>
                     </Field>
                     <Field label="Source of Policy Information">

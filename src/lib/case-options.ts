@@ -111,6 +111,34 @@ export const CASE_STAGE_OPTIONS = ["Lit", "Txt", "Dmd", "Settled", "Onboarding",
 
 export const EXPECTED_LITIGATION_OPTIONS = ["Pre", "Lit", "Expect"] satisfies ExpectedLitigationStatus[];
 
+export function formatExpectedLitigationLabel(value: ExpectedLitigationStatus | null | undefined) {
+  if (value == null) return "Need Info";
+  if (value === "Expect") return "Expected";
+  return value;
+}
+
+/** When stage is Lit, expected lit is always Lit. */
+export function coerceExpectedLitigationForStage(
+  stage: CaseStage,
+  expectedLitigation: ExpectedLitigationStatus | null,
+): ExpectedLitigationStatus | null {
+  if (stage === "Lit") return "Lit";
+  return expectedLitigation;
+}
+
+export const EXPECTED_LITIGATION_FILTER_OPTIONS = [
+  { value: "needs-info", label: "Need Info" },
+  { value: "Pre", label: "Pre" },
+  { value: "Lit", label: "Lit" },
+  { value: "Expect", label: "Expected" },
+] as const;
+
+export function matchesExpectedLitigationFilter(filter: string, value: ExpectedLitigationStatus | null) {
+  if (filter === "all") return true;
+  if (filter === "needs-info") return value == null;
+  return value === filter;
+}
+
 export const RELEASE_STATUS_OPTIONS = ["No", "Signed"] satisfies ReleaseStatus[];
 export const CLOSING_STATUS_OPTIONS = ["No", "Drafted", "Approved", "Signed"] satisfies ClosingStatus[];
 export const CHECK_STATUS_OPTIONS = ["Deposited", "No", "Sent"] satisfies CheckStatus[];

@@ -288,8 +288,8 @@ export function ResultsTable({
                   )}
                 </TableHead>
                 <TableHead className="w-36">Paralegal</TableHead>
-                <SortableHead label="Settlement Date" sortKey="settlementDate" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
-                <SortableHead label="Settlement Amount" sortKey="settlementAmount" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-44" />
+                <SortableHead label="Settlement Date" sortKey="settlementDate" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-48" />
+                <SortableHead label="Settlement Amount" sortKey="settlementAmount" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
                 <TableHead className="w-24">Fee Percent</TableHead>
                 <SortableHead label="RJL Attorney Fees" sortKey="attorneyFees" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
                 <TableHead className="w-32 align-top">
@@ -358,7 +358,7 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="w-36">Disburse Date</TableHead>
+                <TableHead className="w-48">Disburse Date</TableHead>
                 <TableHead className="w-28">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -377,10 +377,10 @@ export function ResultsTable({
                     <TableCell className="sticky left-56 z-10 w-44 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.shared.clientName}</TableCell>
                     <TableCell className="sticky left-[25rem] z-10 w-40 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.attorney.name}</TableCell>
                     <TableCell className="w-36">{record.paralegal.name}</TableCell>
-                    <TableCell className="w-36">
-                      <Input className="h-9 w-full min-w-0 text-xs" type="date" value={toDateInput(result.settlementDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, settlementDate: fromDateInput(event.target.value) }))} />
+                    <TableCell className="w-48">
+                      <Input className="h-9 w-full text-xs" type="date" value={toDateInput(result.settlementDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, settlementDate: fromDateInput(event.target.value) }))} />
                     </TableCell>
-                    <TableCell className="w-44 overflow-hidden">
+                    <TableCell className="w-36">
                       <InlineNumberInput prefix="$" value={result.settlementAmount} onCommit={(value) => updateResult(record.shared.id, (current) => ({ ...current, settlementAmount: value }))} />
                     </TableCell>
                     <TableCell className="w-24 whitespace-nowrap text-sm text-muted-foreground">
@@ -428,8 +428,8 @@ export function ResultsTable({
                     <TableCell className="w-36 whitespace-nowrap text-sm text-muted-foreground">
                       {result.resultQuarter ?? "—"}
                     </TableCell>
-                    <TableCell className="w-36">
-                      <Input className="h-9 w-full min-w-0 text-xs" type="date" value={toDateInput(result.disburseDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, disburseDate: fromDateInput(event.target.value) }))} />
+                    <TableCell className="w-48">
+                      <Input className="h-9 w-full text-xs" type="date" value={toDateInput(result.disburseDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, disburseDate: fromDateInput(event.target.value) }))} />
                     </TableCell>
                     <TableCell className="w-28">
                       <Button asChild variant="outline" size="sm">

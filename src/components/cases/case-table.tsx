@@ -18,7 +18,11 @@ import {
   caseTypeSelectOptions,
   CASE_SIZE_OPTIONS,
   deriveCaseSizeFromMinimumValue,
+  EXPECTED_LITIGATION_FILTER_OPTIONS,
   EXPECTED_LITIGATION_OPTIONS,
+  coerceExpectedLitigationForStage,
+  formatExpectedLitigationLabel,
+  matchesExpectedLitigationFilter,
   LIABILITY_OPTIONS,
   getTargetPeriodFilterOptions,
   getTargetPeriodSelectOptions,
@@ -136,7 +140,10 @@ export function CaseTable({
         if (caseType !== "all" && record.shared.caseType !== caseType) return false;
         if (liability !== "all" && record.tracker.liability !== liability) return false;
         if (caseSize !== "all" && record.tracker.caseSize !== caseSize) return false;
-        if (expectedLitigation !== "all" && record.tracker.expectedLitigation !== expectedLitigation) return false;
+        if (!matchesExpectedLitigationFilter(
+          expectedLitigation,
+          coerceExpectedLitigationForStage(record.tracker.caseStage, record.tracker.expectedLitigation),
+        )) return false;
         if (quarter !== "all" && toStandardTargetPeriodLabel(record.tracker.targetResolutionQuarter) !== quarter) return false;
 
         return true;
@@ -292,9 +299,17 @@ export function CaseTable({
     value: TrackerEntry[K],
   ) {
     updateRecord(recordId, (record) => {
+      const nextStage = key === "caseStage" ? (value as CaseStage) : record.tracker.caseStage;
+      const nextExpectedLitigation =
+        key === "expectedLitigation"
+          ? (value as TrackerEntry["expectedLitigation"])
+          : key === "caseStage" && value === "Lit"
+            ? "Lit"
+            : record.tracker.expectedLitigation;
       const tracker = {
         ...record.tracker,
         [key]: value,
+        expectedLitigation: coerceExpectedLitigationForStage(nextStage, nextExpectedLitigation),
         ...(key === "minimumValue"
           ? { caseSize: deriveCaseSizeFromMinimumValue(value as number | null) }
           : {}),
@@ -471,7 +486,7 @@ export function CaseTable({
                     onChange={setExpectedLitigation}
                     options={[
                       { value: "all", label: "All" },
-                      ...EXPECTED_LITIGATION_OPTIONS.map((item) => ({ value: item, label: item })),
+                      ...EXPECTED_LITIGATION_FILTER_OPTIONS.map((item) => ({ value: item.value, label: item.label })),
                     ]}
                   />
                 </TableHead>
@@ -558,13 +573,23 @@ export function CaseTable({
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-1">
-                        <InlineSelect value={record.tracker.expectedLitigation ?? ""} onChange={(value) => updateTrackerField(record.shared.id, "expectedLitigation", (value || null) as TrackerEntry["expectedLitigation"])}>
-                          <option value="">Needs info</option>
-                          {EXPECTED_LITIGATION_OPTIONS.filter(
-                            (option) => option !== "Lit" || record.tracker.caseStage === "Lit",
-                          ).map((option) => (
-                            <option key={option} value={option}>{option}</option>
-                          ))}
+                        <InlineSelect
+                          value={coerceExpectedLitigationForStage(record.tracker.caseStage, record.tracker.expectedLitigation) ?? ""}
+                          disabled={record.tracker.caseStage === "Lit"}
+                          onChange={(value) => updateTrackerField(record.shared.id, "expectedLitigation", (value || null) as TrackerEntry["expectedLitigation"])}
+                        >
+                          {record.tracker.caseStage === "Lit" ? (
+                            <option value="Lit">{formatExpectedLitigationLabel("Lit")}</option>
+                          ) : (
+                            <>
+                              <option value="">{formatExpectedLitigationLabel(null)}</option>
+                              {EXPECTED_LITIGATION_OPTIONS.filter(
+                                (option) => option !== "Lit" || record.tracker.caseStage === "Lit",
+                              ).map((option) => (
+                                <option key={option} value={option}>{formatExpectedLitigationLabel(option)}</option>
+                              ))}
+                            </>
+                          )}
                         </InlineSelect>
                         {flags.length > 0 ? <Badge variant={flags[0].severity}>{flags[0].id === "stale-review" ? "Stale" : "Needs info"}</Badge> : null}
                       </div>
@@ -623,14 +648,16 @@ function SortableHead({
 function InlineSelect({
   value,
   onChange,
+  disabled,
   children,
 }: {
   value: string;
   onChange: (value: string) => void;
+  disabled?: boolean;
   children: ReactNode;
 }) {
   return (
-    <Select className="h-9 min-w-0 text-xs" value={value} onChange={(event) => onChange(event.target.value)}>
+    <Select className="h-9 min-w-0 text-xs" value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)}>
       {children}
     </Select>
   );

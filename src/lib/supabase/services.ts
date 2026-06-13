@@ -20,6 +20,7 @@ import { buildTrackerActivityDescription, describeTrackerChanges } from "@/lib/t
 import {
   CASE_STAGE_OPTIONS,
   EXPECTED_LITIGATION_OPTIONS,
+  coerceExpectedLitigationForStage,
   caseTypeFromCasesTable,
   applyDerivedResultFields,
   applyDerivedSettlementResult,
@@ -286,14 +287,22 @@ export async function updateTrackerEntry(
     now,
   );
 
+  const nextStage = input.caseStage ?? existingTracker?.caseStage ?? "Onboarding";
+  const nextExpectedLitigation =
+    input.expectedLitigation !== undefined ? input.expectedLitigation : (existingTracker?.expectedLitigation ?? null);
+  const coercedExpectedLitigation = coerceExpectedLitigationForStage(nextStage, nextExpectedLitigation);
+  const inputWithExpectedLit =
+    nextStage === "Lit" || coercedExpectedLitigation !== nextExpectedLitigation
+      ? { ...inputWithSourcesLit, expectedLitigation: coercedExpectedLitigation }
+      : inputWithSourcesLit;
+
   const litigationPatch: Record<string, unknown> = {};
-  const nextStage = input.caseStage ?? existingTracker?.caseStage;
   if (nextStage === "Lit" || existingTracker?.hasEverBeenLitigation || existingTracker?.caseStage === "Lit") {
     litigationPatch.has_ever_been_litigation = true;
   }
 
   const payload = {
-    ...trackerUpdateToRow(inputWithSourcesLit, markReviewed),
+    ...trackerUpdateToRow(inputWithExpectedLit, markReviewed),
     ...validationPatch,
     ...litigationPatch,
   };
@@ -1494,7 +1503,7 @@ function buildCaseBackfillLookup(records: CaseRecord[]) {
 }
 
 function mergeTrackerImport(existing: TrackerEntry, patch: TrackerUpdateInput): TrackerUpdateInput {
-  return {
+  const merged = {
     caseStage: patch.caseStage ?? existing.caseStage,
     estimatedSettlementValue: patch.estimatedSettlementValue ?? existing.estimatedSettlementValue,
     estimatedFeeValue: patch.estimatedFeeValue ?? existing.estimatedFeeValue,
@@ -1519,6 +1528,10 @@ function mergeTrackerImport(existing: TrackerEntry, patch: TrackerUpdateInput): 
     lastQuarterlyCheckInAt: patch.lastQuarterlyCheckInAt ?? existing.lastQuarterlyCheckInAt,
     lastSourcesLitUpdatedAt: patch.lastSourcesLitUpdatedAt ?? existing.lastSourcesLitUpdatedAt,
     forecastNotes: patch.forecastNotes ?? existing.forecastNotes,
+  };
+  return {
+    ...merged,
+    expectedLitigation: coerceExpectedLitigationForStage(merged.caseStage, merged.expectedLitigation),
   };
 }
 
