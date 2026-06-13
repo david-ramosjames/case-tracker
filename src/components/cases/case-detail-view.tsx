@@ -28,6 +28,7 @@ import {
   LIABILITY_OPTIONS,
   RELEASE_STATUS_OPTIONS,
   getTargetPeriodSelectOptions,
+  toStandardTargetPeriodLabel,
 } from "@/lib/case-options";
 import { AttorneyScoreBreakdown } from "@/components/attorney-score/attorney-score";
 import { getCaseAttorneyScore, getValidationFieldLabel } from "@/lib/attorney-score";
@@ -782,7 +783,10 @@ export function CaseDetailView({
                       </Select>
                     </AttorneyField>
                     <AttorneyField fieldId="targetResolutionQuarter" record={record}>
-                      <Select value={tracker.targetResolutionQuarter ?? ""} onChange={(event) => updateField("targetResolutionQuarter", event.target.value || null)}>
+                      <Select
+                        value={toStandardTargetPeriodLabel(tracker.targetResolutionQuarter) ?? ""}
+                        onChange={(event) => updateField("targetResolutionQuarter", event.target.value || null)}
+                      >
                         <option value="">Select expected disbursement quarter</option>
                         {quarterOptions.map((quarter) => (
                           <option key={quarter} value={quarter}>

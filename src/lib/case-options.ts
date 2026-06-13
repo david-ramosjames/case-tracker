@@ -13,6 +13,7 @@ import {
   type TrackerEntry,
 } from "@/lib/types";
 import { getCalculatedAttorneyFees } from "@/lib/utils";
+import { normalizeTargetQuarter } from "@/lib/target-quarter";
 
 export { EXPECTED_DISBURSEMENT_QUARTER_LABEL } from "@/lib/case-labels";
 export { normalizeTargetQuarter } from "@/lib/target-quarter";
@@ -121,11 +122,43 @@ export const REDUCTIONS_STATUS_OPTIONS = [...REDUCTIONS_MANUAL_STATUS_OPTIONS, "
 /** Actual quarter from disburse date on the results tab (auto-derived from the sheet). */
 export const RESULT_QUARTER_LABEL = "Result quarter";
 
+export const TARGET_PERIOD_LABEL_PATTERN = /^Q[1-4]-\d{2}$/i;
+
 export function getTargetPeriodOptions(date = new Date()) {
   const currentYear = date.getFullYear() % 100;
   const years = Array.from({ length: 6 }, (_, index) => currentYear - 1 + index);
 
-  return years.flatMap((year) => [`Q1-${year}`, `Q2-${year}`, `Q3-${year}`, `Q4-${year}`]);
+  return years.flatMap((year) => {
+    const yy = String(year).padStart(2, "0");
+    return [`Q1-${yy}`, `Q2-${yy}`, `Q3-${yy}`, `Q4-${yy}`];
+  });
+}
+
+export function isStandardTargetPeriodLabel(label: string | null | undefined) {
+  return Boolean(label?.trim() && TARGET_PERIOD_LABEL_PATTERN.test(label.trim()));
+}
+
+/** Convert stored quarter text to canonical Q#-YY (e.g. Q4-26). Returns null for invalid/legacy values like N/A. */
+export function toStandardTargetPeriodLabel(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+
+  const direct = parseTargetPeriodLabel(trimmed);
+  if (direct) {
+    const yy = String(direct.year % 100).padStart(2, "0");
+    return `Q${direct.quarter}-${yy}`;
+  }
+
+  const normalized = normalizeTargetQuarter(trimmed);
+  if (!normalized) return null;
+
+  const longMatch = normalized.match(/^(\d{4})\s*Q([1-4])$/i);
+  if (longMatch) {
+    const yy = String(Number(longMatch[1]) % 100).padStart(2, "0");
+    return `Q${longMatch[2]}-${yy}`;
+  }
+
+  return null;
 }
 
 export function parseTargetPeriodLabel(label: string): { year: number; quarter: number } | null {
@@ -154,12 +187,17 @@ export function getSelectableTargetPeriodOptions(date = new Date()) {
   return getTargetPeriodOptions(date).filter((label) => isTargetPeriodCurrentOrFuture(label, date));
 }
 
-/** Dropdown options for a case, keeping an existing past quarter visible when already set. */
+/** Column filter options — standard Q#-YY labels only (current quarter and later). */
+export function getTargetPeriodFilterOptions(date = new Date()) {
+  return getSelectableTargetPeriodOptions(date);
+}
+
+/** Dropdown options for a case, keeping an existing past standard quarter visible when already set. */
 export function getTargetPeriodSelectOptions(currentValue: string | null | undefined, date = new Date()) {
   const selectable = getSelectableTargetPeriodOptions(date);
-  const normalized = currentValue?.trim();
-  if (normalized && !selectable.includes(normalized) && parseTargetPeriodLabel(normalized)) {
-    return [normalized, ...selectable];
+  const standardCurrent = toStandardTargetPeriodLabel(currentValue);
+  if (standardCurrent && !selectable.includes(standardCurrent)) {
+    return [standardCurrent, ...selectable];
   }
   return selectable;
 }

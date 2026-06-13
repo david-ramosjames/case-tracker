@@ -20,8 +20,9 @@ import {
   deriveCaseSizeFromMinimumValue,
   EXPECTED_LITIGATION_OPTIONS,
   LIABILITY_OPTIONS,
-  getTargetPeriodOptions,
+  getTargetPeriodFilterOptions,
   getTargetPeriodSelectOptions,
+  toStandardTargetPeriodLabel,
 } from "@/lib/case-options";
 import { CaseAttorneyScoreCell } from "@/components/attorney-score/attorney-score";
 import { getCaseAttorneyScore } from "@/lib/attorney-score";
@@ -84,9 +85,7 @@ export function CaseTable({
 
   const attorneys = users.filter((user) => user.role === "attorney");
   const paralegals = users.filter((user) => user.role === "paralegal");
-  const quarters = Array.from(
-    new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.targetResolutionQuarter).filter(Boolean)]),
-  );
+  const quarterFilterOptions = useMemo(() => getTargetPeriodFilterOptions(), []);
   const statusFilterOptions = useMemo(() => {
     const options: Array<{ value: CasePipelineFilter; label: string }> = [
       { value: "all", label: "All statuses" },
@@ -138,7 +137,7 @@ export function CaseTable({
         if (liability !== "all" && record.tracker.liability !== liability) return false;
         if (caseSize !== "all" && record.tracker.caseSize !== caseSize) return false;
         if (expectedLitigation !== "all" && record.tracker.expectedLitigation !== expectedLitigation) return false;
-        if (quarter !== "all" && record.tracker.targetResolutionQuarter !== quarter) return false;
+        if (quarter !== "all" && toStandardTargetPeriodLabel(record.tracker.targetResolutionQuarter) !== quarter) return false;
 
         return true;
       })
@@ -436,7 +435,7 @@ export function CaseTable({
                     onChange={setQuarter}
                     options={[
                       { value: "all", label: "All" },
-                      ...quarters.map((item) => ({ value: item ?? "", label: item ?? "" })),
+                      ...quarterFilterOptions.map((item) => ({ value: item, label: item })),
                     ]}
                   />
                 </TableHead>
@@ -516,7 +515,10 @@ export function CaseTable({
                       </InlineSelect>
                     </TableCell>
                     <TableCell>
-                      <InlineSelect value={record.tracker.targetResolutionQuarter ?? ""} onChange={(value) => updateTrackerField(record.shared.id, "targetResolutionQuarter", value || null)}>
+                      <InlineSelect
+                        value={toStandardTargetPeriodLabel(record.tracker.targetResolutionQuarter) ?? ""}
+                        onChange={(value) => updateTrackerField(record.shared.id, "targetResolutionQuarter", value || null)}
+                      >
                         <option value="">Not set</option>
                         {getTargetPeriodSelectOptions(record.tracker.targetResolutionQuarter).map((option) => (
                           <option key={option} value={option}>{option}</option>

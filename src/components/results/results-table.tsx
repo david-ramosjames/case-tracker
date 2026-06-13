@@ -69,7 +69,7 @@ export function ResultsTable({
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
-  const [scrollWidth, setScrollWidth] = useState(1800);
+  const [scrollWidth, setScrollWidth] = useState(2300);
 
   const attorneys = users.filter((user) => user.role === "attorney");
   const quarters = Array.from(new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.result.resultQuarter).filter(Boolean)]));
@@ -155,7 +155,7 @@ export function ResultsTable({
 
   useEffect(() => {
     function updateScrollWidth() {
-      setScrollWidth(tableRef.current?.scrollWidth ?? 1800);
+      setScrollWidth(tableRef.current?.scrollWidth ?? 2300);
     }
 
     updateScrollWidth();
@@ -269,7 +269,7 @@ export function ResultsTable({
               className="max-h-[calc(100vh-23rem)] min-h-[28rem] overflow-auto"
               onScroll={(event) => syncScroll(event, topScrollRef)}
             >
-          <Table ref={tableRef} className="min-w-[1800px] table-fixed">
+          <Table ref={tableRef} className="min-w-[2300px] table-fixed">
             <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
               <TableRow>
                 <SortableHead label="% Complete" sortKey="completion" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-0 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
@@ -287,12 +287,12 @@ export function ResultsTable({
                     <span className="text-xs font-semibold uppercase text-muted-foreground">Attorney</span>
                   )}
                 </TableHead>
-                <TableHead>Paralegal</TableHead>
-                <SortableHead label="Settlement Date" sortKey="settlementDate" active={sortKey} direction={sortDirection} onSort={requestSort} />
-                <SortableHead label="Settlement Amount" sortKey="settlementAmount" active={sortKey} direction={sortDirection} onSort={requestSort} />
-                <TableHead>Fee Percent</TableHead>
-                <SortableHead label="RJL Attorney Fees" sortKey="attorneyFees" active={sortKey} direction={sortDirection} onSort={requestSort} />
-                <TableHead className="align-top">
+                <TableHead className="w-36">Paralegal</TableHead>
+                <SortableHead label="Settlement Date" sortKey="settlementDate" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
+                <SortableHead label="Settlement Amount" sortKey="settlementAmount" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-44" />
+                <TableHead className="w-24">Fee Percent</TableHead>
+                <SortableHead label="RJL Attorney Fees" sortKey="attorneyFees" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
+                <TableHead className="w-32 align-top">
                   <HeaderFilter
                     label="Release"
                     value={release}
@@ -303,7 +303,7 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="align-top">
+                <TableHead className="w-32 align-top">
                   <HeaderFilter
                     label="Closing"
                     value={closing}
@@ -314,7 +314,7 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="align-top">
+                <TableHead className="w-32 align-top">
                   <HeaderFilter
                     label="Check"
                     value={check}
@@ -325,7 +325,7 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="align-top">
+                <TableHead className="w-32 align-top">
                   <HeaderFilter
                     label="Disbursed"
                     value={disbursed}
@@ -336,7 +336,7 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="align-top">
+                <TableHead className="w-36 align-top">
                   <HeaderFilter
                     label="Reductions"
                     value={reductions}
@@ -347,7 +347,7 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="align-top">
+                <TableHead className="w-36 align-top">
                   <HeaderFilter
                     label="Result quarter"
                     value={quarter}
@@ -358,8 +358,8 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead>Disburse Date</TableHead>
-                <TableHead>Actions</TableHead>
+                <TableHead className="w-36">Disburse Date</TableHead>
+                <TableHead className="w-28">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -376,38 +376,38 @@ export function ResultsTable({
                     </TableCell>
                     <TableCell className="sticky left-56 z-10 w-44 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.shared.clientName}</TableCell>
                     <TableCell className="sticky left-[25rem] z-10 w-40 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.attorney.name}</TableCell>
-                    <TableCell>{record.paralegal.name}</TableCell>
-                    <TableCell>
-                      <Input className="h-9 min-w-32 text-xs" type="date" value={toDateInput(result.settlementDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, settlementDate: fromDateInput(event.target.value) }))} />
+                    <TableCell className="w-36">{record.paralegal.name}</TableCell>
+                    <TableCell className="w-36">
+                      <Input className="h-9 w-full min-w-0 text-xs" type="date" value={toDateInput(result.settlementDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, settlementDate: fromDateInput(event.target.value) }))} />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="w-44 overflow-hidden">
                       <InlineNumberInput prefix="$" value={result.settlementAmount} onCommit={(value) => updateResult(record.shared.id, (current) => ({ ...current, settlementAmount: value }))} />
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
+                    <TableCell className="w-24 whitespace-nowrap text-sm text-muted-foreground">
                       {Math.round((result.feePercent ?? 0) * 100)}%
                     </TableCell>
-                    <TableCell>{formatCurrency(result.attorneyFees)}</TableCell>
-                    <TableCell>
+                    <TableCell className="w-36 whitespace-nowrap">{formatCurrency(result.attorneyFees)}</TableCell>
+                    <TableCell className="w-32">
                       <InlineSelect value={result.releaseStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "releaseStatus", value as ReleaseStatus)}>
                         {RELEASE_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                       </InlineSelect>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="w-32">
                       <InlineSelect value={result.closingStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "closingStatus", value as ClosingStatus)}>
                         {CLOSING_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                       </InlineSelect>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="w-32">
                       <InlineSelect value={result.checkStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "checkStatus", value as CheckStatus)}>
                         {CHECK_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                       </InlineSelect>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="w-32">
                       <InlineSelect value={result.disbursedStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "disbursedStatus", value as DisbursedStatus)}>
                         {DISBURSED_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                       </InlineSelect>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="w-36">
                       {result.disburseDate ? (
                         <span className="text-sm text-muted-foreground">Deposited</span>
                       ) : (
@@ -425,13 +425,13 @@ export function ResultsTable({
                         </InlineSelect>
                       )}
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
+                    <TableCell className="w-36 whitespace-nowrap text-sm text-muted-foreground">
                       {result.resultQuarter ?? "—"}
                     </TableCell>
-                    <TableCell>
-                      <Input className="h-9 min-w-32 text-xs" type="date" value={toDateInput(result.disburseDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, disburseDate: fromDateInput(event.target.value) }))} />
+                    <TableCell className="w-36">
+                      <Input className="h-9 w-full min-w-0 text-xs" type="date" value={toDateInput(result.disburseDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, disburseDate: fromDateInput(event.target.value) }))} />
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="w-28">
                       <Button asChild variant="outline" size="sm">
                         <Link href={`/cases/${record.shared.id}`}>
                           <Eye className="h-4 w-4" />
@@ -474,7 +474,7 @@ function SortableHead({
     <TableHead className={cn("align-middle", className)}>
       <button
         type="button"
-        className="inline-flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground"
+        className="inline-flex max-w-full items-center gap-1 whitespace-normal text-left text-xs font-semibold uppercase leading-tight text-muted-foreground"
         onClick={() => onSort(sortKey)}
       >
         {label}
@@ -486,7 +486,7 @@ function SortableHead({
 
 function InlineSelect({ value, onChange, children }: { value: string; onChange: (value: string) => void; children: React.ReactNode }) {
   return (
-    <Select className="h-9 min-w-28 text-xs" value={value} onChange={(event) => onChange(event.target.value)}>
+    <Select className="h-9 w-full min-w-0 text-xs" value={value} onChange={(event) => onChange(event.target.value)}>
       {children}
     </Select>
   );
@@ -522,7 +522,7 @@ function InlineNumberInput({
   }
 
   return (
-    <div className="flex h-9 min-w-28 items-center rounded-md border border-input bg-white px-2 text-xs focus-within:ring-2 focus-within:ring-ring">
+    <div className="flex h-9 w-full min-w-0 items-center rounded-md border border-input bg-white px-2 text-xs focus-within:ring-2 focus-within:ring-ring">
       {prefix ? <span className="mr-1 text-muted-foreground">{prefix}</span> : null}
       <Input
         className="h-7 min-w-0 border-0 bg-transparent px-0 py-0 text-xs shadow-none focus-visible:ring-0"
