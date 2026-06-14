@@ -1,6 +1,6 @@
 import { fieldReminderValidationPatch } from "@/lib/slack/field-reminders";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import { getCaseById, updateTrackerEntry } from "@/lib/supabase/services";
+import { getCaseById, trackerActivityLink, updateTrackerEntry } from "@/lib/supabase/services";
 import { type FieldReminderKey, type TrackerUpdateInput } from "@/lib/types";
 
 type FieldReminderRow = {
@@ -102,8 +102,12 @@ async function closeFieldReminder(reminderId: string, caseId: string, action: "c
   const column = action === "confirmed" ? "confirmed_at" : "dismissed_at";
   await admin.from("case_tracker_field_reminders").update({ [column]: now }).eq("id", reminderId);
 
+  const record = await getCaseById(caseId);
+  const link = record ? trackerActivityLink(record) : { caseId: null, trackerEntryId: caseId };
+
   await admin.from("case_tracker_activity").insert({
-    case_id: caseId,
+    case_id: link.caseId,
+    tracker_entry_id: link.trackerEntryId,
     action: action === "confirmed" ? "Field reminder confirmed" : "Field reminder dismissed",
     description: `Slack field reminder ${action}.`,
     metadata: { user_name: actorName, reminder_id: reminderId },

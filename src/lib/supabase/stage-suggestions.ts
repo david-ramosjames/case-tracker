@@ -11,6 +11,7 @@ import {
   normalizeStage,
   toDatabaseExpectedLitigation,
   toDatabaseStage,
+  trackerActivityLink,
   updateTrackerEntry,
 } from "@/lib/supabase/services";
 import {
@@ -190,15 +191,22 @@ export async function dismissStageSuggestionById(suggestionId: string, actorName
     .from("case_tracker_stage_suggestions")
     .update({ dismissed_at: now })
     .eq("id", suggestionId)
-    .select("case_id")
+    .select("case_id, tracker_entry_id")
     .maybeSingle();
 
   if (error) throw new Error(error.message);
 
   const caseId = row?.case_id ? String(row.case_id) : null;
-  if (caseId) {
+  const trackerEntryId = row?.tracker_entry_id ? String(row.tracker_entry_id) : null;
+  const lookupId = caseId ?? trackerEntryId;
+  if (lookupId) {
+    const record = await getCaseById(lookupId);
+    const link = record
+      ? trackerActivityLink(record)
+      : { caseId, trackerEntryId: trackerEntryId ?? lookupId };
     await admin.from("case_tracker_activity").insert({
-      case_id: caseId,
+      case_id: link.caseId,
+      tracker_entry_id: link.trackerEntryId,
       action: "Stage suggestion dismissed",
       description: "Slack stage confirmation was dismissed.",
       metadata: { user_name: actorName, suggestion_id: suggestionId },
@@ -231,8 +239,10 @@ export async function applyConfirmedStage(
       .update({ confirmed_at: new Date().toISOString(), suggested_stage: toDatabaseStage(stage) })
       .eq("id", suggestion.id);
 
+    const activityLink = trackerActivityLink(record);
     await admin.from("case_tracker_activity").insert({
-      case_id: caseId,
+      case_id: activityLink.caseId,
+      tracker_entry_id: activityLink.trackerEntryId,
       action: "Stage suggestion confirmed",
       description: `Confirmed ${suggestion.source} signal: case stage is now ${stage}.`,
       metadata: { user_name: actorName, suggestion_id: suggestion.id, excerpt: suggestion.excerpt },

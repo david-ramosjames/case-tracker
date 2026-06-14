@@ -11,16 +11,23 @@ export async function promoteOnboardingToTreatment(records?: CaseRecord[]) {
   for (const record of eligible) {
     if (record.tracker.caseStage !== "Onboarding") continue;
 
-    await updateTrackerEntry(
-      record.shared.id,
-      { caseStage: "Txt" },
-      {
-        actor: { userName: "Automatic stage trigger" },
-        markReviewed: false,
-        changeInput: { caseStage: "Txt" },
-      },
-    );
-    promoted += 1;
+    try {
+      await updateTrackerEntry(
+        record.shared.id,
+        { caseStage: "Txt" },
+        {
+          actor: { userName: "Automatic stage trigger" },
+          markReviewed: false,
+          changeInput: { caseStage: "Txt" },
+        },
+      );
+      promoted += 1;
+    } catch (error) {
+      console.error(
+        `Treatment promotion failed for case ${record.shared.caseNumber} (${record.shared.id})`,
+        error,
+      );
+    }
   }
 
   return { promoted, eligible: eligible.length };

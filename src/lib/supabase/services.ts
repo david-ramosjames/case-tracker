@@ -159,6 +159,14 @@ export function isOrphanTrackerRecord(record: CaseRecord) {
   return record.shared.id === record.tracker.id;
 }
 
+/** Activity/comments FK to `cases` only when the tracker row is linked to DocketFlow. */
+export function trackerActivityLink(record: Pick<CaseRecord, "shared" | "tracker">) {
+  if (isOrphanTrackerRecord(record)) {
+    return { caseId: null, trackerEntryId: record.tracker.id };
+  }
+  return { caseId: record.shared.id, trackerEntryId: record.tracker.id };
+}
+
 /** Remove a tracker row and related data. Optionally delete the linked DocketFlow `cases` row. */
 export async function deleteTrackerCase(
   caseId: string,
@@ -327,9 +335,10 @@ export async function updateTrackerEntry(
       buildTrackerActivityDescription(changedFields, markReviewed),
       options.actor,
       { changedFields },
+      existingRecord,
     );
     if (existingRecord) {
-      await syncDerivedSharedCaseStatus(caseId, tracker);
+      await syncDerivedSharedCaseStatus(caseId, tracker, existingRecord);
       try {
         await runSlackTrackerSideEffects(existingRecord, tracker, changeInput, previousStage);
       } catch (error) {
@@ -354,12 +363,15 @@ export async function updateTrackerEntry(
     ? await upsertResultRow(caseId, toString(inserted.id, ""), requestedResult, inserted as TrackerEntryRow)
     : null;
   const tracker = rowToTrackerEntry(inserted as TrackerEntryRow, resultRow, []);
-  await syncDerivedSharedCaseStatus(caseId, tracker);
+  const insertedRecord = await getCaseById(caseId);
+  await syncDerivedSharedCaseStatus(caseId, tracker, insertedRecord);
   const activity = await createActivityEntry(
     caseId,
     "Tracker created",
     "Tracker row was created from live DocketFlow case data.",
     options.actor,
+    undefined,
+    insertedRecord,
   );
   const refreshed = await getCaseById(caseId);
   return { tracker: refreshed?.tracker ?? tracker, activity: activity ?? undefined };
@@ -459,6 +471,7 @@ export async function importCaseBackfillCsv(
           ),
           options.actor,
           { source: "csv_backfill", trackerEntryId: existing.tracker.id },
+          existing,
         );
       }
 
@@ -859,8 +872,11 @@ export async function createTrackerComment(
   const client = (await createSupabaseAdminClient()) ?? (await createTrackerClient());
 
   const authorName = input.authorName?.trim() || "Unknown user";
+  const record = await getCaseById(input.caseId);
+  const link = record ? trackerActivityLink(record) : { caseId: input.caseId, trackerEntryId: input.caseId };
   const basePayload = {
-    case_id: input.caseId,
+    case_id: link.caseId,
+    tracker_entry_id: link.trackerEntryId,
     author_id: isUuid(input.authorId) ? input.authorId : null,
     comment_type: input.type,
     body: input.body,
@@ -887,6 +903,7 @@ export async function createTrackerComment(
     `${authorName} added ${commentTypeLabel}.`,
     { userId: input.authorId, userName: authorName },
     { comment_id: commentId, user_name: authorName },
+    record,
   );
 
   const record = await getCaseById(input.caseId);
@@ -1150,17 +1167,25 @@ async function createActivityEntry(
   description: string,
   actor?: TrackerActor,
   metadata?: Record<string, unknown>,
+  record?: CaseRecord | null,
 ): Promise<ActivityLogEntry | null> {
   const client = await createTrackerClient();
 
-  const trackerEntryId =
-    typeof metadata?.trackerEntryId === "string" && isUuid(metadata.trackerEntryId) ? metadata.trackerEntryId : null;
+  const resolvedRecord = record ?? (await getCaseById(caseId));
+  const fallbackTrackerEntryId =
+    typeof metadata?.trackerEntryId === "string" && isUuid(metadata.trackerEntryId) ? metadata.trackerEntryId : caseId;
+  const link = resolvedRecord
+    ? trackerActivityLink(resolvedRecord)
+    : {
+        caseId: fallbackTrackerEntryId === caseId ? null : caseId,
+        trackerEntryId: fallbackTrackerEntryId,
+      };
 
   const { data, error } = await client
     .from("case_tracker_activity")
     .insert({
-      case_id: caseId,
-      tracker_entry_id: trackerEntryId,
+      case_id: link.caseId,
+      tracker_entry_id: link.trackerEntryId,
       user_id: actor?.userId && isUuid(actor.userId) ? actor.userId : null,
       action,
       description,
@@ -1684,9 +1709,12 @@ function normalizeCaseStatus(value: string | null | undefined): CaseStatus {
   return normalized === "closed" || normalized === "inactive" || normalized === "disengaged" || normalized === "archived" ? "Closed" : "Active";
 }
 
-async function syncDerivedSharedCaseStatus(caseId: string, tracker: TrackerEntry) {
+async function syncDerivedSharedCaseStatus(caseId: string, tracker: TrackerEntry, record?: CaseRecord | null) {
+  const resolved = record ?? (await getCaseById(caseId));
+  if (!resolved || isOrphanTrackerRecord(resolved)) return;
+
   const status = deriveCaseStatusFromTracker(tracker.caseStage, tracker.result.disbursedStatus);
-  await updateSharedCaseFields(caseId, {}, { explicitStatus: status });
+  await updateSharedCaseFields(resolved.shared.id, {}, { explicitStatus: status });
 }
 
 export function normalizeStage(value: string | null | undefined): CaseStage {
