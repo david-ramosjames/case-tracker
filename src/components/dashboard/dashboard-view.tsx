@@ -85,6 +85,7 @@ export function DashboardView({
           detail="Liability, quarter, minimum, or policy limits >90d"
         />
         <MetricCard
+          href="/stage-suggestions"
           icon={Sparkles}
           label="Stage suggestions"
           value={String(metrics.stageSuggestionsOpen)}

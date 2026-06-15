@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, BriefcaseBusiness, CircleDollarSign, LayoutDashboard, Settings, Target } from "lucide-react";
+import { BarChart3, BriefcaseBusiness, CircleDollarSign, LayoutDashboard, Settings, Sparkles, Target } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/cases", label: "Cases", icon: BriefcaseBusiness },
+  { href: "/stage-suggestions", label: "Suggestions", icon: Sparkles },
   { href: "/results", label: "Results", icon: CircleDollarSign },
   { href: "/output", label: "Output", icon: BarChart3 },
   { href: "/goals", label: "Goals", icon: Target },

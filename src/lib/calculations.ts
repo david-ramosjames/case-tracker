@@ -279,6 +279,17 @@ export function getOpenStageSuggestions(record: CaseRecord) {
   return record.tracker.detectedStageSignals.filter((signal) => !signal.confirmedAt && !signal.dismissedAt);
 }
 
+export type OpenStageSuggestionItem = {
+  record: CaseRecord;
+  signal: CaseRecord["tracker"]["detectedStageSignals"][number];
+};
+
+export function getOpenStageSuggestionItems(records: CaseRecord[]): OpenStageSuggestionItem[] {
+  return records
+    .flatMap((record) => getOpenStageSuggestions(record).map((signal) => ({ record, signal })))
+    .sort((a, b) => b.signal.detectedAt.localeCompare(a.signal.detectedAt));
+}
+
 export type CommissionQuarterPerformanceRow = {
   label: string;
   period: string;
