@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ExternalLink, SlidersHorizontal, Sparkles } from "lucide-react";
+import { ExternalLink, Sparkles } from "lucide-react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -108,32 +108,30 @@ export function StageSuggestionsPanel({
     attorneyIds.length > 0 ? "No stage suggestions match the selected attorney filter." : null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       {showEmpty && canFilterByAttorney ? (
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-              <div className="flex flex-wrap items-center gap-2">
-                <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-semibold text-navy-950">Filters</span>
-                {attorneyIds.length > 0 ? <Badge variant="pink">{attorneyIds.length}</Badge> : null}
-                {attorneyIds.length > 0 ? (
-                  <Button variant="ghost" size="sm" onClick={() => setAttorneyIds([])}>
-                    Clear
-                  </Button>
-                ) : null}
-              </div>
-              <div className="w-full max-w-xs">
-                <HeaderMultiFilter
-                  label="Attorney"
-                  selected={attorneyIds}
-                  onChange={setAttorneyIds}
-                  options={attorneys.map((attorney) => ({ value: attorney.id, label: attorney.name }))}
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        <div className="flex flex-wrap items-end gap-2 rounded-lg border bg-white px-3 py-2">
+          <HeaderMultiFilter
+            label="Attorney"
+            selected={attorneyIds}
+            onChange={setAttorneyIds}
+            options={attorneys.map((attorney) => ({ value: attorney.id, label: attorney.name }))}
+            className="w-44"
+          />
+          {attorneyIds.length > 0 ? (
+            <>
+              <Badge variant="pink" className="mb-1">
+                {attorneyIds.length}
+              </Badge>
+              <Button variant="ghost" size="sm" className="mb-0.5 h-8 px-2" onClick={() => setAttorneyIds([])}>
+                Clear
+              </Button>
+            </>
+          ) : null}
+          <p className="mb-1 ml-auto text-xs text-muted-foreground">
+            {filteredItems.length} of {items.length} open
+          </p>
+        </div>
       ) : null}
 
       {filteredItems.length === 0 ? (
