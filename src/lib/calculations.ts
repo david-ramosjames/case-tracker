@@ -449,7 +449,7 @@ export function getFirmOutputMetrics(
 
 export function getCaseStatusRollup(records: CaseRecord[], goals: AttorneyGoal[]) {
   const activeRecords = records.filter((record) => isActivePipelineCase(record, goals));
-  const labels = ["Onboarding", "Txt", "Dmd", "Lit", "Settled", "Disengaged", "Referred", "Terminated"];
+  const labels = ["Onboarding", "Txt", "Dmd", "Lit", "Settled"];
   const total = activeRecords.length || 1;
   const counts = new Map(labels.map((label) => [label, 0]));
 
