@@ -5,16 +5,20 @@ import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 export const dynamic = "force-dynamic";
 
 export default async function StageSuggestionsPage() {
-  const { records } = await loadViewerCaseBundle();
+  const { records, users, viewer } = await loadViewerCaseBundle();
 
   return (
     <>
       <PageHeader
         eyebrow="Workflow"
         title="Stage suggestions"
-        description="Confirm or dismiss inferred stage changes from the daily pulse recap — no need to hunt through Slack."
+        description={
+          viewer.isAttorney
+            ? "Confirm or dismiss inferred stage changes on your cases from the daily pulse recap."
+            : "Confirm or dismiss inferred stage changes from the daily pulse recap — filter by attorney to focus the queue."
+        }
       />
-      <StageSuggestionsPanel records={records} showEmpty />
+      <StageSuggestionsPanel records={records} users={users} viewer={viewer} showEmpty />
     </>
   );
 }
