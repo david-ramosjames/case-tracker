@@ -1,5 +1,5 @@
 import { getOutdatedValidationFields, getValidationFieldLabel } from "@/lib/attorney-score";
-import { getAttorneyCommissionStartMonth } from "@/lib/auth/access";
+import { getAttorneyCommissionStartMonth, isActivePipelineCase } from "@/lib/auth/access";
 import {
   formatCommissionQuarterPeriod,
   getCommissionQuarterForDate,
@@ -185,8 +185,9 @@ function getCommissionYearElapsedPercentage(goal: AttorneyGoal, refDate = new Da
 export function getDashboardMetrics(
   records: CaseRecord[],
   settings: Pick<CaseTrackerSettings, "staleReviewThresholdDays">,
+  goals: AttorneyGoal[] = [],
 ): DashboardMetrics {
-  const activeRecords = records.filter((record) => record.tracker.isActive);
+  const activeRecords = records.filter((record) => isActivePipelineCase(record, goals));
 
   return {
     totalActiveCases: activeRecords.length,
@@ -401,7 +402,6 @@ export function getFirmOutputMetrics(records: CaseRecord[], goals: AttorneyGoal[
   const feesDisbursed = sum(disbursedRecords.map((record) => record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue));
   const commissionThreshold = Math.round(sum(scopedGoals.map((goal) => goal.commissionThreshold)));
   const commissionableAmount = Math.max(feesDisbursed - commissionThreshold, 0);
-  const completedDisbursementGoal = Math.max(1, Math.ceil(scopedRecords.length * 0.55));
   const planGross = sum(planRecords.map((record) => record.tracker.minimumValue));
   const planFees = sum(planRecords.map((record) => getProjectedFeeValue(record)));
 
@@ -419,7 +419,6 @@ export function getFirmOutputMetrics(records: CaseRecord[], goals: AttorneyGoal[
       planGross,
       planFees,
       completedDisbursements: disbursedRecords.length,
-      completedDisbursementGoal,
     },
     caseStatuses: getCaseStatusRollup(scopedRecords),
     grossQuarterRows: getQuarterRows(scopedRecords, annualGrossGoal, "gross", scopedGoals),

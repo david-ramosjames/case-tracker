@@ -1,6 +1,7 @@
 import { EXPECTED_DISBURSEMENT_QUARTER_LABEL } from "@/lib/case-labels";
+import { isActivePipelineCase } from "@/lib/auth/access";
 import { daysSince } from "@/lib/utils";
-import { type CaseRecord } from "@/lib/types";
+import { type AttorneyGoal, type CaseRecord } from "@/lib/types";
 
 export const ATTORNEY_SCORE_VALIDATION_DAYS = 90;
 export const COMPLETENESS_SCORE_WEIGHT = 0.4;
@@ -155,11 +156,11 @@ export function getCaseAttorneyScore(record: CaseRecord): CaseAttorneyScore {
   };
 }
 
-export function getAttorneyScoreRollups(records: CaseRecord[]): AttorneyScoreRollup[] {
+export function getAttorneyScoreRollups(records: CaseRecord[], goals: AttorneyGoal[] = []): AttorneyScoreRollup[] {
   const byAttorney = new Map<string, CaseRecord[]>();
 
   for (const record of records) {
-    if (!record.tracker.isActive) continue;
+    if (!isActivePipelineCase(record, goals)) continue;
     const list = byAttorney.get(record.shared.attorneyId) ?? [];
     list.push(record);
     byAttorney.set(record.shared.attorneyId, list);

@@ -30,7 +30,7 @@ export function DashboardView({
   users: AppUser[];
   viewer: ViewerContext;
 }) {
-  const metrics = getDashboardMetrics(records, settings);
+  const metrics = getDashboardMetrics(records, settings, goals);
   const goalProgress = getAttorneyGoalProgress(records, goals);
 
   return (
@@ -40,7 +40,7 @@ export function DashboardView({
           icon={BriefcaseBusiness}
           label="Active cases"
           value={String(metrics.totalActiveCases)}
-          detail="Tracker entries marked active"
+          detail="Active pipeline cases (excludes closed and historical)"
         />
         <MetricCard
           icon={CircleDollarSign}
@@ -103,6 +103,7 @@ export function DashboardView({
           <CardContent>
             <AttorneyScoreRollupCard
               records={records}
+              goals={goals}
               users={users}
               highlightAttorneyId={viewer.isAttorney ? viewer.contactId : null}
             />

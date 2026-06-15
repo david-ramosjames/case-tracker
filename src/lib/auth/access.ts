@@ -57,6 +57,10 @@ export function getCasePipelineFilter(record: CaseRecord, goals: AttorneyGoal[])
   return record.shared.status;
 }
 
+export function isActivePipelineCase(record: CaseRecord, goals: AttorneyGoal[]) {
+  return getCasePipelineFilter(record, goals) === "Active";
+}
+
 export function filterRecordsForViewer(
   records: CaseRecord[],
   session: SessionUser,

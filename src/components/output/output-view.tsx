@@ -197,15 +197,7 @@ export function OutputView({
               </TableBody>
             </Table>
 
-            <div className="grid gap-3 sm:grid-cols-3">
-              <MiniStat label="Completed Disbursements" value={String(results.completedDisbursements)} variant="success" />
-              <MiniStat label="FY Goal" value={String(results.completedDisbursementGoal)} />
-              <MiniStat
-                label="% of Goal"
-                value={percent((results.completedDisbursements / results.completedDisbursementGoal) * 100)}
-                variant={results.completedDisbursements >= results.completedDisbursementGoal ? "success" : "warning"}
-              />
-            </div>
+            <MiniStat label="Completed Disbursements" value={String(results.completedDisbursements)} variant="success" />
           </CardContent>
         </Card>
 

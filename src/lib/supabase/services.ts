@@ -155,7 +155,7 @@ export async function getCaseById(caseId: string): Promise<CaseRecord | null> {
   );
 }
 
-export function isOrphanTrackerRecord(record: CaseRecord) {
+export function isOrphanTrackerRecord(record: Pick<CaseRecord, "shared" | "tracker">) {
   return record.shared.id === record.tracker.id;
 }
 
@@ -906,7 +906,6 @@ export async function createTrackerComment(
     record,
   );
 
-  const record = await getCaseById(input.caseId);
   if (record) {
     try {
       await notifySlackCommentPosted(record, {

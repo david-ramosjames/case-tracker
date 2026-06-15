@@ -2,18 +2,20 @@
 
 import { Progress } from "@/components/ui/progress";
 import { getAttorneyScoreRollups } from "@/lib/attorney-score";
-import { type AppUser, type CaseRecord } from "@/lib/types";
+import { type AppUser, type AttorneyGoal, type CaseRecord } from "@/lib/types";
 
 export function AttorneyScoreRollupCard({
   records,
+  goals,
   users,
   highlightAttorneyId,
 }: {
   records: CaseRecord[];
+  goals: AttorneyGoal[];
   users: AppUser[];
   highlightAttorneyId?: string | null;
 }) {
-  const rollups = getAttorneyScoreRollups(records);
+  const rollups = getAttorneyScoreRollups(records, goals);
 
   if (rollups.length === 0) {
     return <p className="text-sm text-muted-foreground">No active cases to score yet.</p>;
