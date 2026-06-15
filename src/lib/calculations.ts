@@ -387,7 +387,12 @@ export function getCurrentCommissionYearGoals(goals: AttorneyGoal[], attorneyIds
   });
 }
 
-export function getFirmOutputMetrics(records: CaseRecord[], goals: AttorneyGoal[], goalYear?: number) {
+export function getFirmOutputMetrics(
+  records: CaseRecord[],
+  goals: AttorneyGoal[],
+  goalYear?: number,
+  pipelineGoals?: AttorneyGoal[],
+) {
   const scopedGoals = goalYear != null ? goals.filter((goal) => goal.year === goalYear) : goals;
   const scopedRecords =
     scopedGoals.length > 0
@@ -436,18 +441,19 @@ export function getFirmOutputMetrics(records: CaseRecord[], goals: AttorneyGoal[
       planFees,
       completedDisbursements: disbursedRecords.length,
     },
-    caseStatuses: getCaseStatusRollup(scopedRecords),
+    caseStatuses: getCaseStatusRollup(records, pipelineGoals ?? goals),
     grossQuarterRows: getQuarterRows(scopedRecords, annualGrossGoal, "gross", scopedGoals),
     feeQuarterRows: getQuarterRows(scopedRecords, 0, "fees", scopedGoals),
   };
 }
 
-export function getCaseStatusRollup(records: CaseRecord[]) {
+export function getCaseStatusRollup(records: CaseRecord[], goals: AttorneyGoal[]) {
+  const activeRecords = records.filter((record) => isActivePipelineCase(record, goals));
   const labels = ["Onboarding", "Txt", "Dmd", "Lit", "Settled", "Disengaged", "Referred", "Terminated"];
-  const total = records.length || 1;
+  const total = activeRecords.length || 1;
   const counts = new Map(labels.map((label) => [label, 0]));
 
-  records.forEach((record) => {
+  activeRecords.forEach((record) => {
     const label = getStatusRollupLabel(record.tracker.caseStage);
     counts.set(label, (counts.get(label) ?? 0) + 1);
   });
@@ -463,7 +469,7 @@ export function getCaseStatusRollup(records: CaseRecord[]) {
 
   return {
     rows,
-    total: records.length,
+    total: activeRecords.length,
   };
 }
 

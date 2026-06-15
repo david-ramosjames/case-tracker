@@ -50,7 +50,10 @@ export function OutputView({
     return `${years[0]}–${years[years.length - 1]}`;
   }, [scopedGoals]);
 
-  const output = useMemo(() => getFirmOutputMetrics(filteredRecords, scopedGoals), [filteredRecords, scopedGoals]);
+  const output = useMemo(
+    () => getFirmOutputMetrics(filteredRecords, scopedGoals, undefined, goals),
+    [filteredRecords, scopedGoals, goals],
+  );
   const { results } = output;
 
   const activeFilterCount = [attorney !== "all", paralegal !== "all"].filter(Boolean).length;
@@ -163,7 +166,7 @@ export function OutputView({
         <Card>
           <CardHeader>
             <CardTitle>Case Status Rollup</CardTitle>
-            <CardDescription>Current pipeline mix by operational status.</CardDescription>
+            <CardDescription>Active pipeline snapshot by case stage — total matches dashboard active cases.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <Table>
