@@ -1275,10 +1275,10 @@ function mapRecords({
     const trackerId = toString(trackerRow.id, "");
     const resultRow = resultsByTrackerId.get(trackerId) ?? resultsByCaseId.get(caseRow.id) ?? null;
     const caseNumber = cleanCaseNumber(caseRow.case_number ?? "");
-    return rowToCaseRecord(caseRow, trackerRow, resultRow, contacts, [
+    return rowToCaseRecord(caseRow, trackerRow, resultRow, contacts, uniqueSuggestionRows([
       ...(suggestionsByTrackerId.get(trackerId) ?? []),
       ...(suggestionsByCaseId.get(caseRow.id) ?? []),
-    ], [
+    ]), [
       ...(disbursementsByTrackerId.get(trackerId) ?? []),
       ...(disbursementsByCaseNumber.get(caseNumber) ?? []),
     ]);
@@ -1370,6 +1370,15 @@ function disbursementRowToDisbursement(row: DisbursementRow): CaseDisbursement {
     pendingRemaining: toBoolean(row.pending_remaining, false),
     syncedAt: toStringOrNull(row.synced_at),
   };
+}
+
+function uniqueSuggestionRows(rows: SuggestionRow[]) {
+  const byId = new Map<string, SuggestionRow>();
+  for (const row of rows) {
+    const id = toString(row.id, "");
+    if (id) byId.set(id, row);
+  }
+  return [...byId.values()];
 }
 
 function uniqueDisbursements(rows: DisbursementRow[]) {
