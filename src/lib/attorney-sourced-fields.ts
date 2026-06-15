@@ -1,3 +1,4 @@
+import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { EXPECTED_DISBURSEMENT_QUARTER_LABEL } from "@/lib/case-options";
 import { sourcesLitNeedsReview } from "@/lib/calculations";
 import {
@@ -91,6 +92,7 @@ function hasAttorneyFieldValue(record: CaseRecord, fieldId: AttorneySourcedField
 export function getAttorneySourcedFieldStatus(record: CaseRecord, fieldId: AttorneySourcedFieldId): AttorneyFieldStatus {
   const meta = ATTORNEY_SOURCED_FIELD_BY_ID[fieldId];
   if (!hasAttorneyFieldValue(record, fieldId)) return "missing";
+  if (!caseRequiresOngoingUpdates(record)) return "current";
 
   if (meta.reviewKind === "validation_90d" && meta.validationFieldId) {
     if (fieldId === "liability" && record.tracker.liability?.trim() !== "Pending") return "current";

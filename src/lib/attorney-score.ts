@@ -1,3 +1,4 @@
+import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { EXPECTED_DISBURSEMENT_QUARTER_LABEL } from "@/lib/case-labels";
 import { isActivePipelineCase } from "@/lib/auth/access";
 import { daysSince } from "@/lib/utils";
@@ -109,6 +110,7 @@ export function isValidationFieldFresh(record: CaseRecord, fieldId: ValidationFi
 
 /** Fields missing or not validated within 90 days — triggers alerts. */
 export function getOutdatedValidationFields(record: CaseRecord): ValidationFieldId[] {
+  if (!caseRequiresOngoingUpdates(record)) return [];
   return VALIDATION_FIELDS.filter((field) => {
     if (field.id === "liability") {
       const liability = record.tracker.liability?.trim();
@@ -126,18 +128,21 @@ export function getValidationFieldLabel(fieldId: ValidationFieldId) {
 }
 
 export function getCaseAttorneyScore(record: CaseRecord): CaseAttorneyScore {
+  const requiresUpdates = caseRequiresOngoingUpdates(record);
   const completenessCompleted = COMPLETENESS_FIELDS.filter((field) => hasCompletenessField(record, field.id)).length;
   const completenessTotal = COMPLETENESS_FIELDS.length;
   const completenessPercent =
     completenessTotal > 0 ? Math.round((completenessCompleted / completenessTotal) * 100) : 0;
 
-  const freshnessCompleted = VALIDATION_FIELDS.filter((field) => {
-    if (field.id === "liability" && record.tracker.liability?.trim() && record.tracker.liability.trim() !== "Pending") {
-      return true;
-    }
-    return hasValidationFieldValue(record, field.id) && isValidationFieldFresh(record, field.id);
-  }).length;
   const freshnessTotal = VALIDATION_FIELDS.length;
+  const freshnessCompleted = requiresUpdates
+    ? VALIDATION_FIELDS.filter((field) => {
+        if (field.id === "liability" && record.tracker.liability?.trim() && record.tracker.liability.trim() !== "Pending") {
+          return true;
+        }
+        return hasValidationFieldValue(record, field.id) && isValidationFieldFresh(record, field.id);
+      }).length
+    : freshnessTotal;
   const freshnessPercent = freshnessTotal > 0 ? Math.round((freshnessCompleted / freshnessTotal) * 100) : 0;
 
   const percent = Math.round(

@@ -1,4 +1,4 @@
-import type { CaseStage, CaseStatus, DisbursedStatus } from "@/lib/types";
+import type { CaseRecord, CaseStage, CaseStatus, DisbursedStatus } from "@/lib/types";
 
 /** Active pipeline stages (UI labels: Onboarding, Treatment, Demand, Litigation, Settled). */
 export const ACTIVE_CASE_STAGES = new Set<CaseStage>(["Onboarding", "Txt", "Dmd", "Lit", "Settled"]);
@@ -14,4 +14,13 @@ export function deriveCaseStatusFromTracker(stage: CaseStage, disbursedStatus: D
   if (CLOSED_CASE_STAGES.has(stage)) return "Closed";
   if (ACTIVE_CASE_STAGES.has(stage)) return "Active";
   return "Active";
+}
+
+export function isClosedCase(record: Pick<CaseRecord, "shared">) {
+  return record.shared.status === "Closed";
+}
+
+/** Active pipeline cases still need periodic attorney review and Slack reminders. */
+export function caseRequiresOngoingUpdates(record: Pick<CaseRecord, "shared">) {
+  return !isClosedCase(record);
 }

@@ -1,3 +1,4 @@
+import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { getOutdatedValidationFields, getValidationFieldLabel } from "@/lib/attorney-score";
 import { getDataQualityFlags, sourcesLitNeedsReview } from "@/lib/calculations";
 import { QUARTERLY_REVIEW_DAYS } from "@/lib/slack/config";
@@ -10,6 +11,8 @@ export function getSlackReminderReasons(
   record: CaseRecord,
   settings: Pick<CaseTrackerSettings, "staleReviewThresholdDays">,
 ): SlackReminderReason[] {
+  if (!caseRequiresOngoingUpdates(record)) return [];
+
   const reasons: SlackReminderReason[] = [];
   const { tracker } = record;
 

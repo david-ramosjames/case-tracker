@@ -1,3 +1,4 @@
+import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { getOutdatedValidationFields, getValidationFieldLabel } from "@/lib/attorney-score";
 import { getAttorneyCommissionStartMonth, isActivePipelineCase } from "@/lib/auth/access";
 import {
@@ -39,6 +40,7 @@ const QUARTERLY_CHECK_IN_FIELDS = ["targetResolutionQuarter", "minimumValue"] as
 const SOURCES_LIT_FIELDS = ["sources", "injuries", "caseDescription"] as const;
 
 export function sourcesLitNeedsReview(record: CaseRecord) {
+  if (!caseRequiresOngoingUpdates(record)) return false;
   const { tracker } = record;
   const hasContent = SOURCES_LIT_FIELDS.some((field) => Boolean(tracker[field]?.trim()));
   if (!hasContent) return true;
@@ -80,20 +82,22 @@ export function getDataQualityFlags(
     flags.push({ id: "missing-quarter", label: "Missing expected disbursement quarter", severity: "warning" });
   }
 
-  if (daysSince(tracker.lastReviewedAt) > settings.staleReviewThresholdDays) {
-    flags.push({ id: "stale-review", label: "Review stale", severity: "warning" });
-  }
+  if (caseRequiresOngoingUpdates(record)) {
+    if (daysSince(tracker.lastReviewedAt) > settings.staleReviewThresholdDays) {
+      flags.push({ id: "stale-review", label: "Review stale", severity: "warning" });
+    }
 
-  if (needsQuarterlyCheckIn(record)) {
-    flags.push({ id: "quarterly-check-in", label: "Quarterly check-in due", severity: "danger" });
-  }
+    if (needsQuarterlyCheckIn(record)) {
+      flags.push({ id: "quarterly-check-in", label: "Quarterly check-in due", severity: "danger" });
+    }
 
-  for (const fieldId of getOutdatedValidationFields(record)) {
-    flags.push({
-      id: `validation-stale-${fieldId}`,
-      label: `${getValidationFieldLabel(fieldId)} needs validation (90d)`,
-      severity: "danger",
-    });
+    for (const fieldId of getOutdatedValidationFields(record)) {
+      flags.push({
+        id: `validation-stale-${fieldId}`,
+        label: `${getValidationFieldLabel(fieldId)} needs validation (90d)`,
+        severity: "danger",
+      });
+    }
   }
 
   if (getOpenStageSuggestions(record).length > 0) {
@@ -265,6 +269,7 @@ export function getProjectedFeeValue(record: CaseRecord) {
 }
 
 export function needsQuarterlyCheckIn(record: CaseRecord) {
+  if (!caseRequiresOngoingUpdates(record)) return false;
   const missingQuarterlyField = QUARTERLY_CHECK_IN_FIELDS.some((field) => !record.tracker[field]);
   const reviewStale = daysSince(record.tracker.lastQuarterlyCheckInAt) >= QUARTERLY_REVIEW_DAYS;
   return missingQuarterlyField || reviewStale;
