@@ -118,7 +118,7 @@ export const CASE_STAGE_OPTIONS = [
   "Terminated",
 ] satisfies CaseStage[];
 
-export const EXPECTED_LITIGATION_OPTIONS = ["Pre", "Lit", "Expect"] satisfies ExpectedLitigationStatus[];
+export const EXPECTED_LITIGATION_OPTIONS = ["Pre", "Expect", "Lit"] satisfies ExpectedLitigationStatus[];
 
 export function formatExpectedLitigationLabel(value: ExpectedLitigationStatus | null | undefined) {
   if (value == null) return "Need Info";
@@ -138,8 +138,8 @@ export function coerceExpectedLitigationForStage(
 export const EXPECTED_LITIGATION_FILTER_OPTIONS = [
   { value: "needs-info", label: "Need Info" },
   { value: "Pre", label: "Pre" },
-  { value: "Lit", label: "Lit" },
   { value: "Expect", label: "Expected" },
+  { value: "Lit", label: "Lit" },
 ] as const;
 
 export function matchesExpectedLitigationFilter(filter: string, value: ExpectedLitigationStatus | null) {
