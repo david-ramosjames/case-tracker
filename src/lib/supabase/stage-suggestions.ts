@@ -37,6 +37,7 @@ function rowToSuggestion(row: SuggestionRow): StageSuggestion {
     slackChannelId: (row.slack_channel_id as string | null) ?? null,
     slackConfirmationThreadTs: (row.slack_confirmation_thread_ts as string | null) ?? null,
     confirmationPostedAt: (row.confirmation_posted_at as string | null) ?? null,
+    metadata: (row.metadata as Record<string, unknown> | null) ?? undefined,
   };
 }
 
@@ -225,7 +226,8 @@ export async function applyConfirmedStage(
   const record = await getCaseById(caseId);
   if (!record) throw new Error("Case not found.");
 
-  const patch = buildStagePatchFromConfirmation(record, stage);
+  const markDisbursed = suggestion.metadata?.mark_disbursed === true;
+  const patch = buildStagePatchFromConfirmation(record, stage, { markDisbursed });
   const { tracker } = await updateTrackerEntry(caseId, patch, {
     actor: { userName: actorName },
     markReviewed: true,
@@ -240,11 +242,14 @@ export async function applyConfirmedStage(
       .eq("id", suggestion.id);
 
     const activityLink = trackerActivityLink(record);
+    const description = markDisbursed
+      ? `Confirmed ${suggestion.source} signal: case stage is now ${stage} and disbursed is Yes.`
+      : `Confirmed ${suggestion.source} signal: case stage is now ${stage}.`;
     await admin.from("case_tracker_activity").insert({
       case_id: activityLink.caseId,
       tracker_entry_id: activityLink.trackerEntryId,
       action: "Stage suggestion confirmed",
-      description: `Confirmed ${suggestion.source} signal: case stage is now ${stage}.`,
+      description,
       metadata: { user_name: actorName, suggestion_id: suggestion.id, excerpt: suggestion.excerpt },
     });
   }

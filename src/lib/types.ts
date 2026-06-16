@@ -37,6 +37,7 @@ export type StageSuggestion = {
   slackChannelId: string | null;
   slackConfirmationThreadTs: string | null;
   confirmationPostedAt: string | null;
+  metadata?: Record<string, unknown>;
 };
 
 export type CommentType =

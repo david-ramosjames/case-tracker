@@ -61,6 +61,7 @@ export function buildStageConfirmationMessage(input: {
   appUrl: string;
   caseId: string;
   topicMentions?: string;
+  markDisbursed?: boolean;
 }) {
   const stage = stageDisplay(input.suggestedStage);
   const confidence = input.confidence.toLowerCase();
@@ -70,10 +71,21 @@ export function buildStageConfirmationMessage(input: {
     lines.push(input.topicMentions);
   }
 
+  if (input.markDisbursed) {
+    lines.push(
+      `Bot suggests case status is: *${stage}* and *Disbursed: Yes* (${confidence} confidence)`,
+      "",
+      "Reply in this thread with ✅ or `confirmed` to set stage to Settled and mark disbursed Yes.",
+    );
+  } else {
+    lines.push(
+      `Bot suggests case status is: *${stage}* (${confidence} confidence)`,
+      "",
+      "Reply in this thread with ✅, `confirmed`, or the correct stage (e.g. `status: Litigation`).",
+    );
+  }
+
   lines.push(
-    `Bot suggests case status is: *${stage}* (${confidence} confidence)`,
-    "",
-    "Reply in this thread with ✅, `confirmed`, or the correct stage (e.g. `status: Litigation`).",
     `Valid stages: ${getStageSlackOptions().map((option) => `\`${option}\``).join(" · ")}`,
     `<${input.appUrl}/cases/${input.caseId}|Open in Case Tracker>`,
   );
@@ -109,6 +121,7 @@ export async function postStageConfirmationForSuggestion(
     appUrl,
     caseId,
     topicMentions,
+    markDisbursed: item.pulseSignal === "disbursed",
   });
 
   const posted = await postSlackMessage({ channel: channelId, text });
@@ -132,11 +145,38 @@ export type PulseFanOutResult =
   | "skipped_post_failed"
   | "skipped_no_channel";
 
+export type PulseItemOutcome = {
+  channelRef: string;
+  pulseLabel: string;
+  suggestedStage: CaseStage;
+  pulseSignal: ParsedPulseItem["pulseSignal"];
+  applyAs: string;
+  caseNumber: string | null;
+  trackerStage: CaseStage | null;
+  trackerDisbursed: string | null;
+  result: PulseFanOutResult;
+};
+
+export function formatPulseFanOutResult(result: PulseFanOutResult) {
+  return result.replace(/^skipped_/, "").replace(/_/g, " ");
+}
+
+export function describePulseItemApply(item: ParsedPulseItem) {
+  if (item.pulseSignal === "disbursed") {
+    return "Settled + Disbursed Yes";
+  }
+  return item.suggestedStage;
+}
+
 export async function processDailyPulseRecap(options?: { force?: boolean }) {
-  if (!isSlackEnabled()) return { processed: 0, posted: 0, skipped: 0, reason: "slack_disabled" };
+  if (!isSlackEnabled()) {
+    return { processed: 0, posted: 0, skipped: 0, itemOutcomes: [] as PulseItemOutcome[], reason: "slack_disabled" };
+  }
 
   const pulseChannelId = await getDailyPulseChannelId();
-  if (!pulseChannelId) return { processed: 0, posted: 0, skipped: 0, reason: "no_pulse_channel" };
+  if (!pulseChannelId) {
+    return { processed: 0, posted: 0, skipped: 0, itemOutcomes: [] as PulseItemOutcome[], reason: "no_pulse_channel" };
+  }
 
   const lastTs = await getDailyPulseLastTs();
   const lookbackOldest = String(Math.floor(Date.now() / 1000) - PULSE_LOOKBACK_HOURS * 3600);
@@ -150,7 +190,7 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
   } catch (error) {
     const detail = errorMessage(error);
     console.error("Daily pulse history fetch failed", detail);
-    return { processed: 0, posted: 0, skipped: 0, reason: "pulse_history_failed", error: detail };
+    return { processed: 0, posted: 0, skipped: 0, itemOutcomes: [] as PulseItemOutcome[], reason: "pulse_history_failed", error: detail };
   }
 
   let processed = 0;
@@ -161,6 +201,7 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
   let recapHeadersFound = 0;
   let newestTs = lastTs;
   const skipReasons: Partial<Record<PulseFanOutResult, number>> = {};
+  const itemOutcomes: PulseItemOutcome[] = [];
 
   const channelIdToName = pulseContext.channelIdToName;
 
@@ -184,7 +225,20 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
     processed += items.length;
 
     for (const item of items) {
-      const result = await fanOutPulseItem(item, message.ts, pulseContext);
+      const match = resolvePulseChannelMatch(item, pulseContext);
+      const record = match ? await getCaseById(match.caseId) : null;
+      const result = await fanOutPulseItem(item, message.ts, pulseContext, match, record);
+      itemOutcomes.push({
+        channelRef: item.channelRef,
+        pulseLabel: item.pulseLabel,
+        suggestedStage: item.suggestedStage,
+        pulseSignal: item.pulseSignal,
+        applyAs: describePulseItemApply(item),
+        caseNumber: match?.caseNumber ?? caseNumberFromPulseChannelRef(item.channelRef),
+        trackerStage: record?.tracker.caseStage ?? null,
+        trackerDisbursed: record?.tracker.result.disbursedStatus ?? null,
+        result,
+      });
       if (result === "posted") posted += 1;
       else {
         skipped += 1;
@@ -202,6 +256,7 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
     posted,
     skipped,
     skipReasons,
+    itemOutcomes,
     lastTs: newestTs,
     previousLastTs: lastTs,
     messagesScanned,
@@ -222,7 +277,14 @@ function resolvePulseChannelMatch(
 
   const caseNumber = caseNumberFromPulseChannelRef(item.channelRef);
   if (caseNumber) {
-    return pulseContext.matchByCaseNumber.get(caseNumber) ?? null;
+    const byNumber = pulseContext.matchByCaseNumber.get(caseNumber);
+    if (byNumber) return byNumber;
+
+    for (const [channelRef, match] of pulseContext.matchByChannelRef) {
+      if (caseNumberFromPulseChannelRef(channelRef) === caseNumber) {
+        return match;
+      }
+    }
   }
 
   return null;
@@ -232,17 +294,18 @@ async function fanOutPulseItem(
   item: ParsedPulseItem,
   pulseMessageTs: string,
   pulseContext: Awaited<ReturnType<typeof loadPulseChannelContext>>,
+  match: PulseChannelMatch | null = resolvePulseChannelMatch(item, pulseContext),
+  record: Awaited<ReturnType<typeof getCaseById>> | null = null,
 ): Promise<PulseFanOutResult> {
   if (isIgnoredPulseChannelRef(item.channelRef)) return "skipped_ignored_channel";
 
-  const match = resolvePulseChannelMatch(item, pulseContext);
   if (!match) return "skipped_no_match";
 
-  const record = await getCaseById(match.caseId);
-  if (!record) return "skipped_no_case";
+  const resolvedRecord = record ?? (await getCaseById(match.caseId));
+  if (!resolvedRecord) return "skipped_no_case";
 
-  const skipReason = shouldSkipPulseSuggestion(record, item.suggestedStage);
-  if (skipReason === "already_at_stage") return "skipped_already_at_stage";
+  const skipReason =
+    item.pulseSignal === "disbursed" ? null : shouldSkipPulseSuggestion(resolvedRecord, item.suggestedStage);
   if (skipReason === "inactive_tracker") return "skipped_inactive_tracker";
 
   const existingLine = await findPulseLineSuggestion(match.caseId, pulseMessageTs, item.channelRef);
@@ -256,7 +319,7 @@ async function fanOutPulseItem(
     existing ??
     (await createStageSuggestion({
       caseId: match.caseId,
-      trackerEntryId: record.tracker.id,
+      trackerEntryId: resolvedRecord.tracker.id,
       source: "pulse",
       suggestedStage: item.suggestedStage,
       confidence: item.confidence,
@@ -265,6 +328,8 @@ async function fanOutPulseItem(
         pulse_message_ts: pulseMessageTs,
         channel_ref: normalizePulseChannelRef(item.channelRef),
         reason: item.reason,
+        pulse_label: item.pulseLabel,
+        ...(item.pulseSignal === "disbursed" ? { mark_disbursed: true } : {}),
       },
       slackChannelId: match.slackChannelId,
     }));
@@ -272,8 +337,8 @@ async function fanOutPulseItem(
   const postResult = await postStageConfirmationForSuggestion(
     suggestion.id,
     match.caseId,
-    record.shared.caseNumber,
-    record.shared.clientName,
+    resolvedRecord.shared.caseNumber,
+    resolvedRecord.shared.clientName,
     item,
     match.slackChannelId,
   );

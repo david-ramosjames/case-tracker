@@ -5,8 +5,13 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { type DailyJobStep } from "@/lib/cron/daily-jobs";
-import { errorMessage } from "@/lib/utils";
+import {
+  formatPulseFanOutResult,
+  type PulseItemOutcome,
+} from "@/lib/slack/stage-confirmation";
+import { cn, errorMessage } from "@/lib/utils";
 
 type JobRow = {
   step: DailyJobStep;
@@ -150,7 +155,7 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
       }
     }
     const skipReasons = result.skipReasons as Record<string, number> | undefined;
-    if (skipReasons && Object.keys(skipReasons).length > 0) {
+    if (skipReasons && Object.keys(skipReasons).length > 0 && !(result.itemOutcomes as unknown[] | undefined)?.length) {
       const detail = Object.entries(skipReasons)
         .map(([reason, count]) => `${reason.replace(/^skipped_/, "")} ${count}`)
         .join(", ");
@@ -174,16 +179,64 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
   return "Completed.";
 }
 
+function parsePulseItemOutcomes(result: Record<string, unknown> | undefined): PulseItemOutcome[] {
+  if (!result?.itemOutcomes || !Array.isArray(result.itemOutcomes)) return [];
+  return result.itemOutcomes as PulseItemOutcome[];
+}
+
+function PulseOutcomeTable({ outcomes }: { outcomes: PulseItemOutcome[] }) {
+  if (outcomes.length === 0) return null;
+
+  return (
+    <div className="mt-2 overflow-x-auto rounded-md border border-border/60 bg-white">
+      <Table className="min-w-[52rem] text-xs">
+        <TableHeader>
+          <TableRow>
+            <TableHead>Channel</TableHead>
+            <TableHead>Pulse</TableHead>
+            <TableHead>On confirm</TableHead>
+            <TableHead>Case #</TableHead>
+            <TableHead>Tracker stage</TableHead>
+            <TableHead>Disbursed</TableHead>
+            <TableHead>Result</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {outcomes.map((row) => (
+            <TableRow key={`${row.channelRef}-${row.pulseLabel}-${row.result}`}>
+              <TableCell className="font-mono">#{row.channelRef}</TableCell>
+              <TableCell>{row.pulseLabel}</TableCell>
+              <TableCell>{row.applyAs}</TableCell>
+              <TableCell>{row.caseNumber ?? "—"}</TableCell>
+              <TableCell>{row.trackerStage ?? "—"}</TableCell>
+              <TableCell>{row.trackerDisbursed ?? "—"}</TableCell>
+              <TableCell
+                className={cn(
+                  row.result === "posted" ? "font-medium text-emerald-700" : "text-amber-800",
+                )}
+              >
+                {formatPulseFanOutResult(row.result)}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
 export function DailyJobsCard() {
   const [activeStep, setActiveStep] = useState<DailyJobStep | null>(null);
   const [caseNumber, setCaseNumber] = useState("");
   const [messages, setMessages] = useState<Partial<Record<DailyJobStep, string>>>({});
   const [errors, setErrors] = useState<Partial<Record<DailyJobStep, string>>>({});
+  const [pulseOutcomes, setPulseOutcomes] = useState<PulseItemOutcome[] | null>(null);
 
   async function runStep(step: DailyJobStep, options?: { keepActive?: boolean }) {
     setActiveStep(step);
     setMessages((prev) => ({ ...prev, [step]: undefined }));
     setErrors((prev) => ({ ...prev, [step]: undefined }));
+    if (step === "dailyPulse") setPulseOutcomes(null);
 
     try {
       const response = await fetch("/api/admin/daily-jobs", {
@@ -209,6 +262,9 @@ export function DailyJobsCard() {
       }
 
       setMessages((prev) => ({ ...prev, [step]: message }));
+      if (step === "dailyPulse") {
+        setPulseOutcomes(parsePulseItemOutcomes(body.result as Record<string, unknown> | undefined));
+      }
       return true;
     } catch (err) {
       setErrors((prev) => ({
@@ -267,6 +323,9 @@ export function DailyJobsCard() {
                 <p className="text-sm text-muted-foreground">{row.description}</p>
                 {messages[row.step] ? <p className="mt-1 text-sm text-emerald-700">{messages[row.step]}</p> : null}
                 {errors[row.step] ? <p className="mt-1 text-sm text-rose-700">{errors[row.step]}</p> : null}
+                {row.step === "dailyPulse" && pulseOutcomes ? (
+                  <PulseOutcomeTable outcomes={pulseOutcomes} />
+                ) : null}
               </div>
               <Button
                 variant="outline"

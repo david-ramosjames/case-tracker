@@ -1,6 +1,8 @@
 import { deriveResultFeePercent } from "@/lib/calculations";
-import { type CaseRecord, type CaseStage, type ExpectedLitigationStatus } from "@/lib/types";
+import { type CaseRecord, type CaseStage, type ExpectedLitigationStatus, type SettlementResult } from "@/lib/types";
 import { daysSince } from "@/lib/utils";
+
+export type PulseSignal = "disbursed";
 
 /** Days after date signed before auto-promoting Onboarding → Treatment (Txt). */
 export const TREATMENT_AUTO_DAYS = 10;
@@ -25,6 +27,13 @@ function stripSlackMarkdown(text: string) {
     .trim();
 }
 
+/** Detect pulse-specific signals before stage mapping (e.g. Disbursed → Settled + result). */
+export function detectPulseSignal(raw: string): PulseSignal | null {
+  const normalized = stripSlackMarkdown(raw).toLowerCase();
+  if (normalized.includes("disbursed")) return "disbursed";
+  return null;
+}
+
 /** Parse a stage label from daily-pulse text — returns null when unrecognized. */
 export function parsePulseStageLabel(raw: string): CaseStage | null {
   const normalized = stripSlackMarkdown(raw).toLowerCase();
@@ -32,7 +41,9 @@ export function parsePulseStageLabel(raw: string): CaseStage | null {
   if (normalized.includes("disengaged")) return "Disengaged";
   if (normalized.includes("terminated")) return "Terminated";
   if (normalized.includes("referred")) return "Referred";
-  if (normalized.includes("settled") || normalized.includes("settlement")) return "Settled";
+  if (detectPulseSignal(raw) === "disbursed" || normalized.includes("settled") || normalized.includes("settlement")) {
+    return "Settled";
+  }
   if (normalized.includes("litigation") || normalized === "lit") return "Lit";
   if (normalized.includes("demand") || normalized === "dmd") return "Dmd";
   if (normalized.includes("treatment") || normalized === "txt") return "Txt";
@@ -46,8 +57,7 @@ export function normalizePulseStageLabel(raw: string): CaseStage {
 }
 
 export function shouldSkipPulseSuggestion(record: CaseRecord, suggestedStage: CaseStage) {
-  if (record.tracker.caseStage === suggestedStage) return "already_at_stage";
-  if (!record.tracker.isActive && suggestedStage !== "Disengaged" && suggestedStage !== "Terminated") {
+  if (!record.tracker.isActive && suggestedStage !== "Disengaged" && suggestedStage !== "Terminated" && suggestedStage !== "Referred") {
     return "inactive_tracker";
   }
   return null;
@@ -65,9 +75,15 @@ export function recordsEligibleForTreatmentPromotion(records: CaseRecord[], minD
 export function buildStagePatchFromConfirmation(
   record: CaseRecord,
   stage: CaseStage,
-): { caseStage: CaseStage; expectedLitigation?: ExpectedLitigationStatus; estimatedFeeValue?: number } {
+  options?: { markDisbursed?: boolean },
+) {
   const expectedLitigation = stage === "Lit" ? "Lit" : record.tracker.expectedLitigation;
-  const patch: { caseStage: CaseStage; expectedLitigation?: ExpectedLitigationStatus; estimatedFeeValue?: number } = {
+  const patch: {
+    caseStage: CaseStage;
+    expectedLitigation?: ExpectedLitigationStatus;
+    estimatedFeeValue?: number;
+    result?: SettlementResult;
+  } = {
     caseStage: stage,
   };
 
@@ -84,6 +100,15 @@ export function buildStagePatchFromConfirmation(
           referralFee: record.tracker.referralFee,
         }),
     );
+  }
+
+  if (options?.markDisbursed) {
+    const now = new Date().toISOString();
+    patch.result = {
+      ...record.tracker.result,
+      disbursedStatus: "Yes",
+      checkDisbursedAt: record.tracker.result.checkDisbursedAt ?? now,
+    };
   }
 
   return patch;

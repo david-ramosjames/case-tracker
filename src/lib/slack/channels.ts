@@ -51,6 +51,7 @@ export async function loadPulseChannelContext() {
   const matchByChannelRef = new Map<string, PulseChannelMatch>();
   const matchByCaseNumber = new Map<string, PulseChannelMatch>();
   const channelIdToName = new Map<string, string>();
+  const channelByCaseNumber = new Map<string, { slackChannelId: string | null; slackChannelName: string }>();
 
   for (const row of channels ?? []) {
     const channelName = String(row.slack_channel_name ?? "");
@@ -71,14 +72,41 @@ export async function loadPulseChannelContext() {
 
     matchByChannelRef.set(normalized, match);
     matchByCaseNumber.set(caseNumber, match);
+    channelByCaseNumber.set(caseNumber, { slackChannelId, slackChannelName: channelName });
 
     const caseNumberFromChannel = caseNumberFromPulseChannelRef(channelName);
-    if (caseNumberFromChannel) {
+    if (caseNumberFromChannel && caseNumberFromChannel !== caseNumber) {
       matchByCaseNumber.set(caseNumberFromChannel, match);
     }
 
     if (slackChannelId) {
       channelIdToName.set(slackChannelId, normalized);
+    }
+  }
+
+  const { data: allTrackers } = await admin
+    .from("case_tracker_entries")
+    .select("case_id,id,case_number")
+    .not("case_number", "is", null);
+
+  for (const row of allTrackers ?? []) {
+    const caseNumber = cleanCaseNumber(String(row.case_number ?? ""));
+    if (!caseNumber || matchByCaseNumber.has(caseNumber)) continue;
+
+    const caseId = String(row.case_id ?? row.id);
+    const channel = channelByCaseNumber.get(caseNumber);
+    matchByCaseNumber.set(caseNumber, {
+      caseId,
+      caseNumber,
+      slackChannelId: channel?.slackChannelId ?? null,
+      slackChannelName: channel?.slackChannelName ?? "",
+    });
+  }
+
+  for (const [channelRef, match] of matchByChannelRef) {
+    const suffix = caseNumberFromPulseChannelRef(channelRef);
+    if (suffix && !matchByCaseNumber.has(suffix)) {
+      matchByCaseNumber.set(suffix, match);
     }
   }
 

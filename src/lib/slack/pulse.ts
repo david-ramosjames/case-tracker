@@ -1,9 +1,12 @@
 import { cleanCaseNumber } from "@/lib/csv/parse";
-import { parsePulseStageLabel } from "@/lib/stage-triggers";
+import { detectPulseSignal, parsePulseStageLabel, type PulseSignal } from "@/lib/stage-triggers";
 import { type CaseStage, type ConfidenceLevel } from "@/lib/types";
 
 export type ParsedPulseItem = {
   channelRef: string;
+  /** Raw pulse label before mapping (e.g. Disbursed, Settled). */
+  pulseLabel: string;
+  pulseSignal: PulseSignal | null;
   suggestedStage: CaseStage;
   confidence: ConfidenceLevel;
   reason: string;
@@ -143,7 +146,9 @@ function extractPulseItemsFromLines(lines: string[]) {
     }
 
     const { channelRef, inline, consumedNextLine } = parsedLine;
-    const suggestedStage = parsePulseStageLabel(inline.remainder);
+    const pulseLabel = inline.remainder.trim();
+    const pulseSignal = detectPulseSignal(pulseLabel);
+    const suggestedStage = parsePulseStageLabel(pulseLabel);
     if (!suggestedStage) {
       index += consumedNextLine ? 2 : 1;
       continue;
@@ -176,6 +181,8 @@ function extractPulseItemsFromLines(lines: string[]) {
 
     items.push({
       channelRef,
+      pulseLabel,
+      pulseSignal,
       suggestedStage,
       confidence,
       reason,
