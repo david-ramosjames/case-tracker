@@ -408,22 +408,23 @@ export function ResultsTable({
                       </InlineSelect>
                     </TableCell>
                     <TableCell className="w-36">
-                      {result.disburseDate ? (
-                        <span className="text-sm text-muted-foreground">Deposited</span>
-                      ) : (
-                        <InlineSelect
-                          value={result.reductionsStatus}
-                          onChange={(value) =>
-                            updateResult(record.shared.id, (current) => ({ ...current, reductionsStatus: value as ReductionsStatus }))
-                          }
-                        >
-                          {REDUCTIONS_MANUAL_STATUS_OPTIONS.map((option) => (
-                            <option key={option} value={option}>
-                              {option}
-                            </option>
-                          ))}
-                        </InlineSelect>
-                      )}
+                      <InlineSelect
+                        value={result.reductionsStatus}
+                        onChange={(value) =>
+                          updateResult(record.shared.id, (current) => ({ ...current, reductionsStatus: value as ReductionsStatus }))
+                        }
+                      >
+                        {(REDUCTIONS_MANUAL_STATUS_OPTIONS.includes(
+                          result.reductionsStatus as (typeof REDUCTIONS_MANUAL_STATUS_OPTIONS)[number],
+                        )
+                          ? REDUCTIONS_MANUAL_STATUS_OPTIONS
+                          : [result.reductionsStatus, ...REDUCTIONS_MANUAL_STATUS_OPTIONS]
+                        ).map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </InlineSelect>
                     </TableCell>
                     <TableCell className="w-36 whitespace-nowrap text-sm text-muted-foreground">
                       {result.resultQuarter ?? "—"}

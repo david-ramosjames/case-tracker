@@ -44,7 +44,7 @@ import {
 } from "@/lib/calculations";
 import { DisbursementPartiesCard } from "@/components/cases/disbursement-parties-card";
 import { ResultDateInput } from "@/components/cases/result-date-input";
-import { dateInputToDateOnly, dateInputToTimestamp, toDateInput } from "@/lib/date-input";
+import { dateInputToDateOnly, toDateInput } from "@/lib/date-input";
 import { disbursementWeight } from "@/lib/disbursements";
 import { type SessionUser } from "@/lib/auth/types";
 import { formatSlackChannelLabel, getSlackChannelArchiveUrl } from "@/lib/slack/links";
@@ -270,15 +270,8 @@ export function CaseDetailView({
     key: K,
     value: SettlementResult[K],
   ) {
-    const now = new Date().toISOString();
     setTracker((current) => {
       const result = { ...current.result, [key]: value };
-
-      if (key === "releaseStatus") result.releaseSignedAt = value === "Signed" ? (result.releaseSignedAt ?? now) : null;
-      if (key === "closingStatus") result.closingSignedAt = value === "Signed" ? (result.closingSignedAt ?? now) : null;
-      if (key === "checkStatus") result.checkDepositedAt = value === "Deposited" ? (result.checkDepositedAt ?? now) : null;
-      if (key === "disbursedStatus") result.checkDisbursedAt = value === "Yes" ? (result.checkDisbursedAt ?? now) : null;
-
       const next = { ...current, result };
       if (key === "disbursedStatus") {
         setShared((s) => ({
@@ -994,8 +987,8 @@ export function CaseDetailView({
               <div>
                 <CardTitle>Results Tracking</CardTitle>
                 <CardDescription>
-                  Release, closing, deposit, and disbursement tracking. Import from the RJL Cases Disbursing sheet to pull
-                  all rows for this case # (one row per party).
+                  Settlement and disbursement tracking. Import from the RJL Cases Disbursing sheet to pull all rows for
+                  this case # (one row per party). Disburse date sets the result quarter automatically.
                 </CardDescription>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1023,10 +1016,6 @@ export function CaseDetailView({
                 <Info label="Check" value={tracker.result.checkStatus} />
                 <Info label="Disbursed" value={tracker.result.disbursedStatus} />
                 <Info label="Reductions" value={tracker.result.reductionsStatus} />
-                <Info label="Release Signed" value={formatDate(tracker.result.releaseSignedAt)} />
-                <Info label="Closing Signed" value={formatDate(tracker.result.closingSignedAt)} />
-                <Info label="Check Deposited" value={formatDate(tracker.result.checkDepositedAt)} />
-                <Info label="Check Disbursed" value={formatDate(tracker.result.checkDisbursedAt)} />
                 <Info label="Disburse Date" value={formatDate(tracker.result.disburseDate)} />
                 <Info label="Result Quarter" value={tracker.result.resultQuarter ?? "Not set"} />
               </>
@@ -1088,44 +1077,21 @@ export function CaseDetailView({
                   </Select>
                 </Field>
                 <Field label="Reductions">
-                  {tracker.result.disburseDate ? (
-                    <Input value="Deposited" readOnly />
-                  ) : (
-                    <Select
-                      value={tracker.result.reductionsStatus}
-                      onChange={(event) => updateResult("reductionsStatus", event.target.value as ReductionsStatus)}
-                    >
-                      {REDUCTIONS_MANUAL_STATUS_OPTIONS.map((option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ))}
-                    </Select>
-                  )}
-                </Field>
-                <Field label="Release Signed">
-                  <ResultDateInput
-                    value={tracker.result.releaseSignedAt}
-                    onCommit={(value) => updateResult("releaseSignedAt", dateInputToTimestamp(value))}
-                  />
-                </Field>
-                <Field label="Closing Signed">
-                  <ResultDateInput
-                    value={tracker.result.closingSignedAt}
-                    onCommit={(value) => updateResult("closingSignedAt", dateInputToTimestamp(value))}
-                  />
-                </Field>
-                <Field label="Check Deposited">
-                  <ResultDateInput
-                    value={tracker.result.checkDepositedAt}
-                    onCommit={(value) => updateResult("checkDepositedAt", dateInputToTimestamp(value))}
-                  />
-                </Field>
-                <Field label="Check Disbursed">
-                  <ResultDateInput
-                    value={tracker.result.checkDisbursedAt}
-                    onCommit={(value) => updateResult("checkDisbursedAt", dateInputToTimestamp(value))}
-                  />
+                  <Select
+                    value={tracker.result.reductionsStatus}
+                    onChange={(event) => updateResult("reductionsStatus", event.target.value as ReductionsStatus)}
+                  >
+                    {(REDUCTIONS_MANUAL_STATUS_OPTIONS.includes(
+                      tracker.result.reductionsStatus as (typeof REDUCTIONS_MANUAL_STATUS_OPTIONS)[number],
+                    )
+                      ? REDUCTIONS_MANUAL_STATUS_OPTIONS
+                      : [tracker.result.reductionsStatus, ...REDUCTIONS_MANUAL_STATUS_OPTIONS]
+                    ).map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
                 </Field>
                 <Field label="Disburse Date">
                   <ResultDateInput

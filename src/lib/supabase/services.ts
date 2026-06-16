@@ -630,6 +630,8 @@ export type SettlementSheetCasePayload = {
   caseNumber: string;
   sheetRowCount: number;
   settlementDate: string | null;
+  /** Column G on the disbursing sheet — Y means full settlement (stage can move to Settled). */
+  fullSettlement: boolean;
   totalSettlementAmount: number | null;
   totalAttorneyFees: number | null;
   latestDisburseDate: string | null;
@@ -793,7 +795,6 @@ async function recomputeCaseResultFromDisbursements(
     check_disbursed_at: aggregated.checkDisbursedAt,
     disbursed_status: aggregated.disbursedStatus,
     result_quarter: aggregated.resultQuarter,
-    reductions_status: aggregated.reductionsStatus,
   };
 
   if (existingResult?.id) {
@@ -1097,7 +1098,11 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
 
     const resolvedSettlementDate =
       aggregated?.settlementDate ??
-      (allPartiesSettled && sheetSettlementDate ? sheetSettlementDate : null);
+      (item.fullSettlement && sheetSettlementDate
+        ? sheetSettlementDate
+        : allPartiesSettled && sheetSettlementDate
+          ? sheetSettlementDate
+          : null);
     const resolvedDisburseDate =
       aggregated?.disburseDate ?? (allPartiesDisbursed && sheetDisburseDate ? sheetDisburseDate : null);
     const resolvedDisbursedStatus = aggregated?.disbursedStatus ?? (allPartiesDisbursed ? "Yes" : "No");
@@ -1107,8 +1112,6 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     const resolvedResultQuarter =
       aggregated?.resultQuarter ??
       (resolvedDisburseDate ? deriveResultQuarterFromDisburseDate(resolvedDisburseDate) : null);
-    const resolvedReductionsStatus =
-      aggregated?.reductionsStatus ?? (allPartiesDisbursed ? "Deposited" : "Not Complete");
 
     const resultPayload = {
       case_id: isUuid(caseId) ? caseId : null,
@@ -1121,7 +1124,6 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
       check_disbursed_at: resolvedCheckDisbursedAt,
       disbursed_status: resolvedDisbursedStatus,
       result_quarter: resolvedResultQuarter,
-      reductions_status: resolvedReductionsStatus,
     };
 
     if (existingResult) {
@@ -1135,7 +1137,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     casesProcessed += 1;
     if (resolvedSettlementDate || resolvedDisburseDate) settlementsUpdated += 1;
 
-    if (resolvedSettlementDate) {
+    if (resolvedSettlementDate && item.fullSettlement) {
       const currentStage = normalizeStage(toStringOrNull(trackerRow.case_stage));
       if (currentStage !== "Settled") {
         const record = await getCaseById(caseId);

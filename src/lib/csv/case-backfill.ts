@@ -1,7 +1,6 @@
 import { deriveResultFeePercent } from "@/lib/calculations";
 import {
   deriveCaseSizeFromMinimumValue,
-  deriveReductionsStatusFromDisburseDate,
   deriveResultQuarterFromDisburseDate,
   normalizeCaseType,
   normalizeTargetQuarter,
@@ -239,11 +238,10 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       const resultQuarter = getCsvCell(row, headers, "Result Quarter");
       if (result.disburseDate) {
         result.resultQuarter = deriveResultQuarterFromDisburseDate(result.disburseDate) ?? undefined;
-        result.reductionsStatus = deriveReductionsStatusFromDisburseDate(result.disburseDate) ?? undefined;
       } else {
         if (resultQuarter) result.resultQuarter = normalizeTargetQuarter(resultQuarter) ?? undefined;
-        if (reductions) result.reductionsStatus = normalizeReductionsStatus(reductions);
       }
+      if (reductions) result.reductionsStatus = normalizeReductionsStatus(reductions);
 
       if (result.feePercent == null && (result.settlementAmount != null || result.settlementDate)) {
         result.feePercent = deriveResultFeePercent({

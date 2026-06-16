@@ -4,7 +4,7 @@ import {
   getRecordDisburseDate,
   isDateInCommissionYear,
 } from "@/lib/commission-year";
-import { type CaseDisbursement, type CaseRecord, type DisbursedStatus, type ReductionsStatus, type TrackerEntry } from "@/lib/types";
+import { type CaseDisbursement, type CaseRecord, type DisbursedStatus, type TrackerEntry } from "@/lib/types";
 
 export function disbursementWeight(expectedCount: number) {
   const count = Math.max(1, Math.trunc(expectedCount));
@@ -135,7 +135,6 @@ export function getAggregatedResultFromDisbursements(
   const disbursedStatus: DisbursedStatus = allDisbursed ? "Yes" : "No";
   const checkDisbursedAt = allDisbursed && disburseDate ? new Date(disburseDate).toISOString() : null;
   const resultQuarter = disburseDate ? deriveResultQuarterFromDisburseDate(disburseDate) : null;
-  const reductionsStatus: ReductionsStatus = allDisbursed ? "Deposited" : "Not Complete";
 
   return {
     settlementAmount,
@@ -146,7 +145,6 @@ export function getAggregatedResultFromDisbursements(
     disbursedStatus,
     checkDisbursedAt,
     resultQuarter,
-    reductionsStatus,
   };
 }
 

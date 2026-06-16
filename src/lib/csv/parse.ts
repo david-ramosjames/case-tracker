@@ -91,6 +91,12 @@ export function parseSheetDate(value: string): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+/** Parse Y/N (or yes/no) flags from Google Sheets. */
+export function parseSheetYesNo(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return normalized === "y" || normalized === "yes" || normalized === "true";
+}
+
 export function cleanCaseNumber(value: string) {
   const trimmed = value.trim().replace(/^#+/, "");
   if (!trimmed) return "";

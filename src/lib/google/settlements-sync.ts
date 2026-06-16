@@ -1,4 +1,4 @@
-import { caseNumbersMatch, cleanCaseNumber, parseSheetDate } from "@/lib/csv/parse";
+import { caseNumbersMatch, cleanCaseNumber, parseSheetDate, parseSheetYesNo } from "@/lib/csv/parse";
 import { fetchGoogleSheetValues, findSheetColumnIndex } from "@/lib/google/client";
 import {
   getGoogleSheetsCredentials,
@@ -25,6 +25,8 @@ type ParsedSettlementRow = {
   /** Non-blank B = still waiting to disburse; blank B = this row has disbursed. */
   pendingRemaining: boolean;
   settlementDate: string | null;
+  /** Column G — Y when the case has a full settlement (can move to Settled even if not all parties are on the sheet). */
+  fullSettlement: boolean;
   disburseDate: string | null;
   settlementAmount: number | null;
   attorneyFees: number | null;
@@ -61,6 +63,10 @@ export function parseSettlementSheetRows(rows: string[][], spreadsheetId: string
     (cell) => cell.includes("settlement") && cell.includes("date"),
     (cell) => cell === "settlement date",
   ]);
+  const fullSettlementIdx = findSheetColumnIndex(header, [
+    (cell) => cell.includes("full") && cell.includes("settlement"),
+    (cell) => cell === "full settlement",
+  ]);
   const grossSettlementIdx = findSheetColumnIndex(header, [
     (cell) => cell.includes("gross") && cell.includes("settlement"),
     (cell) => cell === "gross settlement",
@@ -78,6 +84,7 @@ export function parseSettlementSheetRows(rows: string[][], spreadsheetId: string
   const resolvedCaseIdx = caseIdx >= 0 ? caseIdx : 2;
   const resolvedClientIdx = clientIdx >= 0 ? clientIdx : 3;
   const resolvedSettlementIdx = settlementIdx >= 0 ? settlementIdx : 7;
+  const resolvedFullSettlementIdx = fullSettlementIdx >= 0 ? fullSettlementIdx : 6;
   const resolvedGrossIdx = grossSettlementIdx >= 0 ? grossSettlementIdx : 9;
   const resolvedNetFeesIdx = netFeesIdx >= 0 ? netFeesIdx : 10;
   const resolvedDisbursedIdx = disbursedIdx >= 0 ? disbursedIdx : 25;
@@ -90,6 +97,7 @@ export function parseSettlementSheetRows(rows: string[][], spreadsheetId: string
 
     const countCell = (row[resolvedCountIdx] ?? "").trim();
     const settlementDate = parseSheetDate(row[resolvedSettlementIdx] ?? "");
+    const fullSettlement = parseSheetYesNo(row[resolvedFullSettlementIdx] ?? "");
     const disburseDate = parseSheetDate(row[resolvedDisbursedIdx] ?? "");
     const partyLabel = (row[resolvedClientIdx] ?? "").trim() || null;
 
@@ -99,6 +107,7 @@ export function parseSettlementSheetRows(rows: string[][], spreadsheetId: string
       partyLabel,
       pendingRemaining: isPendingDisbursementCountCell(countCell),
       settlementDate,
+      fullSettlement,
       disburseDate,
       settlementAmount: parseSheetMoney(row[resolvedGrossIdx] ?? ""),
       attorneyFees: parseSheetMoney(row[resolvedNetFeesIdx] ?? ""),
@@ -120,6 +129,7 @@ export function buildSettlementCasePayloads(parsed: ParsedSettlementRow[]): Sett
 function buildSettlementCasePayload(caseNumber: string, caseRows: ParsedSettlementRow[]): SettlementSheetCasePayload {
   const sheetRowCount = caseRows.length;
   const settlementDate = caseRows.map((row) => row.settlementDate).find(Boolean) ?? null;
+  const fullSettlement = caseRows.some((row) => row.fullSettlement);
   const disbursements = caseRows.map((row) => ({
     sheetRowKey: row.sheetRowKey,
     partyLabel: row.partyLabel,
@@ -139,6 +149,7 @@ function buildSettlementCasePayload(caseNumber: string, caseRows: ParsedSettleme
     caseNumber,
     sheetRowCount,
     settlementDate,
+    fullSettlement,
     totalSettlementAmount: sumMoney(caseRows.map((row) => row.settlementAmount)),
     totalAttorneyFees: sumMoney(caseRows.map((row) => row.attorneyFees)),
     latestDisburseDate,

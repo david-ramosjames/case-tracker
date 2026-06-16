@@ -18,6 +18,7 @@ The tracker imports **settlement date**, **disburse dates**, and **multi-disburs
 | B | Count — filled while pending, **blank when disbursed** |
 | C | Case # |
 | D | Client / party name (e.g. minor) |
+| G | Full Settlement — **Y** when the case has a full settlement (stage → Settled when column H is also set, even if not all disbursement rows exist yet) |
 | H | Settlement Date |
 | J | Gross Settlement |
 | K | Net Attorney Fees |
@@ -46,6 +47,8 @@ Use your tab name in `GOOGLE_SHEETS_SETTLEMENT_RANGE` (the workbook title is oft
 - **Daily cron** with Slack sheet sync
 
 Cases must already exist in the tracker (matched by Case #).
+
+When **Settlement Date (H)** is set and **Full Settlement (G)** is **Y**, the tracker sets case stage to **Settled** on sync — even when additional disbursement parties are not on the sheet yet.
 
 ## Case detail
 

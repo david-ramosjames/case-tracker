@@ -256,24 +256,24 @@ export function applyDerivedResultQuarter<T extends { disburseDate: string | nul
   return { ...result, resultQuarter: deriveResultQuarterFromDisburseDate(result.disburseDate) };
 }
 
-/** When disburse date is set, reductions are treated as deposited. */
-export function deriveReductionsStatusFromDisburseDate(
-  disburseDate: string | null | undefined,
-): ReductionsStatus | null {
-  return disburseDate?.trim() ? "Deposited" : null;
+export function applyDerivedResultFields<
+  T extends { disburseDate: string | null; resultQuarter: string | null },
+>(result: T): T {
+  return applyDerivedResultQuarter(result);
 }
 
+/** @deprecated Reductions is independent of disburse date — do not use for new logic. */
+export function deriveReductionsStatusFromDisburseDate(
+  _disburseDate: string | null | undefined,
+): ReductionsStatus | null {
+  return null;
+}
+
+/** @deprecated Reductions is no longer derived from disburse date. */
 export function applyDerivedReductionsStatus<T extends { disburseDate: string | null; reductionsStatus: ReductionsStatus }>(
   result: T,
 ): T {
-  const derived = deriveReductionsStatusFromDisburseDate(result.disburseDate);
-  return derived ? { ...result, reductionsStatus: derived } : result;
-}
-
-export function applyDerivedResultFields<
-  T extends { disburseDate: string | null; resultQuarter: string | null; reductionsStatus: ReductionsStatus },
->(result: T): T {
-  return applyDerivedReductionsStatus(applyDerivedResultQuarter(result));
+  return result;
 }
 
 export type ApplyDerivedSettlementResultOptions = {
@@ -314,7 +314,6 @@ export function applyDerivedSettlementResult<
       disbursedStatus: aggregated.disbursedStatus,
       checkDisbursedAt: aggregated.checkDisbursedAt,
       resultQuarter: aggregated.resultQuarter,
-      reductionsStatus: aggregated.reductionsStatus,
     });
   }
 
