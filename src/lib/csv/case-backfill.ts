@@ -351,15 +351,15 @@ function normalizeReductionsStatus(value: string): ReductionsStatus {
   ) {
     return "Sent, Not Approved";
   }
+  if (normalized === "to be sent") return "To Be Sent";
   if (
-    normalized === "to be sent" ||
     normalized === "not complete" ||
     normalized === "deposited" ||
     normalized === "n/a" ||
     normalized === "na" ||
     normalized === "not applicable"
   ) {
-    return "To Be Sent";
+    return "Not Complete";
   }
   return coerceReductionsStatus(value);
 }

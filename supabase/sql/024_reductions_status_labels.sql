@@ -8,9 +8,9 @@ where reductions_status = 'Sent';
 
 update public.case_tracker_results
 set reductions_status = 'To Be Sent'
-where reductions_status in ('Not Complete', 'Deposited', 'N/A', '');
+where reductions_status in ('Deposited', 'N/A', '');
 
 alter table public.case_tracker_results
-  alter column reductions_status set default 'To Be Sent';
+  alter column reductions_status set default 'Not Complete';
 
 commit;

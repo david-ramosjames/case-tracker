@@ -144,6 +144,7 @@ export const CLOSING_STATUS_OPTIONS = ["No", "Drafted", "Approved", "Signed"] sa
 export const CHECK_STATUS_OPTIONS = ["Deposited", "No", "Sent"] satisfies CheckStatus[];
 export const DISBURSED_STATUS_OPTIONS = ["No", "Yes"] satisfies DisbursedStatus[];
 export const REDUCTIONS_MANUAL_STATUS_OPTIONS = [
+  "Not Complete",
   "To Be Sent",
   "Sent, Not Approved",
   "Approved",
@@ -155,14 +156,17 @@ export const REDUCTIONS_STATUS_OPTIONS = REDUCTIONS_MANUAL_STATUS_OPTIONS;
 /** Map stored values (including legacy labels) to a selectable reductions status. */
 export function coerceReductionsStatus(value: string | null | undefined): ReductionsStatus {
   const trimmed = value?.trim() ?? "";
-  if (trimmed === "To Be Sent" || trimmed === "Sent, Not Approved" || trimmed === "Approved") {
+  if (
+    trimmed === "Not Complete" ||
+    trimmed === "To Be Sent" ||
+    trimmed === "Sent, Not Approved" ||
+    trimmed === "Approved"
+  ) {
     return trimmed;
   }
   if (trimmed === "Sent") return "Sent, Not Approved";
-  if (trimmed === "Not Complete" || trimmed === "Deposited" || trimmed === "N/A" || !trimmed) {
-    return "To Be Sent";
-  }
-  return "To Be Sent";
+  if (trimmed === "Deposited" || trimmed === "N/A" || !trimmed) return "Not Complete";
+  return "Not Complete";
 }
 
 /** Forecast quarter when the case is expected to disburse (planning field on the tracker). */

@@ -22,7 +22,7 @@ export type ReleaseStatus = "No" | "Signed";
 export type ClosingStatus = "No" | "Drafted" | "Approved" | "Signed";
 export type CheckStatus = "Deposited" | "No" | "Sent";
 export type DisbursedStatus = "No" | "Yes";
-export type ReductionsStatus = "To Be Sent" | "Sent, Not Approved" | "Approved";
+export type ReductionsStatus = "Not Complete" | "To Be Sent" | "Sent, Not Approved" | "Approved";
 
 export type StageSuggestion = {
   id: string;
