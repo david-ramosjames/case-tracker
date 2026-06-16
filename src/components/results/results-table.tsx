@@ -374,7 +374,7 @@ export function ResultsTable({
                       <CaseCompletionCell record={record} settings={settings} />
                     </TableCell>
                     <TableCell className="sticky left-28 z-10 w-28 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
-                      <CaseNumberLink caseId={record.shared.id} caseNumber={record.shared.caseNumber} />
+                      <CaseNumberLink caseId={record.shared.id} caseNumber={record.shared.caseNumber} openInNewTab />
                     </TableCell>
                     <TableCell className="sticky left-56 z-10 w-44 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.shared.clientName}</TableCell>
                     <TableCell className="sticky left-[25rem] z-10 w-40 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.attorney.name}</TableCell>
@@ -434,7 +434,7 @@ export function ResultsTable({
                     </TableCell>
                     <TableCell className="w-28">
                       <Button asChild variant="outline" size="sm">
-                        <Link href={`/cases/${record.shared.id}`}>
+                        <Link href={`/cases/${record.shared.id}`} target="_blank" rel="noopener noreferrer">
                           <Eye className="h-4 w-4" />
                           View
                         </Link>

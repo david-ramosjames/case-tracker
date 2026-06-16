@@ -89,15 +89,15 @@ export function extractTopicStage(topic: string | null | undefined) {
   return match?.[1]?.trim() || null;
 }
 
-/** Replace or append the trailing `(Status)` segment; preserves attorney/paralegal prefix. */
-export function replaceTopicStage(topic: string | null | undefined, stageLabel: string) {
-  const trimmed = topic?.trim() ?? "";
+const TRAILING_TOPIC_STAGE_PATTERN = /\s*\([^)]*\)\s*$/;
+
+/** Replace or append the trailing `(Status)` segment; preserves the rest of the topic verbatim. */
+export function replaceTopicStage(topic: string, stageLabel: string) {
   const suffix = `(${stageLabel})`;
-  if (!trimmed) return suffix;
-  if (/\([^)]+\)\s*$/.test(trimmed)) {
-    return trimmed.replace(/\s*\([^)]+\)\s*$/, ` ${suffix}`).trim();
+  if (TRAILING_TOPIC_STAGE_PATTERN.test(topic)) {
+    return topic.replace(TRAILING_TOPIC_STAGE_PATTERN, ` ${suffix}`).trimEnd();
   }
-  return `${trimmed} ${suffix}`;
+  return `${topic.trimEnd()} ${suffix}`;
 }
 
 /** Attorney / paralegal segment from topics like `Attorney @Arielle | Paralegal @Adrian (Settled)`. */
@@ -116,9 +116,20 @@ export async function syncSlackChannelTopicForStage(input: {
 }) {
   const stageLabel = getStageTopicLabel(input.stage);
   const currentTopic = await fetchChannelTopic(input.channelId);
-  const nextTopic = replaceTopicStage(currentTopic, stageLabel);
 
-  if (currentTopic?.trim() === nextTopic.trim()) {
+  if (!currentTopic?.trim()) {
+    console.warn("Slack topic update skipped: could not read current channel topic", {
+      channelId: input.channelId,
+      caseNumber: input.caseNumber,
+    });
+    await updateChannelTopicStage(input.caseNumber, stageLabel);
+    return { updated: false as const, reason: "no_current_topic" as const };
+  }
+
+  const nextTopic = replaceTopicStage(currentTopic, stageLabel);
+  const currentStageLabel = extractTopicStage(currentTopic);
+
+  if (currentStageLabel?.toLowerCase() === stageLabel.toLowerCase()) {
     await updateChannelTopicStage(input.caseNumber, stageLabel);
     return { updated: false as const, reason: "already_current" as const };
   }
