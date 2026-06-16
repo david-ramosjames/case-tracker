@@ -43,10 +43,14 @@ import {
   needsQuarterlyCheckIn,
 } from "@/lib/calculations";
 import { DisbursementPartiesCard } from "@/components/cases/disbursement-parties-card";
+import { ResultDateInput } from "@/components/cases/result-date-input";
+import { dateInputToDateOnly, dateInputToTimestamp, toDateInput } from "@/lib/date-input";
+import { disbursementWeight } from "@/lib/disbursements";
 import { type SessionUser } from "@/lib/auth/types";
 import { formatSlackChannelLabel, getSlackChannelArchiveUrl } from "@/lib/slack/links";
 import {
   type ActivityLogEntry,
+  type CaseDisbursement,
   type CaseRecord,
   type CaseSlackChannel,
   type CaseTrackerSettings,
@@ -55,6 +59,8 @@ import {
   type ClosingStatus,
   type CommentType,
   type DisbursedStatus,
+  type DisbursementPartyOverrideInput,
+  type ManualDisbursementInput,
   type ReductionsStatus,
   type ReleaseStatus,
   type SettlementResult,
@@ -131,7 +137,7 @@ export function CaseDetailView({
         }));
       }
       if (key === "caseStage" || key === "expectedLitigation" || key === "referralFee") {
-        return { ...next, result: applyDerivedSettlementResult(next.result, next) };
+        return { ...next, result: applyDerivedSettlementResult(next.result, next, { skipDisbursementAggregation: true }) };
       }
       return next;
     });
@@ -174,8 +180,90 @@ export function CaseDetailView({
           [key]: value,
         },
         current,
+        { skipDisbursementAggregation: true },
       ),
     }));
+  }
+
+  function updateDisbursementParty(id: string, patch: Partial<CaseDisbursement>) {
+    setTracker((current) => ({
+      ...current,
+      disbursements: current.disbursements.map((row) => {
+        if (row.id !== id) return row;
+        const next = { ...row, ...patch };
+        if (row.sheetRowKey) {
+          if (patch.disburseDate !== undefined) {
+            next.disburseDateLocked = patch.disburseDate ? true : next.disburseDateLocked;
+            if (patch.disburseDate) next.pendingRemaining = false;
+          }
+          if (patch.settlementDate !== undefined && patch.settlementDate) {
+            next.settlementDateLocked = true;
+          }
+        }
+        return next;
+      }),
+    }));
+  }
+
+  function addManualDisbursement() {
+    setTracker((current) => {
+      const partyCount = Math.max(current.expectedDisbursementCount, current.disbursements.length + 1);
+      return {
+        ...current,
+        expectedDisbursementCount: Math.max(current.expectedDisbursementCount, partyCount),
+        disbursements: [
+          ...current.disbursements,
+          {
+            id: `manual-${crypto.randomUUID()}`,
+            partyLabel: "",
+            settlementDate: null,
+            disburseDate: null,
+            settlementAmount: null,
+            attorneyFees: null,
+            weight: disbursementWeight(partyCount),
+            pendingRemaining: false,
+            sheetRowKey: null,
+            disburseDateLocked: false,
+            settlementDateLocked: false,
+            syncedAt: null,
+          },
+        ],
+      };
+    });
+  }
+
+  function removeManualDisbursement(id: string) {
+    setTracker((current) => ({
+      ...current,
+      disbursements: current.disbursements.filter((row) => row.id !== id),
+    }));
+  }
+
+  function disbursementOverridesForSave(disbursements: CaseDisbursement[]): DisbursementPartyOverrideInput[] {
+    return disbursements
+      .filter((row) => row.sheetRowKey)
+      .map((row) => ({
+        id: row.id,
+        disburseDate: row.disburseDate,
+        settlementDate: row.settlementDate,
+        pendingRemaining: row.pendingRemaining,
+        disburseDateLocked: row.disburseDateLocked,
+        settlementDateLocked: row.settlementDateLocked,
+      }));
+  }
+
+  function manualDisbursementsForSave(disbursements: CaseDisbursement[]): ManualDisbursementInput[] {
+    return disbursements
+      .filter((row) => !row.sheetRowKey)
+      .map((row) => ({
+        id: row.id.startsWith("manual-") ? undefined : row.id,
+        partyLabel: row.partyLabel,
+        settlementDate: row.settlementDate,
+        disburseDate: row.disburseDate,
+        settlementAmount: row.settlementAmount,
+        attorneyFees: row.attorneyFees,
+        pendingRemaining: row.pendingRemaining,
+      }));
   }
 
   function updateResultWorkflow<K extends "releaseStatus" | "closingStatus" | "checkStatus" | "disbursedStatus">(
@@ -233,6 +321,8 @@ export function CaseDetailView({
         multipleDisbursementsEnabled: nextTracker.multipleDisbursementsEnabled,
         expectedDisbursementCount: nextTracker.expectedDisbursementCount,
         result: nextTracker.result,
+        manualDisbursements: manualDisbursementsForSave(nextTracker.disbursements),
+        disbursementOverrides: disbursementOverridesForSave(nextTracker.disbursements),
       },
       actor: {
         userId: sessionUser.id,
@@ -256,7 +346,7 @@ export function CaseDetailView({
     const now = new Date().toISOString();
     const nextTracker = {
       ...tracker,
-      result: applyDerivedSettlementResult(tracker.result, tracker),
+      result: applyDerivedSettlementResult(tracker.result, tracker, { skipDisbursementAggregation: true }),
       lastReviewedAt: markReviewed ? now : tracker.lastReviewedAt,
       updatedAt: now,
     };
@@ -290,7 +380,7 @@ export function CaseDetailView({
     const now = new Date().toISOString();
     const nextTracker = {
       ...tracker,
-      result: applyDerivedSettlementResult(tracker.result, tracker),
+      result: applyDerivedSettlementResult(tracker.result, tracker, { skipDisbursementAggregation: true }),
       lastQuarterlyCheckInAt: now,
       lastReviewedAt: now,
       updatedAt: now,
@@ -684,14 +774,16 @@ export function CaseDetailView({
                       <Input
                         type="date"
                         value={toDateInput(shared.dateOfIncident)}
-                        onChange={(event) => updateShared("dateOfIncident", fromDateInput(event.target.value))}
+                        onChange={(event) => updateShared("dateOfIncident", dateInputToDateOnly(event.target.value))}
                       />
                     </Field>
                     <Field label="Date Signed">
                       <Input
                         type="date"
                         value={toDateInput(shared.dateSigned)}
-                        onChange={(event) => updateShared("dateSigned", fromDateInput(event.target.value) ?? shared.dateSigned)}
+                        onChange={(event) =>
+                          updateShared("dateSigned", dateInputToDateOnly(event.target.value) ?? shared.dateSigned)
+                        }
                       />
                     </Field>
                     <Field label="Status (auto)">
@@ -941,7 +1033,10 @@ export function CaseDetailView({
             ) : (
               <>
                 <Field label="Settlement Date">
-                  <Input type="date" value={toDateInput(tracker.result.settlementDate)} onChange={(event) => updateResult("settlementDate", fromDateInput(event.target.value))} />
+                  <ResultDateInput
+                    value={tracker.result.settlementDate}
+                    onCommit={(value) => updateResult("settlementDate", dateInputToDateOnly(value))}
+                  />
                 </Field>
                 <Field label="Settlement Amount">
                   <FormattedNumberInput prefix="$" value={tracker.result.settlementAmount} onValueChange={(value) => updateResult("settlementAmount", value)} />
@@ -1009,19 +1104,34 @@ export function CaseDetailView({
                   )}
                 </Field>
                 <Field label="Release Signed">
-                  <Input type="date" value={toDateInput(tracker.result.releaseSignedAt)} onChange={(event) => updateResult("releaseSignedAt", fromDateInput(event.target.value))} />
+                  <ResultDateInput
+                    value={tracker.result.releaseSignedAt}
+                    onCommit={(value) => updateResult("releaseSignedAt", dateInputToTimestamp(value))}
+                  />
                 </Field>
                 <Field label="Closing Signed">
-                  <Input type="date" value={toDateInput(tracker.result.closingSignedAt)} onChange={(event) => updateResult("closingSignedAt", fromDateInput(event.target.value))} />
+                  <ResultDateInput
+                    value={tracker.result.closingSignedAt}
+                    onCommit={(value) => updateResult("closingSignedAt", dateInputToTimestamp(value))}
+                  />
                 </Field>
                 <Field label="Check Deposited">
-                  <Input type="date" value={toDateInput(tracker.result.checkDepositedAt)} onChange={(event) => updateResult("checkDepositedAt", fromDateInput(event.target.value))} />
+                  <ResultDateInput
+                    value={tracker.result.checkDepositedAt}
+                    onCommit={(value) => updateResult("checkDepositedAt", dateInputToTimestamp(value))}
+                  />
                 </Field>
                 <Field label="Check Disbursed">
-                  <Input type="date" value={toDateInput(tracker.result.checkDisbursedAt)} onChange={(event) => updateResult("checkDisbursedAt", fromDateInput(event.target.value))} />
+                  <ResultDateInput
+                    value={tracker.result.checkDisbursedAt}
+                    onCommit={(value) => updateResult("checkDisbursedAt", dateInputToTimestamp(value))}
+                  />
                 </Field>
                 <Field label="Disburse Date">
-                  <Input type="date" value={toDateInput(tracker.result.disburseDate)} onChange={(event) => updateResult("disburseDate", fromDateInput(event.target.value))} />
+                  <ResultDateInput
+                    value={tracker.result.disburseDate}
+                    onCommit={(value) => updateResult("disburseDate", dateInputToDateOnly(value))}
+                  />
                 </Field>
                 <Field label="Result Quarter">
                   <Input value={tracker.result.resultQuarter ?? ""} readOnly placeholder="Set disburse date" />
@@ -1043,8 +1153,17 @@ export function CaseDetailView({
           <DisbursementPartiesCard
             record={record}
             editing={isResultsEditing}
+            showManualOnly={
+              isResultsEditing &&
+              !tracker.multipleDisbursementsEnabled &&
+              tracker.disbursements.length === 0
+            }
             onEnabledChange={(enabled) => updateField("multipleDisbursementsEnabled", enabled)}
             onExpectedCountChange={(count) => updateField("expectedDisbursementCount", count)}
+            onAddManualParty={addManualDisbursement}
+            onUpdateManualParty={updateDisbursementParty}
+            onUpdateSheetParty={updateDisbursementParty}
+            onRemoveManualParty={removeManualDisbursement}
           />
         ) : null}
 
@@ -1455,12 +1574,3 @@ function SetupRow({ label, complete }: { label: string; complete: boolean }) {
   );
 }
 
-function toDateInput(value: string | null) {
-  if (!value) return "";
-  return value.slice(0, 10);
-}
-
-function fromDateInput(value: string) {
-  if (!value) return null;
-  return new Date(`${value}T10:00:00.000Z`).toISOString();
-}

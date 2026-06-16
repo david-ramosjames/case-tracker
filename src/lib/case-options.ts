@@ -276,6 +276,11 @@ export function applyDerivedResultFields<
   return applyDerivedReductionsStatus(applyDerivedResultQuarter(result));
 }
 
+export type ApplyDerivedSettlementResultOptions = {
+  /** When true, do not roll disbursement party rows up into case-level result fields (manual edits). */
+  skipDisbursementAggregation?: boolean;
+};
+
 export function applyDerivedSettlementResult<
   TResult extends SettlementResult,
   TTracker extends {
@@ -286,10 +291,10 @@ export function applyDerivedSettlementResult<
     multipleDisbursementsEnabled?: boolean;
     expectedDisbursementCount?: number;
   },
->(result: TResult, tracker: TTracker): TResult {
+>(result: TResult, tracker: TTracker, options?: ApplyDerivedSettlementResultOptions): TResult {
   const withWorkflow = applyDerivedResultFields(result);
   const aggregated =
-    tracker.disbursements && tracker.disbursements.length > 0
+    !options?.skipDisbursementAggregation && tracker.disbursements && tracker.disbursements.length > 0
       ? getAggregatedResultFromDisbursements({
           disbursements: tracker.disbursements,
           multipleDisbursementsEnabled: tracker.multipleDisbursementsEnabled ?? false,

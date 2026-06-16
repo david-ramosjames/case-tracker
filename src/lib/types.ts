@@ -82,7 +82,34 @@ export type CaseDisbursement = {
   weight: number;
   /** From sheet column B: non-blank while still waiting to disburse. */
   pendingRemaining: boolean;
+  /** Null when entered manually in the tracker (not synced from the disbursing sheet). */
+  sheetRowKey: string | null;
+  /** When true, sheet import will not overwrite disburse_date for this row. */
+  disburseDateLocked: boolean;
+  /** When true, sheet import will not overwrite settlement_date for this row. */
+  settlementDateLocked: boolean;
   syncedAt: string | null;
+};
+
+/** Correct dates on a sheet-linked party without sheet sync overwriting them. */
+export type DisbursementPartyOverrideInput = {
+  id: string;
+  disburseDate?: string | null;
+  settlementDate?: string | null;
+  pendingRemaining?: boolean;
+  disburseDateLocked?: boolean;
+  settlementDateLocked?: boolean;
+};
+
+/** Backfill disbursement party not on the RJL disbursing sheet — preserved across sheet sync. */
+export type ManualDisbursementInput = {
+  id?: string;
+  partyLabel: string | null;
+  settlementDate: string | null;
+  disburseDate: string | null;
+  settlementAmount: number | null;
+  attorneyFees: number | null;
+  pendingRemaining?: boolean;
 };
 
 export type SettlementResult = {

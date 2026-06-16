@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
 import { deleteTrackerCase, updateSharedCaseFields, updateTrackerEntry } from "@/lib/supabase/services";
-import { type CaseStatus, type SettlementResult, type TrackerUpdateInput } from "@/lib/types";
+import { type CaseStatus, type DisbursementPartyOverrideInput, type ManualDisbursementInput, type SettlementResult, type TrackerUpdateInput } from "@/lib/types";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ caseId: string }> }) {
   try {
@@ -11,11 +11,25 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ca
     const { caseId } = await params;
     const input = (await request.json()) as {
       shared?: { status?: CaseStatus; caseType?: string; dateSigned?: string; dateOfIncident?: string | null };
-      tracker?: TrackerUpdateInput & { result?: SettlementResult };
+      tracker?: TrackerUpdateInput & {
+        result?: SettlementResult;
+        manualDisbursements?: ManualDisbursementInput[];
+        disbursementOverrides?: DisbursementPartyOverrideInput[];
+      };
       changeInput?: TrackerUpdateInput & { result?: SettlementResult };
       markReviewed?: boolean;
-    } & TrackerUpdateInput;
-    const trackerInput = input.tracker ?? input;
+      manualDisbursements?: ManualDisbursementInput[];
+      disbursementOverrides?: DisbursementPartyOverrideInput[];
+    } & TrackerUpdateInput & {
+        result?: SettlementResult;
+        manualDisbursements?: ManualDisbursementInput[];
+        disbursementOverrides?: DisbursementPartyOverrideInput[];
+      };
+    const trackerInput = {
+      ...(input.tracker ?? input),
+      manualDisbursements: input.manualDisbursements ?? input.tracker?.manualDisbursements,
+      disbursementOverrides: input.disbursementOverrides ?? input.tracker?.disbursementOverrides,
+    };
     const changeInput = input.changeInput ?? trackerInput;
 
     if (input.shared) {

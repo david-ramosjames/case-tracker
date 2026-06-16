@@ -150,16 +150,26 @@ export function getAggregatedResultFromDisbursements(
   };
 }
 
+export function getPartyDisbursementStatus(item: Pick<CaseDisbursement, "disburseDate" | "pendingRemaining">) {
+  if (item.disburseDate) return { label: "Disbursed", variant: "default" as const };
+  if (item.pendingRemaining) return { label: "Awaiting disbursement", variant: "secondary" as const };
+  return { label: "Missing disburse date", variant: "outline" as const };
+}
+
 export function getDisbursementSyncStatus(tracker: Pick<TrackerEntry, "disbursements" | "expectedDisbursementCount">) {
   const expected = getExpectedDisbursementCount(tracker);
-  const onSheet = tracker.disbursements.length;
-  const awaitingSheet = Math.max(0, expected - onSheet);
+  const onSheet = tracker.disbursements.filter((item) => Boolean(item.sheetRowKey)).length;
+  const manual = tracker.disbursements.filter((item) => !item.sheetRowKey).length;
+  const total = tracker.disbursements.length;
+  const awaitingSheet = Math.max(0, expected - total);
   return {
     expected,
     onSheet,
+    manual,
+    total,
     awaitingSheet,
-    matched: onSheet > 0 && onSheet >= expected,
-    partiallyMatched: onSheet > 0 && onSheet < expected,
+    matched: total > 0 && total >= expected,
+    partiallyMatched: total > 0 && total < expected,
   };
 }
 

@@ -1,6 +1,6 @@
 import { buildFieldValidationRowPatch } from "@/lib/attorney-score";
 import { caseNumbersMatch, cleanCaseNumber } from "@/lib/csv/parse";
-import { disbursementWeight } from "@/lib/disbursements";
+import { disbursementWeight, getAggregatedResultFromDisbursements } from "@/lib/disbursements";
 import { parseCaseBackfillCsv, type ParsedCaseBackfillRow } from "@/lib/csv/case-backfill";
 import { trackerTouchesSourcesLit } from "@/lib/slack/reminders";
 import {
@@ -48,6 +48,8 @@ import {
   type ConfidenceLevel,
   type DisbursedStatus,
   type ExpectedLitigationStatus,
+  type ManualDisbursementInput,
+  type DisbursementPartyOverrideInput,
   type ReductionsStatus,
   type ReleaseStatus,
   type SettlementResult,
@@ -256,7 +258,11 @@ export type TrackerUpdateOptions = {
 
 export async function updateTrackerEntry(
   caseId: string,
-  input: TrackerUpdateInput & { result?: SettlementResult },
+  input: TrackerUpdateInput & {
+    result?: SettlementResult;
+    manualDisbursements?: ManualDisbursementInput[];
+    disbursementOverrides?: DisbursementPartyOverrideInput[];
+  },
   options: TrackerUpdateOptions = {},
 ): Promise<{ tracker: TrackerEntry; activity?: ActivityLogEntry }> {
   const client = await createTrackerClient();
@@ -328,6 +334,51 @@ export async function updateTrackerEntry(
     const resultRow = requestedResult
       ? await upsertResultRow(caseId, toString(data.id, ""), requestedResult, data as TrackerEntryRow)
       : null;
+
+    if (input.manualDisbursements) {
+      const admin = createSupabaseAdminClient();
+      if (!admin) throw new Error("Service role required to save manual disbursements.");
+      const caseNumber = cleanCaseNumber(
+        toStringOrNull((data as TrackerEntryRow).case_number) ??
+          cleanCaseNumber(existingRecord?.shared.caseNumber ?? ""),
+      );
+      if (!caseNumber) throw new Error("Case number is required to save manual disbursements.");
+      await syncManualDisbursements(admin, {
+        trackerEntryId: toString(data.id, ""),
+        caseId: isUuid(caseId) ? caseId : null,
+        caseNumber,
+        expectedDisbursementCount: Math.max(
+          1,
+          toNumber((data as TrackerEntryRow).expected_disbursement_count) ??
+            existingTracker?.expectedDisbursementCount ??
+            1,
+        ),
+        rows: input.manualDisbursements,
+      });
+    }
+
+    if (input.disbursementOverrides?.length) {
+      const admin = createSupabaseAdminClient();
+      if (!admin) throw new Error("Service role required to save disbursement overrides.");
+      await syncDisbursementPartyOverrides(admin, input.disbursementOverrides);
+    }
+
+    if (input.manualDisbursements || input.disbursementOverrides?.length) {
+      const admin = createSupabaseAdminClient();
+      if (!admin) throw new Error("Service role required to update results from disbursements.");
+      const caseNumber = cleanCaseNumber(
+        toStringOrNull((data as TrackerEntryRow).case_number) ??
+          cleanCaseNumber(existingRecord?.shared.caseNumber ?? ""),
+      );
+      if (caseNumber) {
+        await recomputeCaseResultFromDisbursements(admin, {
+          caseId,
+          trackerEntryId: toString(data.id, ""),
+          caseNumber,
+        });
+      }
+    }
+
     const tracker = rowToTrackerEntry(data as TrackerEntryRow, resultRow, []);
     const activity = await createActivityEntry(
       caseId,
@@ -621,20 +672,206 @@ async function upsertDisbursementBySheetRowKey(
 ) {
   const { data: existing, error: lookupError } = await admin
     .from("case_tracker_disbursements")
-    .select("id")
+    .select("id, disburse_date, settlement_date, pending_remaining, disburse_date_locked, settlement_date_locked")
     .eq("sheet_row_key", payload.sheet_row_key)
     .maybeSingle();
 
   if (lookupError) throw new Error(lookupError.message);
 
   if (existing?.id) {
-    const { error } = await admin.from("case_tracker_disbursements").update(payload).eq("id", existing.id);
+    const merged = { ...payload };
+    if (toBoolean(existing.disburse_date_locked, false)) {
+      merged.disburse_date = toStringOrNull(existing.disburse_date);
+      if (merged.disburse_date) {
+        merged.pending_remaining = false;
+      } else {
+        merged.pending_remaining = toBoolean(existing.pending_remaining, false);
+      }
+    }
+    if (toBoolean(existing.settlement_date_locked, false)) {
+      merged.settlement_date = toStringOrNull(existing.settlement_date);
+    }
+    const { error } = await admin.from("case_tracker_disbursements").update(merged).eq("id", existing.id);
     if (error) throw new Error(error.message);
     return;
   }
 
   const { error } = await admin.from("case_tracker_disbursements").insert(payload);
   if (error) throw new Error(error.message);
+}
+
+/** Correct disburse/settlement dates on sheet-linked parties (legacy cases). Locked fields survive sheet import. */
+async function syncDisbursementPartyOverrides(
+  admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
+  overrides: DisbursementPartyOverrideInput[],
+) {
+  for (const override of overrides) {
+    if (!override.id || !isUuid(override.id)) continue;
+
+    const { data: existing, error: lookupError } = await admin
+      .from("case_tracker_disbursements")
+      .select("sheet_row_key")
+      .eq("id", override.id)
+      .maybeSingle();
+    if (lookupError) throw new Error(lookupError.message);
+    if (!existing?.sheet_row_key) continue;
+
+    const update: Record<string, unknown> = {};
+    if (override.disburseDate !== undefined) {
+      update.disburse_date = override.disburseDate ? toDateOnly(override.disburseDate) : null;
+    }
+    if (override.settlementDate !== undefined) {
+      update.settlement_date = override.settlementDate ? toDateOnly(override.settlementDate) : null;
+    }
+    if (override.pendingRemaining !== undefined) {
+      update.pending_remaining = override.pendingRemaining;
+    }
+    if (override.disburseDateLocked !== undefined) {
+      update.disburse_date_locked = override.disburseDateLocked;
+    }
+    if (override.settlementDateLocked !== undefined) {
+      update.settlement_date_locked = override.settlementDateLocked;
+    }
+    if (override.disburseDate && override.disburseDateLocked !== false) {
+      update.disburse_date_locked = true;
+      update.pending_remaining = false;
+    }
+    if (override.settlementDate && override.settlementDateLocked !== false) {
+      update.settlement_date_locked = true;
+    }
+    if (Object.keys(update).length === 0) continue;
+
+    const { error } = await admin.from("case_tracker_disbursements").update(update).eq("id", override.id);
+    if (error) throw new Error(error.message);
+  }
+}
+
+async function recomputeCaseResultFromDisbursements(
+  admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
+  input: { caseId: string; trackerEntryId: string; caseNumber: string },
+) {
+  const [{ data: trackerRow, error: trackerError }, { data: disbursementRows, error: disbursementError }, { data: existingResult, error: resultError }] =
+    await Promise.all([
+      admin.from("case_tracker_entries").select("*").eq("id", input.trackerEntryId).maybeSingle(),
+      admin
+        .from("case_tracker_disbursements")
+        .select("*")
+        .eq("case_number", input.caseNumber)
+        .order("created_at", { ascending: true }),
+      admin
+        .from("case_tracker_results")
+        .select("*")
+        .or(`tracker_entry_id.eq.${input.trackerEntryId},case_id.eq.${input.caseId}`)
+        .maybeSingle(),
+    ]);
+
+  if (trackerError) throw new Error(trackerError.message);
+  if (disbursementError) throw new Error(disbursementError.message);
+  if (resultError) throw new Error(resultError.message);
+  if (!trackerRow) return;
+
+  const disbursements = uniqueDisbursements((disbursementRows ?? []) as DisbursementRow[]);
+  const partyCount = Math.max(
+    1,
+    toNumber(trackerRow.expected_disbursement_count) ?? 1,
+    disbursements.length,
+  );
+  const aggregated = getAggregatedResultFromDisbursements({
+    multipleDisbursementsEnabled: partyCount > 1 || toBoolean(trackerRow.multiple_disbursements_enabled, false),
+    expectedDisbursementCount: partyCount,
+    disbursements,
+    result: rowToResult(existingResult),
+  });
+  if (!aggregated) return;
+
+  const resultPayload = {
+    settlement_date: aggregated.settlementDate ? toDateOnly(aggregated.settlementDate) : null,
+    settlement_amount: aggregated.settlementAmount,
+    attorney_fees: aggregated.attorneyFees,
+    fee_percent: aggregated.feePercent,
+    disburse_date: aggregated.disburseDate ? toDateOnly(aggregated.disburseDate) : null,
+    check_disbursed_at: aggregated.checkDisbursedAt,
+    disbursed_status: aggregated.disbursedStatus,
+    result_quarter: aggregated.resultQuarter,
+    reductions_status: aggregated.reductionsStatus,
+  };
+
+  if (existingResult?.id) {
+    const { error } = await admin.from("case_tracker_results").update(resultPayload).eq("id", existingResult.id);
+    if (error) throw new Error(error.message);
+    return;
+  }
+
+  const { error } = await admin.from("case_tracker_results").insert({
+    case_id: isUuid(input.caseId) ? input.caseId : null,
+    tracker_entry_id: input.trackerEntryId,
+    release_status: "No",
+    closing_status: "No",
+    check_status: "No",
+    ...resultPayload,
+  });
+  if (error) throw new Error(error.message);
+}
+
+/** Manual disbursement rows (sheet_row_key null) are never deleted by sheet sync. */
+async function syncManualDisbursements(
+  admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
+  input: {
+    trackerEntryId: string;
+    caseId: string | null;
+    caseNumber: string;
+    expectedDisbursementCount: number;
+    rows: ManualDisbursementInput[];
+  },
+) {
+  const weight = disbursementWeight(input.expectedDisbursementCount);
+  const { data: existing, error: lookupError } = await admin
+    .from("case_tracker_disbursements")
+    .select("id")
+    .eq("case_number", input.caseNumber)
+    .is("sheet_row_key", null);
+
+  if (lookupError) throw new Error(lookupError.message);
+
+  const keepIds = new Set(input.rows.map((row) => row.id).filter((id): id is string => Boolean(id && isUuid(id))));
+
+  for (const row of existing ?? []) {
+    const id = toString(row.id, "");
+    if (id && !keepIds.has(id)) {
+      const { error } = await admin.from("case_tracker_disbursements").delete().eq("id", id);
+      if (error) throw new Error(error.message);
+    }
+  }
+
+  for (const row of input.rows) {
+    const payload = {
+      tracker_entry_id: input.trackerEntryId,
+      case_id: input.caseId && isUuid(input.caseId) ? input.caseId : null,
+      case_number: input.caseNumber,
+      label: row.partyLabel?.trim() || null,
+      settlement_date: row.settlementDate ? toDateOnly(row.settlementDate) : null,
+      disburse_date: row.disburseDate ? toDateOnly(row.disburseDate) : null,
+      settlement_amount: row.settlementAmount,
+      attorney_fees: row.attorneyFees,
+      weight,
+      pending_remaining: row.pendingRemaining ?? false,
+      sheet_row_key: null,
+      synced_at: null,
+    };
+
+    if (row.id && isUuid(row.id)) {
+      const { error } = await admin
+        .from("case_tracker_disbursements")
+        .update(payload)
+        .eq("id", row.id)
+        .is("sheet_row_key", null);
+      if (error) throw new Error(error.message);
+      continue;
+    }
+
+    const { error } = await admin.from("case_tracker_disbursements").insert(payload);
+    if (error) throw new Error(error.message);
+  }
 }
 
 const TRACKER_ENTRY_LOOKUP_SELECT = "id,case_id,case_number,expected_disbursement_count,case_stage";
@@ -805,38 +1042,86 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
       disbursementsSynced += 1;
     }
 
+    const { data: allDisbursementRows, error: fetchAllError } = await admin
+      .from("case_tracker_disbursements")
+      .select("*")
+      .eq("case_number", resolvedCaseNumber)
+      .order("created_at", { ascending: true });
+    if (fetchAllError) throw new Error(fetchAllError.message);
+
+    const mappedDisbursements = uniqueDisbursements((allDisbursementRows ?? []) as DisbursementRow[]);
+    const partyCount = Math.max(totalSlots, mappedDisbursements.length);
+    if (partyCount > totalSlots) {
+      const { error: countError } = await admin
+        .from("case_tracker_entries")
+        .update({
+          expected_disbursement_count: partyCount,
+          multiple_disbursements_enabled: partyCount > 1,
+        })
+        .eq("id", trackerEntryId);
+      if (countError) throw new Error(countError.message);
+    }
+
     const { data: existingResult } = await admin
       .from("case_tracker_results")
       .select("*")
       .or(`tracker_entry_id.eq.${trackerEntryId},case_id.eq.${caseId}`)
       .maybeSingle();
 
-    const settlementDate = item.settlementDate ? toDateOnly(item.settlementDate) : null;
-    const disburseDate = item.latestDisburseDate ? toDateOnly(item.latestDisburseDate) : null;
-    const allPartiesSettled = item.disbursements.every((row) => Boolean(row.settlementDate));
-    const allPartiesDisbursed =
-      item.disbursements.length >= totalSlots &&
-      item.disbursements.every((row) => Boolean(row.disburseDate) && !row.pendingRemaining);
-    const totalSettlementAmount = item.totalSettlementAmount ?? toNumber(existingResult?.settlement_amount);
-    const totalAttorneyFees = item.totalAttorneyFees ?? toNumber(existingResult?.attorney_fees);
+    const existingResultModel = rowToResult(existingResult);
+    const aggregated = getAggregatedResultFromDisbursements({
+      multipleDisbursementsEnabled: partyCount > 1,
+      expectedDisbursementCount: partyCount,
+      disbursements: mappedDisbursements,
+      result: existingResultModel,
+    });
+
+    const sheetSettlementDate = item.settlementDate ? toDateOnly(item.settlementDate) : null;
+    const sheetDisburseDate = item.latestDisburseDate ? toDateOnly(item.latestDisburseDate) : null;
+    const allPartiesSettled = aggregated
+      ? Boolean(aggregated.settlementDate)
+      : item.disbursements.every((row) => Boolean(row.settlementDate));
+    const allPartiesDisbursed = aggregated
+      ? aggregated.disbursedStatus === "Yes"
+      : item.disbursements.length >= totalSlots &&
+        item.disbursements.every((row) => Boolean(row.disburseDate) && !row.pendingRemaining);
+
+    const totalSettlementAmount =
+      aggregated?.settlementAmount ?? item.totalSettlementAmount ?? toNumber(existingResult?.settlement_amount);
+    const totalAttorneyFees =
+      aggregated?.attorneyFees ?? item.totalAttorneyFees ?? toNumber(existingResult?.attorney_fees);
     const feePercent =
       totalSettlementAmount != null && totalAttorneyFees != null && totalSettlementAmount > 0
         ? totalAttorneyFees / totalSettlementAmount
         : toNumber(existingResult?.fee_percent);
-    const resolvedSettlementDate = allPartiesSettled && settlementDate ? settlementDate : null;
-    const resolvedDisburseDate = allPartiesDisbursed && disburseDate ? disburseDate : null;
+
+    const resolvedSettlementDate =
+      aggregated?.settlementDate ??
+      (allPartiesSettled && sheetSettlementDate ? sheetSettlementDate : null);
+    const resolvedDisburseDate =
+      aggregated?.disburseDate ?? (allPartiesDisbursed && sheetDisburseDate ? sheetDisburseDate : null);
+    const resolvedDisbursedStatus = aggregated?.disbursedStatus ?? (allPartiesDisbursed ? "Yes" : "No");
+    const resolvedCheckDisbursedAt =
+      aggregated?.checkDisbursedAt ??
+      (resolvedDisburseDate ? new Date(`${resolvedDisburseDate}T12:00:00.000Z`).toISOString() : null);
+    const resolvedResultQuarter =
+      aggregated?.resultQuarter ??
+      (resolvedDisburseDate ? deriveResultQuarterFromDisburseDate(resolvedDisburseDate) : null);
+    const resolvedReductionsStatus =
+      aggregated?.reductionsStatus ?? (allPartiesDisbursed ? "Deposited" : "Not Complete");
+
     const resultPayload = {
       case_id: isUuid(caseId) ? caseId : null,
       tracker_entry_id: trackerEntryId,
-      settlement_date: resolvedSettlementDate,
+      settlement_date: resolvedSettlementDate ? toDateOnly(resolvedSettlementDate) : null,
       settlement_amount: totalSettlementAmount,
       attorney_fees: totalAttorneyFees,
       fee_percent: feePercent,
-      disburse_date: resolvedDisburseDate,
-      check_disbursed_at: resolvedDisburseDate ? new Date(resolvedDisburseDate).toISOString() : null,
-      disbursed_status: allPartiesDisbursed ? "Yes" : "No",
-      result_quarter: resolvedDisburseDate ? deriveResultQuarterFromDisburseDate(resolvedDisburseDate) : null,
-      reductions_status: allPartiesDisbursed ? "Deposited" : "Not Complete",
+      disburse_date: resolvedDisburseDate ? toDateOnly(resolvedDisburseDate) : null,
+      check_disbursed_at: resolvedCheckDisbursedAt,
+      disbursed_status: resolvedDisbursedStatus,
+      result_quarter: resolvedResultQuarter,
+      reductions_status: resolvedReductionsStatus,
     };
 
     if (existingResult) {
@@ -848,9 +1133,9 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     }
 
     casesProcessed += 1;
-    if (settlementDate || disburseDate) settlementsUpdated += 1;
+    if (resolvedSettlementDate || resolvedDisburseDate) settlementsUpdated += 1;
 
-    if (settlementDate) {
+    if (resolvedSettlementDate) {
       const currentStage = normalizeStage(toStringOrNull(trackerRow.case_stage));
       if (currentStage !== "Settled") {
         const record = await getCaseById(caseId);
@@ -1215,25 +1500,27 @@ async function upsertResultRow(
   trackerRow: TrackerEntryRow,
 ): Promise<ResultRow | null> {
   const client = await createTrackerClient();
-  const normalized = applyDerivedSettlementResult(result, trackerFieldsFromRow(trackerRow));
+  const normalized = applyDerivedSettlementResult(result, trackerFieldsFromRow(trackerRow), {
+    skipDisbursementAggregation: true,
+  });
 
   const payload = {
     case_id: caseId,
     tracker_entry_id: trackerEntryId || null,
-    settlement_date: normalized.settlementDate,
+    settlement_date: normalized.settlementDate ? toDateOnly(normalized.settlementDate) : null,
     settlement_amount: normalized.settlementAmount,
     fee_percent: normalized.feePercent,
     attorney_fees: normalized.attorneyFees,
     release_status: result.releaseStatus,
     closing_status: result.closingStatus,
     check_status: result.checkStatus,
-    disbursed_status: result.disbursedStatus,
+    disbursed_status: normalized.disbursedStatus,
     reductions_status: normalized.reductionsStatus,
     release_signed_at: result.releaseSignedAt,
     closing_signed_at: result.closingSignedAt,
     check_deposited_at: result.checkDepositedAt,
     check_disbursed_at: result.checkDisbursedAt,
-    disburse_date: normalized.disburseDate,
+    disburse_date: normalized.disburseDate ? toDateOnly(normalized.disburseDate) : null,
     result_quarter: normalized.resultQuarter,
   };
 
@@ -1376,6 +1663,9 @@ function disbursementRowToDisbursement(row: DisbursementRow): CaseDisbursement {
     attorneyFees: toNumber(row.attorney_fees),
     weight: toNumber(row.weight) ?? 1,
     pendingRemaining: toBoolean(row.pending_remaining, false),
+    sheetRowKey: toStringOrNull(row.sheet_row_key),
+    disburseDateLocked: toBoolean(row.disburse_date_locked, false),
+    settlementDateLocked: toBoolean(row.settlement_date_locked, false),
     syncedAt: toStringOrNull(row.synced_at),
   };
 }
