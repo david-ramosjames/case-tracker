@@ -26,6 +26,11 @@ import { getCaseById, updateTrackerEntry } from "@/lib/supabase/services";
 import { findCaseByStageUpdateThread } from "@/lib/slack/channels";
 import { getStageSlackOptions } from "@/lib/slack/enum-replies";
 import {
+  describePulseItemApply,
+  type PulseFanOutResult,
+  type PulseItemOutcome,
+} from "@/lib/slack/pulse-outcomes";
+import {
   applyConfirmedStage,
   createStageSuggestion,
   dismissStageSuggestionById,
@@ -131,42 +136,14 @@ export async function postStageConfirmationForSuggestion(
   return { posted: true as const, threadTs: posted.ts, channelId };
 }
 
+export {
+  describePulseItemApply,
+  formatPulseFanOutResult,
+  type PulseFanOutResult,
+  type PulseItemOutcome,
+} from "@/lib/slack/pulse-outcomes";
+
 const PULSE_LOOKBACK_HOURS = 48;
-
-export type PulseFanOutResult =
-  | "posted"
-  | "skipped_ignored_channel"
-  | "skipped_no_match"
-  | "skipped_no_case"
-  | "skipped_already_at_stage"
-  | "skipped_inactive_tracker"
-  | "skipped_handled"
-  | "skipped_already_posted"
-  | "skipped_post_failed"
-  | "skipped_no_channel";
-
-export type PulseItemOutcome = {
-  channelRef: string;
-  pulseLabel: string;
-  suggestedStage: CaseStage;
-  pulseSignal: ParsedPulseItem["pulseSignal"];
-  applyAs: string;
-  caseNumber: string | null;
-  trackerStage: CaseStage | null;
-  trackerDisbursed: string | null;
-  result: PulseFanOutResult;
-};
-
-export function formatPulseFanOutResult(result: PulseFanOutResult) {
-  return result.replace(/^skipped_/, "").replace(/_/g, " ");
-}
-
-export function describePulseItemApply(item: ParsedPulseItem) {
-  if (item.pulseSignal === "disbursed") {
-    return "Settled + Disbursed Yes";
-  }
-  return item.suggestedStage;
-}
 
 export async function processDailyPulseRecap(options?: { force?: boolean }) {
   if (!isSlackEnabled()) {

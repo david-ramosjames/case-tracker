@@ -10,7 +10,7 @@ import { type DailyJobStep } from "@/lib/cron/daily-jobs";
 import {
   formatPulseFanOutResult,
   type PulseItemOutcome,
-} from "@/lib/slack/stage-confirmation";
+} from "@/lib/slack/pulse-outcomes";
 import { cn, errorMessage } from "@/lib/utils";
 
 type JobRow = {
