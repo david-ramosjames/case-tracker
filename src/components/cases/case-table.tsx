@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Eye, Loader2 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HeaderFilter, HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Card, CardContent } from "@/components/ui/card";
@@ -30,7 +29,7 @@ import {
 } from "@/lib/case-options";
 import { CaseAttorneyScoreCell } from "@/components/attorney-score/attorney-score";
 import { getCaseAttorneyScore } from "@/lib/attorney-score";
-import { getCaseCompletionScore, getDataQualityFlags } from "@/lib/calculations";
+import { getCaseCompletionScore } from "@/lib/calculations";
 import { getCasePipelineFilter, type CasePipelineFilter, type ViewerContext } from "@/lib/auth/access";
 import {
   type AppUser,
@@ -664,7 +663,6 @@ export function CaseTable({
             </TableHeader>
             <TableBody>
               {filteredRecords.map((record) => {
-                const flags = getDataQualityFlags(record, settings);
                 const saveStatus = rowSaveStatus[record.shared.id];
 
                 return (
@@ -742,27 +740,22 @@ export function CaseTable({
                       </InlineSelect>
                     </TableCell>
                     <TableCell>
-                      <div className="flex flex-col gap-1">
-                        <InlineSelect
-                          value={coerceExpectedLitigationForStage(record.tracker.caseStage, record.tracker.expectedLitigation) ?? ""}
-                          disabled={record.tracker.caseStage === "Lit"}
-                          onChange={(value) => updateTrackerField(record.shared.id, "expectedLitigation", (value || null) as TrackerEntry["expectedLitigation"])}
-                        >
-                          {record.tracker.caseStage === "Lit" ? (
-                            <option value="Lit">{formatExpectedLitigationLabel("Lit")}</option>
-                          ) : (
-                            <>
-                              <option value="">{formatExpectedLitigationLabel(null)}</option>
-                              {EXPECTED_LITIGATION_OPTIONS.filter(
-                                (option) => option !== "Lit" || record.tracker.caseStage === "Lit",
-                              ).map((option) => (
-                                <option key={option} value={option}>{formatExpectedLitigationLabel(option)}</option>
-                              ))}
-                            </>
-                          )}
-                        </InlineSelect>
-                        {flags.length > 0 ? <Badge variant={flags[0].severity}>{flags[0].id === "stale-review" ? "Stale" : "Needs info"}</Badge> : null}
-                      </div>
+                      <InlineSelect
+                        value={coerceExpectedLitigationForStage(record.tracker.caseStage, record.tracker.expectedLitigation) ?? ""}
+                        disabled={record.tracker.caseStage === "Lit"}
+                        onChange={(value) => updateTrackerField(record.shared.id, "expectedLitigation", (value || null) as TrackerEntry["expectedLitigation"])}
+                      >
+                        {record.tracker.caseStage === "Lit" ? (
+                          <option value="Lit">{formatExpectedLitigationLabel("Lit")}</option>
+                        ) : (
+                          <>
+                            <option value="">{formatExpectedLitigationLabel(null)}</option>
+                            {EXPECTED_LITIGATION_OPTIONS.map((option) => (
+                              <option key={option} value={option}>{formatExpectedLitigationLabel(option)}</option>
+                            ))}
+                          </>
+                        )}
+                      </InlineSelect>
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">

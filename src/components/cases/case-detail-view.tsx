@@ -842,7 +842,7 @@ export function CaseDetailView({
                         ) : (
                           <>
                             <option value="">{formatExpectedLitigationLabel(null)}</option>
-                            {EXPECTED_LITIGATION_OPTIONS.filter((status) => status !== "Lit").map((status) => (
+                            {EXPECTED_LITIGATION_OPTIONS.map((status) => (
                               <option key={status} value={status}>
                                 {formatExpectedLitigationLabel(status)}
                               </option>
