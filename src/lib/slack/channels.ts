@@ -137,6 +137,23 @@ function rowToChannel(row: ChannelRow): CaseSlackChannel {
   };
 }
 
+export async function updateChannelTopicStage(caseNumber: string, topicStage: string) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return false;
+
+  const key = cleanCaseNumber(caseNumber);
+  const { error } = await admin
+    .from("case_slack_channels")
+    .update({ topic_stage: topicStage, updated_at: new Date().toISOString() })
+    .eq("case_number", key);
+
+  if (error) {
+    console.warn("Failed to update topic_stage in database", { caseNumber: key, error: error.message });
+    return false;
+  }
+  return true;
+}
+
 export async function getSlackChannelForCaseNumber(caseNumber: string): Promise<CaseSlackChannel | null> {
   const admin = createSupabaseAdminClient();
   if (!admin) return null;

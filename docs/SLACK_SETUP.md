@@ -13,6 +13,7 @@ Apply `supabase/sql/006_slack_integration.sql` in the Supabase SQL editor.
    - `chat:write`
    - `channels:read`
    - `channels:join` (auto-join **public** case channels before posting)
+   - `channels:manage` (update channel topic status suffix when case stage changes)
    - `channels:history` (read `#daily-pulse` recaps)
    - `groups:read`
    - `groups:history` (if `#daily-pulse` or case channels are **private**)
@@ -104,7 +105,7 @@ Set `NEXT_PUBLIC_SITE_URL=https://YOUR_DOMAIN` on Vercel (then redeploy) so Slac
 
 Response includes `sheetSync`, `settlementSync`, `stageWorkflow`, and `fieldReminders: { posted, skipped, fields }`.
 
-**Channel topics:** the app does **not** change Slack channel topics (Attorney/Paralegal mentions stay as you set them in Slack).
+**Channel topics:** when case stage changes in the tracker, the app updates only the trailing `(Status)` suffix (e.g. `(Treating)` → `(Disengaged)`). Attorney/Paralegal mentions at the start of the topic are left unchanged. Requires `channels:manage` (and `groups:write` for private channels).
 
 ### Per-field attorney reminders
 

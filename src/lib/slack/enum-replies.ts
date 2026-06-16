@@ -22,6 +22,22 @@ export const STAGE_SLACK_LABELS: Record<CaseStage, string> = {
   Terminated: "Terminated",
 };
 
+/** Labels used in Slack channel topics, e.g. `Attorney @Kody (Treating)`. */
+export const STAGE_TOPIC_LABELS: Record<CaseStage, string> = {
+  Onboarding: "Onboarding",
+  Txt: "Treating",
+  Dmd: "Demand",
+  Lit: "Litigation",
+  Settled: "Settled",
+  Disengaged: "Disengaged",
+  Referred: "Referred",
+  Terminated: "Terminated",
+};
+
+export function getStageTopicLabel(stage: CaseStage) {
+  return STAGE_TOPIC_LABELS[stage] ?? stage;
+}
+
 export const EXPECTED_LIT_SLACK_LABELS: Record<ExpectedLitigationStatus, string> = {
   Pre: "Pre-lit",
   Lit: "Litigation",

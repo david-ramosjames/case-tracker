@@ -153,6 +153,52 @@ export async function fetchChannelTopic(channelId: string) {
   }
 }
 
+export async function setChannelTopic(channelId: string, topic: string) {
+  if (!isSlackEnabled()) return false;
+
+  const channel = resolveSlackChannelParam(channelId);
+  const trimmed = topic.trim();
+  if (!trimmed) return false;
+
+  async function attemptSet() {
+    await slackApi<{ ok: boolean }>("conversations.setTopic", {
+      channel,
+      topic: trimmed,
+    });
+    return true;
+  }
+
+  try {
+    return await attemptSet();
+  } catch (error) {
+    if (!isNotInChannelError(error)) {
+      const message = errorMessage(error);
+      if (message.includes("missing_scope")) {
+        console.warn("Slack topic update skipped: add channels:manage (and groups:write for private channels)", {
+          channelId,
+        });
+        return false;
+      }
+      console.warn("Slack channel topic update failed", { channelId, error: message });
+      return false;
+    }
+
+    await ensureSlackChannelMembership(channel);
+
+    try {
+      return await attemptSet();
+    } catch (retryError) {
+      const message = errorMessage(retryError);
+      if (isNotInChannelError(retryError) || message.includes("missing_scope")) {
+        console.warn("Slack topic update skipped", { channelId, error: message });
+        return false;
+      }
+      console.warn("Slack channel topic update failed", { channelId, error: message });
+      return false;
+    }
+  }
+}
+
 export async function postSlackMessage(input: {
   channel: string;
   text: string;

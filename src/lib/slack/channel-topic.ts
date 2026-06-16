@@ -1,4 +1,7 @@
-import { listSlackWorkspaceUsers, lookupSlackUserIdByEmail } from "@/lib/slack/client";
+import { fetchChannelTopic, listSlackWorkspaceUsers, lookupSlackUserIdByEmail, setChannelTopic } from "@/lib/slack/client";
+import { getStageTopicLabel } from "@/lib/slack/enum-replies";
+import { updateChannelTopicStage } from "@/lib/slack/channels";
+import { type CaseStage } from "@/lib/types";
 
 type SlackUserDirectoryEntry = {
   id: string;
@@ -79,6 +82,24 @@ async function loadSlackUserDirectory() {
   }
 }
 
+/** Trailing `(Status)` label from channel topics. */
+export function extractTopicStage(topic: string | null | undefined) {
+  if (!topic?.trim()) return null;
+  const match = topic.trim().match(/\(([^)]+)\)\s*$/);
+  return match?.[1]?.trim() || null;
+}
+
+/** Replace or append the trailing `(Status)` segment; preserves attorney/paralegal prefix. */
+export function replaceTopicStage(topic: string | null | undefined, stageLabel: string) {
+  const trimmed = topic?.trim() ?? "";
+  const suffix = `(${stageLabel})`;
+  if (!trimmed) return suffix;
+  if (/\([^)]+\)\s*$/.test(trimmed)) {
+    return trimmed.replace(/\s*\([^)]+\)\s*$/, ` ${suffix}`).trim();
+  }
+  return `${trimmed} ${suffix}`;
+}
+
 /** Attorney / paralegal segment from topics like `Attorney @Arielle | Paralegal @Adrian (Settled)`. */
 export function extractTopicMentionPrefix(topic: string | null | undefined) {
   if (!topic?.trim()) return null;
@@ -86,6 +107,29 @@ export function extractTopicMentionPrefix(topic: string | null | undefined) {
   const withoutStage = trimmed.replace(/\s*\([^)]+\)\s*$/, "").trim();
   if (!withoutStage.includes("@")) return null;
   return withoutStage;
+}
+
+export async function syncSlackChannelTopicForStage(input: {
+  channelId: string;
+  caseNumber: string;
+  stage: CaseStage;
+}) {
+  const stageLabel = getStageTopicLabel(input.stage);
+  const currentTopic = await fetchChannelTopic(input.channelId);
+  const nextTopic = replaceTopicStage(currentTopic, stageLabel);
+
+  if (currentTopic?.trim() === nextTopic.trim()) {
+    await updateChannelTopicStage(input.caseNumber, stageLabel);
+    return { updated: false as const, reason: "already_current" as const };
+  }
+
+  const set = await setChannelTopic(input.channelId, nextTopic);
+  if (!set) {
+    return { updated: false as const, reason: "set_failed" as const };
+  }
+
+  await updateChannelTopicStage(input.caseNumber, stageLabel);
+  return { updated: true as const, topic: nextTopic };
 }
 
 export async function resolveChannelUserMentions(input: {
