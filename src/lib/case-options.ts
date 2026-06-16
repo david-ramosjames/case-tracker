@@ -107,7 +107,16 @@ export function deriveCaseSizeFromMinimumValue(minimumValue: number | null | und
   return ">$100k";
 }
 
-export const CASE_STAGE_OPTIONS = ["Lit", "Txt", "Dmd", "Settled", "Onboarding", "Disengaged", "Referred", "Terminated"] satisfies CaseStage[];
+export const CASE_STAGE_OPTIONS = [
+  "Onboarding",
+  "Txt",
+  "Dmd",
+  "Lit",
+  "Settled",
+  "Disengaged",
+  "Referred",
+  "Terminated",
+] satisfies CaseStage[];
 
 export const EXPECTED_LITIGATION_OPTIONS = ["Pre", "Lit", "Expect"] satisfies ExpectedLitigationStatus[];
 
