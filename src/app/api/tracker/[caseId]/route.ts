@@ -12,9 +12,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ca
     const input = (await request.json()) as {
       shared?: { status?: CaseStatus; caseType?: string; dateSigned?: string; dateOfIncident?: string | null };
       tracker?: TrackerUpdateInput & { result?: SettlementResult };
+      changeInput?: TrackerUpdateInput & { result?: SettlementResult };
       markReviewed?: boolean;
     } & TrackerUpdateInput;
     const trackerInput = input.tracker ?? input;
+    const changeInput = input.changeInput ?? trackerInput;
 
     if (input.shared) {
       await updateSharedCaseFields(caseId, input.shared);
@@ -24,6 +26,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ca
       actor: { userId: sessionUser.id, userName: sessionUser.name },
       shared: input.shared,
       markReviewed: input.markReviewed,
+      changeInput,
     });
 
     return NextResponse.json({ tracker, activity });

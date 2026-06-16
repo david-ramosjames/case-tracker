@@ -3,6 +3,8 @@
 -- The app assigns roles on sign-in in /auth/callback:
 -- - david@ramosjames.com -> admin
 -- - jon@ramosjames.com   -> admin
+-- - ryan@ramosjames.com  -> admin
+-- - laura@ramosjames.com -> admin
 -- - other @ramosjames.com users -> role from public.contacts (matched by email)
 -- - no contact match -> no role row (user sees "Role pending" in the app)
 --

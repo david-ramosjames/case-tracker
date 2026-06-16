@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
-import { ArrowDown, ArrowUp, ArrowUpDown, Eye } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Eye, Loader2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { HeaderFilter, HeaderMultiFilter } from "@/components/ui/header-filter";
@@ -40,6 +40,7 @@ import {
   type CaseTrackerSettings,
   type ExpectedLitigationStatus,
   type TrackerEntry,
+  type TrackerUpdateInput,
 } from "@/lib/types";
 import { cn, formatDate, formatOptionalDate } from "@/lib/utils";
 import { cleanCaseNumber, compareCaseNumbers } from "@/lib/csv/parse";
@@ -47,6 +48,16 @@ import { type ReactNode, type RefObject, type UIEvent, useEffect, useMemo, useRe
 
 type SortKey = "completion" | "attorneyScore" | "caseNumber" | "clientName" | "dateSigned" | "dol" | "minimumValue" | "policyLimits";
 type SortDirection = "asc" | "desc";
+
+type CaseTablePersistPatch = {
+  shared?: { caseType?: string };
+  tracker?: TrackerUpdateInput;
+};
+
+const AUTOSAVE_DELAY_MS = 350;
+const SAVED_INDICATOR_MS = 2500;
+
+type RowSaveStatus = "saving" | "saved";
 
 export function CaseTable({
   records,
@@ -65,6 +76,11 @@ export function CaseTable({
 }) {
   const [workingRecords, setWorkingRecords] = useState(records);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [rowSaveStatus, setRowSaveStatus] = useState<Record<string, RowSaveStatus>>({});
+  const pendingPatchesRef = useRef(new Map<string, CaseTablePersistPatch>());
+  const persistTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const savedIndicatorTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const recordsRef = useRef(records);
   const [search, setSearch] = useState(initialSearch);
   const [attorneyIds, setAttorneyIds] = useState<string[]>([]);
   const [paralegal, setParalegal] = useState("all");
@@ -241,56 +257,182 @@ export function CaseTable({
     setQuarter("all");
   }
 
-  function updateRecord(recordId: string, updater: (record: CaseRecord) => CaseRecord) {
-    let nextRecord: CaseRecord | null = null;
-    setWorkingRecords((current) =>
-      current.map((record) => {
-        if (record.shared.id !== recordId) return record;
-        nextRecord = updater(record);
-        return nextRecord;
-      }),
-    );
+  useEffect(() => {
+    recordsRef.current = workingRecords;
+  }, [workingRecords]);
 
-    if (nextRecord) {
-      void persistRecord(nextRecord);
+  useEffect(() => {
+    return () => {
+      for (const timer of persistTimersRef.current.values()) clearTimeout(timer);
+      persistTimersRef.current.clear();
+      for (const timer of savedIndicatorTimersRef.current.values()) clearTimeout(timer);
+      savedIndicatorTimersRef.current.clear();
+    };
+  }, []);
+
+  function markRowSaving(caseId: string) {
+    const existing = savedIndicatorTimersRef.current.get(caseId);
+    if (existing) {
+      clearTimeout(existing);
+      savedIndicatorTimersRef.current.delete(caseId);
+    }
+    setRowSaveStatus((current) => ({ ...current, [caseId]: "saving" }));
+  }
+
+  function markRowSaved(caseId: string) {
+    setRowSaveStatus((current) => ({ ...current, [caseId]: "saved" }));
+    const existing = savedIndicatorTimersRef.current.get(caseId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      savedIndicatorTimersRef.current.delete(caseId);
+      setRowSaveStatus((current) => {
+        if (current[caseId] !== "saved") return current;
+        const next = { ...current };
+        delete next[caseId];
+        return next;
+      });
+    }, SAVED_INDICATOR_MS);
+    savedIndicatorTimersRef.current.set(caseId, timer);
+  }
+
+  function clearRowSaveStatus(caseId: string) {
+    const existing = savedIndicatorTimersRef.current.get(caseId);
+    if (existing) {
+      clearTimeout(existing);
+      savedIndicatorTimersRef.current.delete(caseId);
+    }
+    setRowSaveStatus((current) => {
+      if (!current[caseId]) return current;
+      const next = { ...current };
+      delete next[caseId];
+      return next;
+    });
+  }
+
+  function mergePersistPatch(caseId: string, patch: CaseTablePersistPatch) {
+    const existing = pendingPatchesRef.current.get(caseId) ?? {};
+    pendingPatchesRef.current.set(caseId, {
+      shared: { ...existing.shared, ...patch.shared },
+      tracker: { ...existing.tracker, ...patch.tracker },
+    });
+  }
+
+  function schedulePersist(caseId: string) {
+    const existingTimer = persistTimersRef.current.get(caseId);
+    if (existingTimer) clearTimeout(existingTimer);
+    const timer = setTimeout(() => {
+      persistTimersRef.current.delete(caseId);
+      void flushPersist(caseId);
+    }, AUTOSAVE_DELAY_MS);
+    persistTimersRef.current.set(caseId, timer);
+  }
+
+  function queuePersist(caseId: string, patch: CaseTablePersistPatch) {
+    mergePersistPatch(caseId, patch);
+    markRowSaving(caseId);
+    schedulePersist(caseId);
+  }
+
+  async function flushPersist(caseId: string) {
+    while (true) {
+      const patch = pendingPatchesRef.current.get(caseId);
+      if (!patch) return;
+
+      const hasSharedChanges = patch.shared && Object.keys(patch.shared).length > 0;
+      const hasTrackerChanges = patch.tracker && Object.keys(patch.tracker).length > 0;
+      if (!hasSharedChanges && !hasTrackerChanges) {
+        pendingPatchesRef.current.delete(caseId);
+        return;
+      }
+
+      pendingPatchesRef.current.delete(caseId);
+      const snapshotBefore = recordsRef.current.find((record) => record.shared.id === caseId);
+      if (!snapshotBefore) continue;
+
+      setSaveMessage(null);
+
+      try {
+        const response = await fetch(`/api/tracker/${caseId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...(hasSharedChanges ? { shared: patch.shared } : {}),
+            ...(hasTrackerChanges ? { tracker: patch.tracker, changeInput: patch.tracker } : {}),
+            markReviewed: true,
+          }),
+        });
+
+        if (!response.ok) {
+          const body = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(body?.error ?? "Unable to save inline case update.");
+        }
+
+        const body = (await response.json()) as { tracker?: TrackerEntry };
+        if (body.tracker) {
+          setWorkingRecords((current) =>
+            current.map((record) => {
+              if (record.shared.id !== caseId) return record;
+              const nextTracker = body.tracker!;
+              return {
+                ...record,
+                tracker: nextTracker,
+                shared: {
+                  ...record.shared,
+                  ...(patch.shared?.caseType !== undefined ? { caseType: patch.shared.caseType } : {}),
+                  status: deriveCaseStatusFromTracker(nextTracker.caseStage, nextTracker.result.disbursedStatus),
+                },
+              };
+            }),
+          );
+        } else if (patch.shared?.caseType !== undefined) {
+          setWorkingRecords((current) =>
+            current.map((record) =>
+              record.shared.id === caseId
+                ? { ...record, shared: { ...record.shared, caseType: patch.shared!.caseType! } }
+                : record,
+            ),
+          );
+        }
+        markRowSaved(caseId);
+      } catch (error) {
+        clearRowSaveStatus(caseId);
+        setWorkingRecords((current) =>
+          current.map((record) => (record.shared.id === caseId ? snapshotBefore : record)),
+        );
+        setSaveMessage(error instanceof Error ? error.message : "Unable to save inline case update.");
+      }
     }
   }
 
-  async function persistRecord(record: CaseRecord) {
-    const response = await fetch(`/api/tracker/${record.shared.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        shared: {
-          caseType: record.shared.caseType,
-        },
-        tracker: {
-          caseStage: record.tracker.caseStage,
-          targetResolutionQuarter: record.tracker.targetResolutionQuarter,
-          liability: record.tracker.liability,
-          caseSize: record.tracker.caseSize,
-          minimumValue: record.tracker.minimumValue,
-          referralFee: record.tracker.referralFee,
-          policyLimits: record.tracker.policyLimits,
-          expectedLitigation: record.tracker.expectedLitigation,
-        },
+  function updateRecord(
+    recordId: string,
+    updater: (record: CaseRecord) => CaseRecord,
+    persistPatch?: CaseTablePersistPatch,
+  ) {
+    setWorkingRecords((current) =>
+      current.map((record) => {
+        if (record.shared.id !== recordId) return record;
+        return updater(record);
       }),
-    });
+    );
 
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as { error?: string } | null;
-      setSaveMessage(body?.error ?? "Unable to save inline case update.");
+    if (persistPatch) {
+      queuePersist(recordId, persistPatch);
     }
   }
 
   function updateSharedField(recordId: string, key: "caseType", value: string) {
-    updateRecord(recordId, (record) => ({
-      ...record,
-      shared: {
-        ...record.shared,
-        [key]: value,
-      },
-    }));
+    updateRecord(
+      recordId,
+      (record) => ({
+        ...record,
+        shared: {
+          ...record.shared,
+          [key]: value,
+        },
+      }),
+      { shared: { [key]: value } },
+    );
   }
 
   function updateTrackerField<K extends "caseStage" | "targetResolutionQuarter" | "liability" | "minimumValue" | "referralFee" | "policyLimits" | "expectedLitigation">(
@@ -298,31 +440,58 @@ export function CaseTable({
     key: K,
     value: TrackerEntry[K],
   ) {
-    updateRecord(recordId, (record) => {
-      const nextStage = key === "caseStage" ? (value as CaseStage) : record.tracker.caseStage;
-      const nextExpectedLitigation =
-        key === "expectedLitigation"
-          ? (value as TrackerEntry["expectedLitigation"])
-          : key === "caseStage" && value === "Lit"
-            ? "Lit"
-            : record.tracker.expectedLitigation;
-      const tracker = {
-        ...record.tracker,
-        [key]: value,
-        expectedLitigation: coerceExpectedLitigationForStage(nextStage, nextExpectedLitigation),
-        ...(key === "minimumValue"
-          ? { caseSize: deriveCaseSizeFromMinimumValue(value as number | null) }
-          : {}),
-      };
-      return {
-        ...record,
-        tracker,
-        shared: {
-          ...record.shared,
-          status: deriveCaseStatusFromTracker(tracker.caseStage, tracker.result.disbursedStatus),
-        },
-      };
-    });
+    let persistPatch: CaseTablePersistPatch | undefined;
+
+    setWorkingRecords((current) =>
+      current.map((record) => {
+        if (record.shared.id !== recordId) return record;
+
+        const nextStage = key === "caseStage" ? (value as CaseStage) : record.tracker.caseStage;
+        const nextExpectedLitigation =
+          key === "expectedLitigation"
+            ? (value as TrackerEntry["expectedLitigation"])
+            : key === "caseStage" && value === "Lit"
+              ? "Lit"
+              : record.tracker.expectedLitigation;
+        const tracker = {
+          ...record.tracker,
+          [key]: value,
+          expectedLitigation: coerceExpectedLitigationForStage(nextStage, nextExpectedLitigation),
+          ...(key === "minimumValue"
+            ? { caseSize: deriveCaseSizeFromMinimumValue(value as number | null) }
+            : {}),
+        };
+        persistPatch = buildTrackerPersistPatch(record, key, value, tracker.expectedLitigation);
+        return {
+          ...record,
+          tracker,
+          shared: {
+            ...record.shared,
+            status: deriveCaseStatusFromTracker(tracker.caseStage, tracker.result.disbursedStatus),
+          },
+        };
+      }),
+    );
+
+    if (persistPatch) {
+      queuePersist(recordId, persistPatch);
+    }
+  }
+
+  function buildTrackerPersistPatch<K extends "caseStage" | "targetResolutionQuarter" | "liability" | "minimumValue" | "referralFee" | "policyLimits" | "expectedLitigation">(
+    record: CaseRecord,
+    key: K,
+    value: TrackerEntry[K],
+    coercedExpectedLitigation?: TrackerEntry["expectedLitigation"],
+  ): CaseTablePersistPatch {
+    const patch: TrackerUpdateInput = { [key]: value };
+    if (key === "minimumValue") {
+      patch.caseSize = deriveCaseSizeFromMinimumValue(value as number | null);
+    }
+    if (key === "caseStage") {
+      patch.expectedLitigation = coercedExpectedLitigation ?? record.tracker.expectedLitigation;
+    }
+    return { tracker: patch };
   }
 
   return (
@@ -490,12 +659,13 @@ export function CaseTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="w-28">Actions</TableHead>
+                <TableHead className="w-36">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredRecords.map((record) => {
                 const flags = getDataQualityFlags(record, settings);
+                const saveStatus = rowSaveStatus[record.shared.id];
 
                 return (
                   <TableRow key={record.shared.id}>
@@ -595,12 +765,27 @@ export function CaseTable({
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Button asChild variant="outline" size="sm">
-                        <Link href={`/cases/${record.shared.id}`}>
-                          <Eye className="h-4 w-4" />
-                          View
-                        </Link>
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        {saveStatus === "saving" ? (
+                          <span className="inline-flex w-5 shrink-0 justify-center" title="Saving…">
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+                            <span className="sr-only">Saving</span>
+                          </span>
+                        ) : saveStatus === "saved" ? (
+                          <span className="inline-flex w-5 shrink-0 justify-center" title="Saved">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
+                            <span className="sr-only">Saved</span>
+                          </span>
+                        ) : (
+                          <span className="w-5 shrink-0" aria-hidden />
+                        )}
+                        <Button asChild variant="outline" size="sm">
+                          <Link href={`/cases/${record.shared.id}`}>
+                            <Eye className="h-4 w-4" />
+                            View
+                          </Link>
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 );

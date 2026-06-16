@@ -21,8 +21,10 @@ import {
   isStageConfirmationReaction,
   parseStageConfirmationText,
 } from "@/lib/slack/stage-confirmation-parse";
-import { shouldSkipPulseSuggestion } from "@/lib/stage-triggers";
-import { getCaseById } from "@/lib/supabase/services";
+import { buildStagePatchFromConfirmation, shouldSkipPulseSuggestion } from "@/lib/stage-triggers";
+import { getCaseById, updateTrackerEntry } from "@/lib/supabase/services";
+import { findCaseByStageUpdateThread } from "@/lib/slack/channels";
+import { getStageSlackOptions } from "@/lib/slack/enum-replies";
 import {
   applyConfirmedStage,
   createStageSuggestion,
@@ -71,7 +73,8 @@ export function buildStageConfirmationMessage(input: {
   lines.push(
     `Bot suggests case status is: *${stage}* (${confidence} confidence)`,
     "",
-    "Reply in this thread with ✅, `confirmed`, or the correct stage (e.g. `Stage: Demand`).",
+    "Reply in this thread with ✅, `confirmed`, or the correct stage (e.g. `status: Litigation`).",
+    `Valid stages: ${getStageSlackOptions().map((option) => `\`${option}\``).join(" · ")}`,
     `<${input.appUrl}/cases/${input.caseId}|Open in Case Tracker>`,
   );
   return lines.join("\n");
@@ -282,6 +285,39 @@ async function fanOutPulseItem(
   return "posted";
 }
 
+export async function handleStageUpdateNotificationReply(threadTs: string, text: string, actorName = "Slack") {
+  const mapping = await findCaseByStageUpdateThread(threadTs);
+  if (!mapping?.caseId) return { handled: false as const, reason: "not_stage_update_thread" };
+
+  const record = await getCaseById(mapping.caseId);
+  if (!record) return { handled: false as const, reason: "case_not_found" };
+
+  const parsed = parseStageConfirmationText(text, record.tracker.caseStage);
+  if (!parsed) return { handled: false as const, reason: "unrecognized_reply" };
+
+  if (parsed.kind === "dismiss") {
+    return { handled: true as const, action: "dismissed" as const };
+  }
+
+  if (parsed.kind === "invalid_stage") {
+    return { handled: true as const, action: "invalid" as const, message: parsed.message };
+  }
+
+  const stage = parsed.kind === "explicit_stage" ? parsed.stage : record.tracker.caseStage;
+  if (stage === record.tracker.caseStage) {
+    return { handled: true as const, action: "unchanged" as const, stage };
+  }
+
+  const patch = buildStagePatchFromConfirmation(record, stage);
+  await updateTrackerEntry(mapping.caseId, patch, {
+    actor: { userName: actorName },
+    markReviewed: true,
+    changeInput: patch,
+  });
+
+  return { handled: true as const, action: "confirmed" as const, stage };
+}
+
 export async function handleStageConfirmationReply(threadTs: string, text: string, actorName = "Slack") {
   const suggestion = await findStageSuggestionByConfirmationThread(threadTs);
   if (!suggestion) return { handled: false as const, reason: "no_pending_suggestion" };
@@ -292,6 +328,10 @@ export async function handleStageConfirmationReply(threadTs: string, text: strin
   if (parsed.kind === "dismiss") {
     await dismissStageSuggestionById(suggestion.id, actorName);
     return { handled: true as const, action: "dismissed" as const };
+  }
+
+  if (parsed.kind === "invalid_stage") {
+    return { handled: true as const, action: "invalid" as const, message: parsed.message };
   }
 
   const stage = parsed.kind === "explicit_stage" ? parsed.stage : suggestion.suggestedStage;

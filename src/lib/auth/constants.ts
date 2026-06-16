@@ -2,7 +2,12 @@ import { type UserRole } from "@/lib/types";
 
 export const ALLOWED_EMAIL_DOMAIN = "ramosjames.com";
 
-export const ADMIN_EMAILS = ["david@ramosjames.com", "jon@ramosjames.com"] as const;
+export const ADMIN_EMAILS = [
+  "david@ramosjames.com",
+  "jon@ramosjames.com",
+  "ryan@ramosjames.com",
+  "laura@ramosjames.com",
+] as const;
 
 export function normalizeEmail(email: string) {
   return email.trim().toLowerCase();
@@ -13,7 +18,7 @@ export function isAllowedEmail(email: string | null | undefined) {
   return normalizeEmail(email).endsWith(`@${ALLOWED_EMAIL_DOMAIN}`);
 }
 
-/** Only david@ and jon@ get admin from their email address. */
+/** Firm emails that always receive admin on sign-in. */
 export function getAdminRoleForEmail(email: string): "admin" | null {
   const normalized = normalizeEmail(email);
   if ((ADMIN_EMAILS as readonly string[]).includes(normalized)) return "admin";

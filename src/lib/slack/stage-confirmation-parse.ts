@@ -1,4 +1,8 @@
-import { normalizePulseStageLabel } from "@/lib/stage-triggers";
+import {
+  formatSlackInvalidEnumMessage,
+  getStageSlackOptions,
+  parseStrictSlackStage,
+} from "@/lib/slack/enum-replies";
 import { type CaseStage } from "@/lib/types";
 
 const CONFIRM_RE = /^(?:yes|yeah|yep|confirmed?|correct|approve[d]?|ok(?:ay)?|✅|👍)$/i;
@@ -9,7 +13,16 @@ const STAGE_LINE_RE =
 export type ParsedStageConfirmation =
   | { kind: "confirm_suggested" }
   | { kind: "explicit_stage"; stage: CaseStage }
-  | { kind: "dismiss"; reason?: string };
+  | { kind: "dismiss"; reason?: string }
+  | { kind: "invalid_stage"; attempted: string; message: string };
+
+function invalidStage(attempted: string): ParsedStageConfirmation {
+  return {
+    kind: "invalid_stage",
+    attempted,
+    message: formatSlackInvalidEnumMessage("Case stage", getStageSlackOptions(), attempted),
+  };
+}
 
 export function parseStageConfirmationText(text: string, suggestedStage?: CaseStage): ParsedStageConfirmation | null {
   const trimmed = text.trim();
@@ -22,22 +35,30 @@ export function parseStageConfirmationText(text: string, suggestedStage?: CaseSt
 
   const stageLine = trimmed.match(STAGE_LINE_RE);
   if (stageLine) {
-    return { kind: "explicit_stage", stage: normalizePulseStageLabel(stageLine[1]) };
+    const attempted = stageLine[1].trim();
+    const stage = parseStrictSlackStage(attempted);
+    if (stage) return { kind: "explicit_stage", stage };
+    return invalidStage(attempted);
   }
 
   if (CONFIRM_RE.test(trimmed)) {
     return { kind: "confirm_suggested" };
   }
 
-  const singleWord = trimmed.split(/\s+/).length <= 3 ? normalizePulseStageLabel(trimmed) : null;
-  if (singleWord && singleWord !== "Onboarding" && trimmed.length < 40) {
-    if (suggestedStage && singleWord === suggestedStage) return { kind: "confirm_suggested" };
-    return { kind: "explicit_stage", stage: singleWord };
+  const confirmMatch = trimmed.match(/confirm(?:ed)?\s+(?:status\s+)?(?:is\s+)?(.+)/i);
+  if (confirmMatch) {
+    const attempted = confirmMatch[1].trim();
+    const stage = parseStrictSlackStage(attempted);
+    if (stage) return { kind: "explicit_stage", stage };
+    return invalidStage(attempted);
   }
 
-  if (/confirm(?:ed)?\s+(?:status\s+)?(?:is\s+)?(.+)/i.test(trimmed)) {
-    const match = trimmed.match(/confirm(?:ed)?\s+(?:status\s+)?(?:is\s+)?(.+)/i);
-    if (match) return { kind: "explicit_stage", stage: normalizePulseStageLabel(match[1]) };
+  if (trimmed.split(/\s+/).length <= 3 && trimmed.length < 40) {
+    const stage = parseStrictSlackStage(trimmed);
+    if (stage) {
+      if (suggestedStage && stage === suggestedStage) return { kind: "confirm_suggested" };
+      return { kind: "explicit_stage", stage };
+    }
   }
 
   return null;

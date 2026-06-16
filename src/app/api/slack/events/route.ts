@@ -11,8 +11,9 @@ import {
 import {
   handleStageConfirmationReaction,
   handleStageConfirmationReply,
+  handleStageUpdateNotificationReply,
 } from "@/lib/slack/stage-confirmation";
-import { formatSlackThreadAppliedMessage, parseSlackThreadUpdate } from "@/lib/slack/thread-update";
+import { formatSlackThreadAppliedMessage, formatSlackThreadValidationErrors, parseSlackThreadUpdate } from "@/lib/slack/thread-update";
 import { applySlackThreadUpdate } from "@/lib/supabase/services";
 
 type SlackEventPayload = {
@@ -168,7 +169,13 @@ export async function POST(request: Request) {
   try {
     const fieldResult = await handleFieldReminderReply(event.thread_ts, event.text, "Slack thread");
     if (fieldResult.handled) {
-      if (fieldResult.action === "dismissed") {
+      if (fieldResult.action === "invalid") {
+        await postSlackMessage({
+          channel: event.channel,
+          threadTs: event.thread_ts,
+          text: fieldResult.message,
+        });
+      } else if (fieldResult.action === "dismissed") {
         await postSlackMessage({
           channel: event.channel,
           threadTs: event.thread_ts,
@@ -189,7 +196,13 @@ export async function POST(request: Request) {
 
     const stageResult = await handleStageConfirmationReply(event.thread_ts, event.text, "Slack thread");
     if (stageResult.handled) {
-      if (stageResult.action === "confirmed" && stageResult.stage) {
+      if (stageResult.action === "invalid") {
+        await postSlackMessage({
+          channel: event.channel,
+          threadTs: event.thread_ts,
+          text: stageResult.message,
+        });
+      } else if (stageResult.action === "confirmed" && stageResult.stage) {
         await postSlackMessage({
           channel: event.channel,
           threadTs: event.thread_ts,
@@ -200,6 +213,36 @@ export async function POST(request: Request) {
           channel: event.channel,
           threadTs: event.thread_ts,
           text: "Dismissed — no change to case tracker.",
+        });
+      }
+      return NextResponse.json({ ok: true });
+    }
+
+    const stageUpdateResult = await handleStageUpdateNotificationReply(event.thread_ts, event.text, "Slack thread");
+    if (stageUpdateResult.handled) {
+      if (stageUpdateResult.action === "invalid") {
+        await postSlackMessage({
+          channel: event.channel,
+          threadTs: event.thread_ts,
+          text: stageUpdateResult.message,
+        });
+      } else if (stageUpdateResult.action === "confirmed" && stageUpdateResult.stage) {
+        await postSlackMessage({
+          channel: event.channel,
+          threadTs: event.thread_ts,
+          text: `Updated case tracker: *${stageDisplay(stageUpdateResult.stage)}*.`,
+        });
+      } else if (stageUpdateResult.action === "unchanged" && stageUpdateResult.stage) {
+        await postSlackMessage({
+          channel: event.channel,
+          threadTs: event.thread_ts,
+          text: `Case tracker already shows *${stageDisplay(stageUpdateResult.stage)}*.`,
+        });
+      } else if (stageUpdateResult.action === "dismissed") {
+        await postSlackMessage({
+          channel: event.channel,
+          threadTs: event.thread_ts,
+          text: "No change to case tracker.",
         });
       }
       return NextResponse.json({ ok: true });
@@ -225,6 +268,12 @@ export async function POST(request: Request) {
         channel: event.channel,
         threadTs: event.thread_ts,
         text: formatSlackThreadAppliedMessage(result.labels),
+      });
+    } else if (result.reason === "validation_failed" && result.validationErrors?.length) {
+      await postSlackMessage({
+        channel: event.channel,
+        threadTs: event.thread_ts,
+        text: formatSlackThreadValidationErrors(result.validationErrors),
       });
     } else {
       await postSlackMessage({

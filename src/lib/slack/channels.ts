@@ -264,3 +264,49 @@ export async function saveReminderThread(caseId: string, caseNumber: string, thr
 
   return !byCaseNumber.error && (byCaseNumber.data?.length ?? 0) > 0;
 }
+
+export async function findCaseByStageUpdateThread(threadTs: string) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return null;
+
+  const { data, error } = await admin
+    .from("case_tracker_entries")
+    .select("case_number, case_id, id")
+    .eq("slack_stage_update_thread_ts", threadTs)
+    .maybeSingle();
+
+  if (error || !data) return null;
+  const caseId = trackerCaseId(data as { case_id: string | null; id?: string | null });
+  if (!caseId) return null;
+
+  return {
+    caseNumber: data.case_number as string | null,
+    caseId,
+  };
+}
+
+export async function saveStageUpdateThread(caseId: string, caseNumber: string, threadTs: string | null) {
+  const admin = createSupabaseAdminClient();
+  if (!admin || !threadTs) return false;
+
+  const payload = { slack_stage_update_thread_ts: threadTs };
+
+  const byCaseId = await admin
+    .from("case_tracker_entries")
+    .update(payload)
+    .or(`case_id.eq.${caseId},id.eq.${caseId}`)
+    .select("id");
+
+  if (!byCaseId.error && (byCaseId.data?.length ?? 0) > 0) return true;
+
+  const key = cleanCaseNumber(caseNumber);
+  if (!key) return false;
+
+  const byCaseNumber = await admin
+    .from("case_tracker_entries")
+    .update(payload)
+    .eq("case_number", key)
+    .select("id");
+
+  return !byCaseNumber.error && (byCaseNumber.data?.length ?? 0) > 0;
+}

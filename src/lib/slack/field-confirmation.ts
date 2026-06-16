@@ -3,6 +3,7 @@ import {
   parseFieldReminderReply,
 } from "@/lib/slack/field-confirmation-parse";
 import { FIELD_REMINDER_META } from "@/lib/slack/field-reminders";
+import { getCaseById } from "@/lib/supabase/services";
 import {
   confirmFieldReminder,
   dismissFieldReminder,
@@ -13,12 +14,19 @@ export async function handleFieldReminderReply(threadTs: string, text: string, a
   const reminder = await findFieldReminderByThread(threadTs);
   if (!reminder) return { handled: false as const, reason: "no_pending_reminder" };
 
-  const parsed = parseFieldReminderReply(text, reminder.fieldKey);
+  const record = await getCaseById(reminder.caseId);
+  const parsed = parseFieldReminderReply(text, reminder.fieldKey, {
+    currentTargetQuarter: record?.tracker.targetResolutionQuarter,
+  });
   if (!parsed) return { handled: false as const, reason: "unrecognized_reply" };
 
   if (parsed.kind === "dismiss") {
     await dismissFieldReminder(reminder.id, reminder.caseId, actorName);
     return { handled: true as const, action: "dismissed" as const, fieldKey: reminder.fieldKey };
+  }
+
+  if (parsed.kind === "invalid") {
+    return { handled: true as const, action: "invalid" as const, fieldKey: reminder.fieldKey, message: parsed.message };
   }
 
   if (parsed.kind === "update") {

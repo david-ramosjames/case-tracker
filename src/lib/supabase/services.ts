@@ -349,6 +349,10 @@ export async function updateTrackerEntry(
     return { tracker: refreshed?.tracker ?? tracker, activity: activity ?? undefined };
   }
 
+  if (existingTracker) {
+    throw new Error("Tracker entry could not be updated.");
+  }
+
   const { data: inserted, error: insertError } = await client
     .from("case_tracker_entries")
     .insert({
@@ -925,11 +929,15 @@ export async function createTrackerComment(
 }
 
 export async function applySlackThreadUpdate(caseId: string, text: string, actor?: TrackerActor) {
-  const parsed = parseSlackThreadUpdate(text);
-  if (!parsed) return { applied: false as const, reason: "No recognizable tracker fields in thread reply." };
-
   const existing = await getCaseById(caseId);
   if (!existing) return { applied: false as const, reason: "Case not found." };
+
+  const parsed = parseSlackThreadUpdate(text, { currentTargetQuarter: existing.tracker.targetResolutionQuarter });
+  if (!parsed) return { applied: false as const, reason: "No recognizable tracker fields in thread reply." };
+
+  if (parsed.validationErrors.length > 0) {
+    return { applied: false as const, reason: "validation_failed", validationErrors: parsed.validationErrors };
+  }
 
   if (parsed.shared?.caseType) {
     await updateSharedCaseFields(caseId, { caseType: parsed.shared.caseType });
@@ -1580,38 +1588,42 @@ async function runSlackTrackerSideEffects(
 }
 
 function trackerUpdateToRow(input: TrackerUpdateInput, markReviewed = true) {
-  return {
-    case_stage: toDatabaseStage(input.caseStage),
-    minimum_value: input.minimumValue ?? input.estimatedSettlementValue,
-    estimated_fee_value: input.estimatedFeeValue,
-    target_resolution_quarter: input.targetResolutionQuarter,
-    confidence_level: input.confidenceLevel,
-    source_of_estimate: input.sourceOfEstimate,
-    liability: input.liability,
-    case_size: input.caseSize,
-    referral_fee: input.referralFee,
-    referral_fee_arrangement: input.referralFeeArrangement,
-    balance_cta_info: input.balanceCtaInfo,
-    policy_limits: input.policyLimits,
-    policy_info_source: input.policyInfoSource,
-    expected_litigation: toDatabaseExpectedLitigation(input.expectedLitigation),
-    sources: input.sources,
-    injuries: input.injuries,
-    case_description: input.caseDescription,
-    status_notes: input.statusNotes,
-    gv_notes: input.gvNotes,
-    lrj_notes: input.lrjNotes,
-    last_quarterly_check_in_at: input.lastQuarterlyCheckInAt,
-    last_sources_lit_updated_at: input.lastSourcesLitUpdatedAt,
-    forecast_notes: input.forecastNotes,
-    ...(input.multipleDisbursementsEnabled !== undefined
-      ? { multiple_disbursements_enabled: input.multipleDisbursementsEnabled }
-      : {}),
-    ...(input.expectedDisbursementCount !== undefined
-      ? { expected_disbursement_count: Math.max(1, Math.trunc(input.expectedDisbursementCount)) }
-      : {}),
-    ...(markReviewed ? { last_reviewed_at: new Date().toISOString() } : {}),
-  };
+  const row: Record<string, unknown> = {};
+
+  if (input.caseStage !== undefined) row.case_stage = toDatabaseStage(input.caseStage);
+  if (input.minimumValue !== undefined || input.estimatedSettlementValue !== undefined) {
+    row.minimum_value = input.minimumValue ?? input.estimatedSettlementValue;
+  }
+  if (input.estimatedFeeValue !== undefined) row.estimated_fee_value = input.estimatedFeeValue;
+  if (input.targetResolutionQuarter !== undefined) row.target_resolution_quarter = input.targetResolutionQuarter;
+  if (input.confidenceLevel !== undefined) row.confidence_level = input.confidenceLevel;
+  if (input.sourceOfEstimate !== undefined) row.source_of_estimate = input.sourceOfEstimate;
+  if (input.liability !== undefined) row.liability = input.liability;
+  if (input.caseSize !== undefined) row.case_size = input.caseSize;
+  if (input.referralFee !== undefined) row.referral_fee = input.referralFee;
+  if (input.referralFeeArrangement !== undefined) row.referral_fee_arrangement = input.referralFeeArrangement;
+  if (input.balanceCtaInfo !== undefined) row.balance_cta_info = input.balanceCtaInfo;
+  if (input.policyLimits !== undefined) row.policy_limits = input.policyLimits;
+  if (input.policyInfoSource !== undefined) row.policy_info_source = input.policyInfoSource;
+  if (input.expectedLitigation !== undefined) row.expected_litigation = toDatabaseExpectedLitigation(input.expectedLitigation);
+  if (input.sources !== undefined) row.sources = input.sources;
+  if (input.injuries !== undefined) row.injuries = input.injuries;
+  if (input.caseDescription !== undefined) row.case_description = input.caseDescription;
+  if (input.statusNotes !== undefined) row.status_notes = input.statusNotes;
+  if (input.gvNotes !== undefined) row.gv_notes = input.gvNotes;
+  if (input.lrjNotes !== undefined) row.lrj_notes = input.lrjNotes;
+  if (input.lastQuarterlyCheckInAt !== undefined) row.last_quarterly_check_in_at = input.lastQuarterlyCheckInAt;
+  if (input.lastSourcesLitUpdatedAt !== undefined) row.last_sources_lit_updated_at = input.lastSourcesLitUpdatedAt;
+  if (input.forecastNotes !== undefined) row.forecast_notes = input.forecastNotes;
+  if (input.multipleDisbursementsEnabled !== undefined) {
+    row.multiple_disbursements_enabled = input.multipleDisbursementsEnabled;
+  }
+  if (input.expectedDisbursementCount !== undefined) {
+    row.expected_disbursement_count = Math.max(1, Math.trunc(input.expectedDisbursementCount));
+  }
+  if (markReviewed) row.last_reviewed_at = new Date().toISOString();
+
+  return row;
 }
 
 function isUuid(value: string | null | undefined) {

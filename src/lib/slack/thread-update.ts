@@ -1,23 +1,50 @@
-import { normalizeCaseType, normalizeTargetQuarter } from "@/lib/case-options";
 import { cleanCaseNumber } from "@/lib/csv/parse";
+import {
+  formatInvalidMinimumValueMessage,
+  formatInvalidPolicyLimitsMessage,
+  formatInvalidReferralFeeMessage,
+  formatInvalidTargetQuarterMessage,
+  formatSlackInvalidEnumMessage,
+  getCaseTypeSlackOptions,
+  getExpectedLitigationSlackOptions,
+  getLiabilitySlackOptions,
+  parseStrictCaseType,
+  parseStrictExpectedLitigation,
+  parseStrictLiability,
+  parseStrictMinimumValue,
+  parseStrictPolicyLimits,
+  parseStrictReferralFee,
+  parseStrictTargetQuarter,
+} from "@/lib/slack/enum-replies";
 import { type TrackerUpdateInput } from "@/lib/types";
 
 export type ParsedThreadUpdate = {
   tracker: TrackerUpdateInput;
   shared?: { caseType?: string };
   sharedNotes?: string;
+  validationErrors: string[];
 };
 
-export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null {
+export function parseSlackThreadUpdate(
+  text: string,
+  options?: { currentTargetQuarter?: string | null },
+): ParsedThreadUpdate | null {
   const tracker: TrackerUpdateInput = {};
   const shared: { caseType?: string } = {};
   let sharedNotes: string | undefined;
+  const validationErrors: string[] = [];
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
   for (const line of lines) {
     const typeMatch = line.match(/^(?:type|case\s*type)\s*:\s*(.+)$/i);
     if (typeMatch) {
-      shared.caseType = normalizeCaseType(typeMatch[1]);
+      const attempted = typeMatch[1].trim();
+      const value = parseStrictCaseType(attempted);
+      if (value) {
+        shared.caseType = value;
+      } else {
+        validationErrors.push(formatSlackInvalidEnumMessage("Case type", getCaseTypeSlackOptions(), attempted));
+      }
       continue;
     }
 
@@ -25,16 +52,25 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
       /^(?:quarter|expected disbursement quarter|expected completion quarter|target quarter|disbursement quarter)\s*:\s*(.+)$/i,
     );
     if (quarterMatch) {
-      tracker.targetResolutionQuarter = normalizeTargetQuarter(quarterMatch[1]) ?? undefined;
+      const attempted = quarterMatch[1].trim();
+      const value = parseStrictTargetQuarter(attempted, { currentValue: options?.currentTargetQuarter });
+      if (value) {
+        tracker.targetResolutionQuarter = value;
+      } else {
+        validationErrors.push(formatInvalidTargetQuarterMessage(attempted, options?.currentTargetQuarter));
+      }
       continue;
     }
 
     const minimumMatch = line.match(/^(?:minimum(?:\s+value)?|min(?:\s+value)?)\s*:\s*(.+)$/i);
     if (minimumMatch) {
-      const value = parseMoney(minimumMatch[1]);
+      const attempted = minimumMatch[1].trim();
+      const value = parseStrictMinimumValue(attempted);
       if (value != null) {
         tracker.minimumValue = value;
         tracker.estimatedSettlementValue = value;
+      } else {
+        validationErrors.push(formatInvalidMinimumValueMessage(attempted));
       }
       continue;
     }
@@ -68,35 +104,59 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
 
     const liabilityMatch = line.match(/^liability\s*:\s*(.+)$/i);
     if (liabilityMatch) {
-      tracker.liability = liabilityMatch[1].trim();
+      const attempted = liabilityMatch[1].trim();
+      const value = parseStrictLiability(attempted);
+      if (value) {
+        tracker.liability = value;
+      } else {
+        validationErrors.push(formatSlackInvalidEnumMessage("Liability", getLiabilitySlackOptions(), attempted));
+      }
       continue;
     }
 
     const policyMatch = line.match(/^policy\s*limits?\s*:\s*(.+)$/i);
     if (policyMatch) {
-      const value = parseMoney(policyMatch[1]);
-      if (value != null) tracker.policyLimits = value;
+      const attempted = policyMatch[1].trim();
+      const value = parseStrictPolicyLimits(attempted);
+      if (value != null) {
+        tracker.policyLimits = value;
+      } else {
+        validationErrors.push(formatInvalidPolicyLimitsMessage(attempted));
+      }
       continue;
     }
 
     const expectedLitMatch = line.match(/^(?:expected\s*lit(?:igation)?|expected litigation)\s*:\s*(.+)$/i);
     if (expectedLitMatch) {
-      const normalized = expectedLitMatch[1].trim().toLowerCase();
-      if (normalized.includes("litigation") || normalized === "lit") tracker.expectedLitigation = "Lit";
-      else if (normalized.includes("expected")) tracker.expectedLitigation = "Expect";
-      else if (normalized.includes("pre")) tracker.expectedLitigation = "Pre";
+      const attempted = expectedLitMatch[1].trim();
+      const value = parseStrictExpectedLitigation(attempted);
+      if (value) {
+        tracker.expectedLitigation = value;
+      } else {
+        validationErrors.push(
+          formatSlackInvalidEnumMessage("Expected litigation", getExpectedLitigationSlackOptions(), attempted),
+        );
+      }
       continue;
     }
 
     const referralFeeMatch = line.match(/^referral\s*fee\s*:\s*(.+)$/i);
     if (referralFeeMatch) {
-      const value = parsePercent(referralFeeMatch[1]);
-      if (value != null) tracker.referralFee = value;
+      const attempted = referralFeeMatch[1].trim();
+      const value = parseStrictReferralFee(attempted);
+      if (value != null) {
+        tracker.referralFee = value;
+      } else {
+        validationErrors.push(formatInvalidReferralFeeMessage(attempted));
+      }
       continue;
     }
   }
 
-  if (Object.keys(tracker).length === 0 && !shared.caseType) {
+  const hasTrackerPatch = Object.keys(tracker).length > 0;
+  const hasSharedPatch = Boolean(shared.caseType);
+
+  if (!hasTrackerPatch && !hasSharedPatch) {
     const caseNumber = lines.find((line) => /^case\s*#/i.test(line));
     if (!caseNumber && lines.length >= 2) {
       sharedNotes = text.trim();
@@ -104,7 +164,14 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
     return null;
   }
 
-  if (Object.keys(tracker).length > 0) {
+  if (validationErrors.length > 0) {
+    return {
+      tracker: {},
+      validationErrors,
+    };
+  }
+
+  if (hasTrackerPatch) {
     tracker.lastQuarterlyCheckInAt = new Date().toISOString();
   }
 
@@ -112,6 +179,7 @@ export function parseSlackThreadUpdate(text: string): ParsedThreadUpdate | null 
     tracker,
     ...(shared.caseType ? { shared } : {}),
     sharedNotes,
+    validationErrors: [],
   };
 }
 
@@ -145,17 +213,11 @@ export function formatSlackThreadAppliedMessage(labels: string[]) {
   return `Thanks — updated the case tracker: *${labels.join("*, *")}*.`;
 }
 
+export function formatSlackThreadValidationErrors(errors: string[]) {
+  return errors.join("\n");
+}
+
 export function caseNumberFromSlackText(text: string) {
   const match = text.match(/case\s*#\s*([^\s)]+)/i);
   return match ? cleanCaseNumber(match[1]) : "";
-}
-
-function parseMoney(value: string) {
-  const numeric = Number(value.replace(/[$,\s]/g, "").replace(/,/g, ""));
-  return Number.isFinite(numeric) ? numeric : null;
-}
-
-function parsePercent(value: string) {
-  const numeric = Number(value.trim().replace(/%$/, "").replace(/[,\s]/g, ""));
-  return Number.isFinite(numeric) ? numeric : null;
 }

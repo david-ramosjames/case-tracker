@@ -9,10 +9,12 @@ import {
 } from "@/lib/attorney-score";
 import {
   EXPECTED_DISBURSEMENT_QUARTER_LABEL,
-  EXPECTED_LITIGATION_OPTIONS,
-  LIABILITY_OPTIONS,
-  getTargetPeriodOptions,
 } from "@/lib/case-options";
+import {
+  getExpectedLitigationSlackOptions,
+  getLiabilitySlackOptions,
+  getTargetQuarterSlackOptions,
+} from "@/lib/slack/enum-replies";
 import { type CaseRecord, type FieldReminderKey } from "@/lib/types";
 import { daysSince, formatCurrency } from "@/lib/utils";
 
@@ -113,26 +115,21 @@ function formatFieldValue(record: CaseRecord, fieldKey: FieldReminderKey) {
   }
 }
 
-function fieldOptionsBlock(fieldKey: FieldReminderKey) {
+function fieldOptionsBlock(fieldKey: FieldReminderKey, record: CaseRecord) {
   switch (fieldKey) {
     case "liability":
-      return LIABILITY_OPTIONS.map((option) => `\`Liability: ${option}\``).join(" · ");
+      return getLiabilitySlackOptions().map((option) => `\`Liability: ${option}\``).join(" · ");
     case "targetResolutionQuarter": {
-      const samples = getTargetPeriodOptions().slice(0, 4);
-      return [
-        ...samples.map((q) => `\`Expected disbursement quarter: ${q}\``),
-        "_Shorthand `Quarter: Q3-26` also works_",
-      ].join(" · ");
+      return getTargetQuarterSlackOptions(record.tracker.targetResolutionQuarter)
+        .map((quarter) => `\`Expected disbursement quarter: ${quarter}\``)
+        .join(" · ");
     }
     case "minimumValue":
       return "`Minimum: 75000` · `Minimum value: $85,000`";
     case "policyLimits":
       return "`Policy limits: 100000` · `Policy limits: $250,000`";
     case "expectedLitigation":
-      return EXPECTED_LITIGATION_OPTIONS.map((option) => {
-        const label = option === "Pre" ? "Pre-lit" : option === "Expect" ? "Expected litigation" : "Litigation";
-        return `\`Expected lit: ${label}\``;
-      }).join(" · ");
+      return getExpectedLitigationSlackOptions().map((label) => `\`Expected lit: ${label}\``).join(" · ");
     default:
       return "";
   }
@@ -175,7 +172,7 @@ export function buildFieldReminderMessage(
   lines.push(
     `Current: ${formatFieldValue(record, fieldKey)}`,
     meta.shortPrompt,
-    `Options: ${fieldOptionsBlock(fieldKey)}`,
+    `Options: ${fieldOptionsBlock(fieldKey, record)}`,
     "",
     `React ✅ or reply \`confirmed\` / \`yes\` if unchanged · <${caseLink}|Open in Case Tracker>`,
   );

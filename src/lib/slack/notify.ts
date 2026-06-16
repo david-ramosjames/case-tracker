@@ -1,6 +1,7 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
 import { normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
-import { getSlackChannelForCaseNumber, saveReminderThread } from "@/lib/slack/channels";
+import { getSlackChannelForCaseNumber, saveReminderThread, saveStageUpdateThread } from "@/lib/slack/channels";
+import { getStageSlackOptions } from "@/lib/slack/enum-replies";
 import { SLACK_REMINDER_COOLDOWN_DAYS, isSlackEnabled } from "@/lib/slack/config";
 import {
   buildSlackReminderMessage,
@@ -56,10 +57,17 @@ export async function notifySlackCaseStageUpdated(record: CaseRecord, previousSt
   if (!context) return;
 
   try {
-    await postSlackMessage({
+    const posted = await postSlackMessage({
       channel: context.channelId,
-      text: `Case stage updated to *${record.tracker.caseStage}* for ${record.shared.caseNumber} (${record.shared.clientName}).`,
+      text: [
+        `Case stage updated to *${record.tracker.caseStage}* for ${record.shared.caseNumber} (${record.shared.clientName}).`,
+        "Reply in this thread to correct the stage (e.g. `status: Litigation`).",
+        `Valid stages: ${getStageSlackOptions().map((option) => `\`${option}\``).join(" · ")}`,
+      ].join("\n"),
     });
+    if (posted?.ts) {
+      await saveStageUpdateThread(record.shared.id, record.shared.caseNumber, posted.ts);
+    }
   } catch (error) {
     console.error("Slack stage notification failed", {
       caseNumber: record.shared.caseNumber,
