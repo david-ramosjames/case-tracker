@@ -193,7 +193,9 @@ export function ResultsTable({
     setWorkingRecords((current) =>
       current.flatMap((record) => {
         if (record.shared.id !== recordId) return [record];
-        const result = applyDerivedSettlementResult(updater(record.tracker.result), record.tracker);
+        const result = applyDerivedSettlementResult(updater(record.tracker.result), record.tracker, {
+          skipDisbursementAggregation: true,
+        });
         if (!result.settlementDate) return [];
         nextRecord = {
           ...record,

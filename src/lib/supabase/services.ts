@@ -1517,7 +1517,7 @@ async function upsertResultRow(
     closing_status: result.closingStatus,
     check_status: result.checkStatus,
     disbursed_status: normalized.disbursedStatus,
-    reductions_status: normalized.reductionsStatus,
+    reductions_status: result.reductionsStatus,
     release_signed_at: result.releaseSignedAt,
     closing_signed_at: result.closingSignedAt,
     check_deposited_at: result.checkDepositedAt,
@@ -1766,10 +1766,7 @@ function rowToResult(row: ResultRow | null): SettlementResult {
     closingStatus: normalizeClosingStatus(toStringOrNull(row?.closing_status), toStringOrNull(row?.closing_signed_at)),
     checkStatus: normalizeCheckStatus(toStringOrNull(row?.check_status), toStringOrNull(row?.check_deposited_at)),
     disbursedStatus: normalizeDisbursedStatus(toStringOrNull(row?.disbursed_status), toStringOrNull(row?.check_disbursed_at)),
-    reductionsStatus: normalizeReductionsStatus(
-      toStringOrNull(row?.reductions_status),
-      toStringOrNull(row?.disburse_date),
-    ),
+    reductionsStatus: normalizeReductionsStatus(toStringOrNull(row?.reductions_status)),
     releaseSignedAt: toStringOrNull(row?.release_signed_at),
     closingSignedAt: toStringOrNull(row?.closing_signed_at),
     checkDepositedAt: toStringOrNull(row?.check_deposited_at),
@@ -2074,12 +2071,16 @@ function normalizeDisbursedStatus(value: string | null | undefined, disbursedAt:
   return value === "Yes" || disbursedAt ? "Yes" : "No";
 }
 
-function normalizeReductionsStatus(
-  value: string | null | undefined,
-  disburseDate: string | null = null,
-): ReductionsStatus {
-  if (disburseDate?.trim()) return "Deposited";
-  if (value === "Sent" || value === "Approved" || value === "N/A" || value === "Deposited") return value;
+function normalizeReductionsStatus(value: string | null | undefined): ReductionsStatus {
+  if (
+    value === "Not Complete" ||
+    value === "Sent" ||
+    value === "Approved" ||
+    value === "N/A" ||
+    value === "Deposited"
+  ) {
+    return value;
+  }
   return "Not Complete";
 }
 
