@@ -1,6 +1,7 @@
 import { deriveResultFeePercent } from "@/lib/calculations";
 import {
   deriveCaseSizeFromMinimumValue,
+  coerceReductionsStatus,
   deriveResultQuarterFromDisburseDate,
   normalizeCaseType,
   normalizeTargetQuarter,
@@ -342,9 +343,23 @@ function normalizeDisbursedStatus(value: string): DisbursedStatus {
 
 function normalizeReductionsStatus(value: string): ReductionsStatus {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "sent") return "Sent";
   if (normalized === "approved") return "Approved";
-  if (normalized === "deposited") return "Not Complete";
-  if (normalized === "n/a" || normalized === "na" || normalized === "not applicable") return "N/A";
-  return "Not Complete";
+  if (
+    normalized === "sent, not approved" ||
+    normalized === "sent not approved" ||
+    normalized === "sent"
+  ) {
+    return "Sent, Not Approved";
+  }
+  if (
+    normalized === "to be sent" ||
+    normalized === "not complete" ||
+    normalized === "deposited" ||
+    normalized === "n/a" ||
+    normalized === "na" ||
+    normalized === "not applicable"
+  ) {
+    return "To Be Sent";
+  }
+  return coerceReductionsStatus(value);
 }

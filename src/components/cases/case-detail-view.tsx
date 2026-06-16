@@ -1016,7 +1016,7 @@ export function CaseDetailView({
                 <Info label="Closing" value={tracker.result.closingStatus} />
                 <Info label="Check" value={tracker.result.checkStatus} />
                 <Info label="Disbursed" value={tracker.result.disbursedStatus} />
-                <Info label="Reductions" value={tracker.result.reductionsStatus} />
+                <Info label="Reductions" value={coerceReductionsStatus(tracker.result.reductionsStatus)} />
                 <Info label="Disburse Date" value={formatDate(tracker.result.disburseDate)} />
                 <Info label="Result Quarter" value={tracker.result.resultQuarter ?? "Not set"} />
               </>
@@ -1236,10 +1236,8 @@ export function CaseDetailView({
             <ResultStep label="Disbursed" value={tracker.result.disbursedStatus} complete={tracker.result.disbursedStatus === "Yes"} />
             <ResultStep
               label="Reductions"
-              value={tracker.result.reductionsStatus}
-              complete={
-                tracker.result.reductionsStatus === "Approved" || tracker.result.reductionsStatus === "N/A"
-              }
+              value={coerceReductionsStatus(tracker.result.reductionsStatus)}
+              complete={coerceReductionsStatus(tracker.result.reductionsStatus) === "Approved"}
             />
           </CardContent>
         </Card>

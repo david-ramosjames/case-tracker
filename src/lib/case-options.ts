@@ -143,16 +143,26 @@ export const RELEASE_STATUS_OPTIONS = ["No", "Signed"] satisfies ReleaseStatus[]
 export const CLOSING_STATUS_OPTIONS = ["No", "Drafted", "Approved", "Signed"] satisfies ClosingStatus[];
 export const CHECK_STATUS_OPTIONS = ["Deposited", "No", "Sent"] satisfies CheckStatus[];
 export const DISBURSED_STATUS_OPTIONS = ["No", "Yes"] satisfies DisbursedStatus[];
-export const REDUCTIONS_MANUAL_STATUS_OPTIONS = ["Not Complete", "Sent", "Approved", "N/A"] satisfies ReductionsStatus[];
+export const REDUCTIONS_MANUAL_STATUS_OPTIONS = [
+  "To Be Sent",
+  "Sent, Not Approved",
+  "Approved",
+] satisfies ReductionsStatus[];
 
-/** @deprecated Use REDUCTIONS_MANUAL_STATUS_OPTIONS — Deposited is no longer a reductions status. */
+/** @deprecated Use REDUCTIONS_MANUAL_STATUS_OPTIONS */
 export const REDUCTIONS_STATUS_OPTIONS = REDUCTIONS_MANUAL_STATUS_OPTIONS;
 
-/** Map stored values (including legacy Deposited) to a selectable reductions status. */
+/** Map stored values (including legacy labels) to a selectable reductions status. */
 export function coerceReductionsStatus(value: string | null | undefined): ReductionsStatus {
-  if (value === "Deposited") return "Not Complete";
-  if (value === "Sent" || value === "Approved" || value === "N/A" || value === "Not Complete") return value;
-  return "Not Complete";
+  const trimmed = value?.trim() ?? "";
+  if (trimmed === "To Be Sent" || trimmed === "Sent, Not Approved" || trimmed === "Approved") {
+    return trimmed;
+  }
+  if (trimmed === "Sent") return "Sent, Not Approved";
+  if (trimmed === "Not Complete" || trimmed === "Deposited" || trimmed === "N/A" || !trimmed) {
+    return "To Be Sent";
+  }
+  return "To Be Sent";
 }
 
 /** Forecast quarter when the case is expected to disburse (planning field on the tracker). */

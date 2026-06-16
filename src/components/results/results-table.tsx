@@ -101,7 +101,7 @@ export function ResultsTable({
         if (closing !== "all" && result.closingStatus !== closing) return false;
         if (check !== "all" && result.checkStatus !== check) return false;
         if (disbursed !== "all" && result.disbursedStatus !== disbursed) return false;
-        if (reductions !== "all" && result.reductionsStatus !== reductions) return false;
+        if (reductions !== "all" && coerceReductionsStatus(result.reductionsStatus) !== reductions) return false;
         if (quarter !== "all" && result.resultQuarter !== quarter) return false;
 
         return true;
