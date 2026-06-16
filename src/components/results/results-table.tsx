@@ -15,11 +15,11 @@ import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   applyDerivedSettlementResult,
+  coerceReductionsStatus,
   REDUCTIONS_MANUAL_STATUS_OPTIONS,
   CHECK_STATUS_OPTIONS,
   CLOSING_STATUS_OPTIONS,
   DISBURSED_STATUS_OPTIONS,
-  REDUCTIONS_STATUS_OPTIONS,
   RELEASE_STATUS_OPTIONS,
   getTargetPeriodOptions,
 } from "@/lib/case-options";
@@ -345,7 +345,7 @@ export function ResultsTable({
                     onChange={setReductions}
                     options={[
                       { value: "all", label: "All" },
-                      ...REDUCTIONS_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
+                      ...REDUCTIONS_MANUAL_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
                     ]}
                   />
                 </TableHead>
@@ -411,17 +411,15 @@ export function ResultsTable({
                     </TableCell>
                     <TableCell className="w-36">
                       <InlineSelect
-                        value={result.reductionsStatus}
+                        value={coerceReductionsStatus(result.reductionsStatus)}
                         onChange={(value) =>
-                          updateResult(record.shared.id, (current) => ({ ...current, reductionsStatus: value as ReductionsStatus }))
+                          updateResult(record.shared.id, (current) => ({
+                            ...current,
+                            reductionsStatus: value as ReductionsStatus,
+                          }))
                         }
                       >
-                        {(REDUCTIONS_MANUAL_STATUS_OPTIONS.includes(
-                          result.reductionsStatus as (typeof REDUCTIONS_MANUAL_STATUS_OPTIONS)[number],
-                        )
-                          ? REDUCTIONS_MANUAL_STATUS_OPTIONS
-                          : [result.reductionsStatus, ...REDUCTIONS_MANUAL_STATUS_OPTIONS]
-                        ).map((option) => (
+                        {REDUCTIONS_MANUAL_STATUS_OPTIONS.map((option) => (
                           <option key={option} value={option}>
                             {option}
                           </option>

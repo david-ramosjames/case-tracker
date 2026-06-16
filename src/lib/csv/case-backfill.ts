@@ -344,7 +344,7 @@ function normalizeReductionsStatus(value: string): ReductionsStatus {
   const normalized = value.trim().toLowerCase();
   if (normalized === "sent") return "Sent";
   if (normalized === "approved") return "Approved";
-  if (normalized === "deposited") return "Deposited";
+  if (normalized === "deposited") return "Not Complete";
   if (normalized === "n/a" || normalized === "na" || normalized === "not applicable") return "N/A";
   return "Not Complete";
 }

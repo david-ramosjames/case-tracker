@@ -24,6 +24,7 @@ import {
   caseTypeFromCasesTable,
   applyDerivedResultFields,
   applyDerivedSettlementResult,
+  coerceReductionsStatus,
   deriveCaseSizeFromMinimumValue,
   deriveResultQuarterFromDisburseDate,
   normalizeCaseType,
@@ -50,7 +51,6 @@ import {
   type ExpectedLitigationStatus,
   type ManualDisbursementInput,
   type DisbursementPartyOverrideInput,
-  type ReductionsStatus,
   type ReleaseStatus,
   type SettlementResult,
   type StageSignalSource,
@@ -1766,7 +1766,7 @@ function rowToResult(row: ResultRow | null): SettlementResult {
     closingStatus: normalizeClosingStatus(toStringOrNull(row?.closing_status), toStringOrNull(row?.closing_signed_at)),
     checkStatus: normalizeCheckStatus(toStringOrNull(row?.check_status), toStringOrNull(row?.check_deposited_at)),
     disbursedStatus: normalizeDisbursedStatus(toStringOrNull(row?.disbursed_status), toStringOrNull(row?.check_disbursed_at)),
-    reductionsStatus: normalizeReductionsStatus(toStringOrNull(row?.reductions_status)),
+    reductionsStatus: coerceReductionsStatus(toStringOrNull(row?.reductions_status)),
     releaseSignedAt: toStringOrNull(row?.release_signed_at),
     closingSignedAt: toStringOrNull(row?.closing_signed_at),
     checkDepositedAt: toStringOrNull(row?.check_deposited_at),
@@ -2069,19 +2069,6 @@ function normalizeCheckStatus(value: string | null | undefined, depositedAt: str
 
 function normalizeDisbursedStatus(value: string | null | undefined, disbursedAt: string | null): DisbursedStatus {
   return value === "Yes" || disbursedAt ? "Yes" : "No";
-}
-
-function normalizeReductionsStatus(value: string | null | undefined): ReductionsStatus {
-  if (
-    value === "Not Complete" ||
-    value === "Sent" ||
-    value === "Approved" ||
-    value === "N/A" ||
-    value === "Deposited"
-  ) {
-    return value;
-  }
-  return "Not Complete";
 }
 
 function calculateAttorneyFees(settlementAmount: number | null, feePercent: number | null) {

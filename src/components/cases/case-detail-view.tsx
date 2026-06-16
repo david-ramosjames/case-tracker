@@ -17,6 +17,7 @@ import type { AttorneySourcedFieldId } from "@/lib/attorney-sourced-fields";
 import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import {
   applyDerivedSettlementResult,
+  coerceReductionsStatus,
   REDUCTIONS_MANUAL_STATUS_OPTIONS,
   deriveCaseSizeFromMinimumValue,
   CASE_STAGE_OPTIONS,
@@ -1078,15 +1079,10 @@ export function CaseDetailView({
                 </Field>
                 <Field label="Reductions">
                   <Select
-                    value={tracker.result.reductionsStatus}
+                    value={coerceReductionsStatus(tracker.result.reductionsStatus)}
                     onChange={(event) => updateResult("reductionsStatus", event.target.value as ReductionsStatus)}
                   >
-                    {(REDUCTIONS_MANUAL_STATUS_OPTIONS.includes(
-                      tracker.result.reductionsStatus as (typeof REDUCTIONS_MANUAL_STATUS_OPTIONS)[number],
-                    )
-                      ? REDUCTIONS_MANUAL_STATUS_OPTIONS
-                      : [tracker.result.reductionsStatus, ...REDUCTIONS_MANUAL_STATUS_OPTIONS]
-                    ).map((option) => (
+                    {REDUCTIONS_MANUAL_STATUS_OPTIONS.map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>
@@ -1242,9 +1238,7 @@ export function CaseDetailView({
               label="Reductions"
               value={tracker.result.reductionsStatus}
               complete={
-                tracker.result.reductionsStatus === "Deposited" ||
-                tracker.result.reductionsStatus === "Approved" ||
-                tracker.result.reductionsStatus === "N/A"
+                tracker.result.reductionsStatus === "Approved" || tracker.result.reductionsStatus === "N/A"
               }
             />
           </CardContent>

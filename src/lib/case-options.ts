@@ -144,7 +144,16 @@ export const CLOSING_STATUS_OPTIONS = ["No", "Drafted", "Approved", "Signed"] sa
 export const CHECK_STATUS_OPTIONS = ["Deposited", "No", "Sent"] satisfies CheckStatus[];
 export const DISBURSED_STATUS_OPTIONS = ["No", "Yes"] satisfies DisbursedStatus[];
 export const REDUCTIONS_MANUAL_STATUS_OPTIONS = ["Not Complete", "Sent", "Approved", "N/A"] satisfies ReductionsStatus[];
-export const REDUCTIONS_STATUS_OPTIONS = [...REDUCTIONS_MANUAL_STATUS_OPTIONS, "Deposited"] satisfies ReductionsStatus[];
+
+/** @deprecated Use REDUCTIONS_MANUAL_STATUS_OPTIONS — Deposited is no longer a reductions status. */
+export const REDUCTIONS_STATUS_OPTIONS = REDUCTIONS_MANUAL_STATUS_OPTIONS;
+
+/** Map stored values (including legacy Deposited) to a selectable reductions status. */
+export function coerceReductionsStatus(value: string | null | undefined): ReductionsStatus {
+  if (value === "Deposited") return "Not Complete";
+  if (value === "Sent" || value === "Approved" || value === "N/A" || value === "Not Complete") return value;
+  return "Not Complete";
+}
 
 /** Forecast quarter when the case is expected to disburse (planning field on the tracker). */
 /** Actual quarter from disburse date on the results tab (auto-derived from the sheet). */
