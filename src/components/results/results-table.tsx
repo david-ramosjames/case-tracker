@@ -49,11 +49,13 @@ export function ResultsTable({
   users,
   settings,
   viewer,
+  initialDisbursed = "all",
 }: {
   records: CaseRecord[];
   users: AppUser[];
   settings: CaseTrackerSettings;
   viewer: ViewerContext;
+  initialDisbursed?: string;
 }) {
   const [workingRecords, setWorkingRecords] = useState(() => records.filter(hasSettlementDate));
   const [search, setSearch] = useState("");
@@ -61,7 +63,7 @@ export function ResultsTable({
   const [release, setRelease] = useState("all");
   const [closing, setClosing] = useState("all");
   const [check, setCheck] = useState("all");
-  const [disbursed, setDisbursed] = useState("all");
+  const [disbursed, setDisbursed] = useState(initialDisbursed);
   const [reductions, setReductions] = useState("all");
   const [quarter, setQuarter] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("caseNumber");
@@ -70,6 +72,10 @@ export function ResultsTable({
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const [scrollWidth, setScrollWidth] = useState(2300);
+
+  useEffect(() => {
+    setDisbursed(initialDisbursed);
+  }, [initialDisbursed]);
 
   const attorneys = users.filter((user) => user.role === "attorney");
   const quarters = Array.from(new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.result.resultQuarter).filter(Boolean)]));

@@ -37,48 +37,56 @@ export function DashboardView({
     <div className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <MetricCard
+          href="/cases"
           icon={BriefcaseBusiness}
           label="Active cases"
           value={String(metrics.totalActiveCases)}
           detail="Active pipeline cases (excludes closed and historical)"
         />
         <MetricCard
+          href="/output"
           icon={CircleDollarSign}
           label="Forecasted settlement"
           value={formatCurrency(metrics.totalForecastSettlementValue)}
           detail="Open pipeline settlement value"
         />
         <MetricCard
+          href="/goals"
           icon={Banknote}
           label="Forecasted fees"
           value={formatCurrency(metrics.totalForecastFeeValue)}
           detail="Projected attorney fee value"
         />
         <MetricCard
+          href="/results?disbursed=No"
           icon={ClipboardCheck}
           label="Settled not disbursed"
           value={formatCurrency(metrics.settledNotDisbursedAmount)}
           detail="Needs collection follow-through"
         />
         <MetricCard
+          href="/cases?filter=missing-fields&status=all"
           icon={AlertTriangle}
           label="Missing required fields"
           value={String(metrics.casesMissingRequiredFields)}
           detail="Value, fee, quarter, source, confidence"
         />
         <MetricCard
+          href="/cases?filter=stale-review&status=all"
           icon={TimerReset}
           label="Not reviewed recently"
           value={String(metrics.casesNotReviewedRecently)}
           detail={`More than ${settings.staleReviewThresholdDays} days old`}
         />
         <MetricCard
+          href="/cases?filter=quarterly-check-in&status=all"
           icon={ClipboardCheck}
           label="Quarterly check-ins due"
           value={String(metrics.casesNeedingQuarterlyCheckIn)}
           detail="Expected disbursement quarter, minimum value"
         />
         <MetricCard
+          href="/cases?filter=validation-overdue&status=all"
           icon={TimerReset}
           label="Validation overdue"
           value={String(metrics.casesWithOutdatedValidation)}

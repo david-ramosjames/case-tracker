@@ -32,6 +32,11 @@ import { getCaseAttorneyScore } from "@/lib/attorney-score";
 import { getCaseCompletionScore } from "@/lib/calculations";
 import { getCasePipelineFilter, type CasePipelineFilter, type ViewerContext } from "@/lib/auth/access";
 import {
+  getCaseListQualityFilterLabel,
+  matchesCaseListQualityFilter,
+  type CaseListQualityFilter,
+} from "@/lib/case-list-filters";
+import {
   type AppUser,
   type AttorneyGoal,
   type CaseRecord,
@@ -65,6 +70,8 @@ export function CaseTable({
   goals,
   viewer,
   initialSearch = "",
+  initialStatus = "Active",
+  initialQualityFilter = null,
 }: {
   records: CaseRecord[];
   users: AppUser[];
@@ -72,6 +79,8 @@ export function CaseTable({
   goals: AttorneyGoal[];
   viewer: ViewerContext;
   initialSearch?: string;
+  initialStatus?: CasePipelineFilter;
+  initialQualityFilter?: CaseListQualityFilter | null;
 }) {
   const [workingRecords, setWorkingRecords] = useState(records);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
@@ -84,7 +93,8 @@ export function CaseTable({
   const [attorneyIds, setAttorneyIds] = useState<string[]>([]);
   const [paralegal, setParalegal] = useState("all");
   const [stage, setStage] = useState("all");
-  const [status, setStatus] = useState<CasePipelineFilter>("Active");
+  const [status, setStatus] = useState<CasePipelineFilter>(initialStatus);
+  const [qualityFilter, setQualityFilter] = useState<CaseListQualityFilter | null>(initialQualityFilter);
   const [caseType, setCaseType] = useState("all");
   const [liability, setLiability] = useState("all");
   const [caseSize, setCaseSize] = useState("all");
@@ -125,11 +135,20 @@ export function CaseTable({
     caseSize !== "all",
     stage !== "all",
     expectedLitigation !== "all",
+    qualityFilter != null,
   ].filter(Boolean).length;
 
   useEffect(() => {
     if (initialSearch) setSearch(initialSearch);
   }, [initialSearch]);
+
+  useEffect(() => {
+    setStatus(initialStatus);
+  }, [initialStatus]);
+
+  useEffect(() => {
+    setQualityFilter(initialQualityFilter);
+  }, [initialQualityFilter]);
 
   const filteredRecords = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase().replace(/^#/, "");
@@ -160,6 +179,7 @@ export function CaseTable({
           coerceExpectedLitigationForStage(record.tracker.caseStage, record.tracker.expectedLitigation),
         )) return false;
         if (quarter !== "all" && toStandardTargetPeriodLabel(record.tracker.targetResolutionQuarter) !== quarter) return false;
+        if (qualityFilter && !matchesCaseListQualityFilter(record, qualityFilter, settings)) return false;
 
         return true;
       })
@@ -217,7 +237,7 @@ export function CaseTable({
         const cmp = aValue - bValue;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [attorneyIds, caseSize, caseType, expectedLitigation, goals, liability, paralegal, quarter, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
+  }, [attorneyIds, caseSize, caseType, expectedLitigation, goals, liability, paralegal, qualityFilter, quarter, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
 
   function requestSort(nextKey: SortKey) {
     if (nextKey === sortKey) {
@@ -254,6 +274,7 @@ export function CaseTable({
     setCaseSize("all");
     setExpectedLitigation("all");
     setQuarter("all");
+    setQualityFilter(null);
   }
 
   useEffect(() => {
@@ -523,6 +544,12 @@ export function CaseTable({
             </p>
           </div>
           {saveMessage ? <p className="text-sm font-medium text-pink-500">{saveMessage}</p> : null}
+
+          {qualityFilter ? (
+            <div className="rounded-lg border border-pink-200 bg-pink-50 px-4 py-3 text-sm text-navy-950">
+              Dashboard filter: <span className="font-semibold">{getCaseListQualityFilterLabel(qualityFilter)}</span>
+            </div>
+          ) : null}
 
           {needsAttentionCount > 0 ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">

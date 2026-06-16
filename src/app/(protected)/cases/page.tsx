@@ -1,15 +1,28 @@
 import { CaseTable } from "@/components/cases/case-table";
 import { PageHeader } from "@/components/layout/page-header";
+import { type CasePipelineFilter } from "@/lib/auth/access";
+import { parseCaseListQualityFilter } from "@/lib/case-list-filters";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 
 export const dynamic = "force-dynamic";
 
+function parsePipelineStatus(
+  value: string | undefined,
+  qualityFilter: ReturnType<typeof parseCaseListQualityFilter>,
+): CasePipelineFilter {
+  if (value === "all" || value === "Active" || value === "Closed" || value === "Historical") {
+    return value;
+  }
+  return qualityFilter ? "all" : "Active";
+}
+
 export default async function CasesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; filter?: string; status?: string }>;
 }) {
-  const { q } = await searchParams;
+  const { q, filter, status } = await searchParams;
+  const qualityFilter = parseCaseListQualityFilter(filter);
   const { records, users, settings, goals, viewer } = await loadViewerCaseBundle();
 
   return (
@@ -30,6 +43,8 @@ export default async function CasesPage({
         goals={goals}
         viewer={viewer}
         initialSearch={q?.trim() ?? ""}
+        initialStatus={parsePipelineStatus(status, qualityFilter)}
+        initialQualityFilter={qualityFilter}
       />
     </>
   );
