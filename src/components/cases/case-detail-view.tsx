@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, ExternalLink, MessageSquarePlus, Pencil, RefreshCw, Save, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, MessageSquarePlus, Pencil, RefreshCw, Save, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -100,6 +100,8 @@ export function CaseDetailView({
   const [isOverviewEditing, setIsOverviewEditing] = useState(false);
   const [isSourcesEditing, setIsSourcesEditing] = useState(false);
   const [isResultsEditing, setIsResultsEditing] = useState(false);
+  const isSettledStage = tracker.caseStage === "Settled";
+  const [isResultsExpanded, setIsResultsExpanded] = useState(isSettledStage);
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingComment, setIsAddingComment] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -114,6 +116,15 @@ export function CaseDetailView({
     setShared(initialRecord.shared);
     setTracker(initialRecord.tracker);
   }, [initialRecord]);
+
+  useEffect(() => {
+    if (tracker.caseStage === "Settled") {
+      setIsResultsExpanded(true);
+    } else {
+      setIsResultsExpanded(false);
+      setIsResultsEditing(false);
+    }
+  }, [tracker.caseStage]);
 
   const isAdmin = sessionUser.role === "admin" || sessionUser.role === "super_admin";
   const isOrphanTracker = initialRecord.shared.id === initialRecord.tracker.id;
@@ -985,27 +996,45 @@ export function CaseDetailView({
         <Card>
           <CardHeader>
             <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
-              <div>
-                <CardTitle>Results Tracking</CardTitle>
-                <CardDescription>
-                  Settlement and disbursement tracking. Import from the RJL Cases Disbursing sheet to pull all rows for
-                  this case # (one row per party). Disburse date sets the result quarter automatically.
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" disabled={isSyncingSheet} onClick={() => void syncFromDisbursingSheet()}>
-                  <RefreshCw className={`h-4 w-4 ${isSyncingSheet ? "animate-spin" : ""}`} />
-                  {isSyncingSheet ? "Importing..." : "Import disbursing sheet"}
+              <div className="flex min-w-0 flex-1 items-start gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mt-0.5 h-8 w-8 shrink-0 p-0"
+                  onClick={() => setIsResultsExpanded((current) => !current)}
+                  aria-expanded={isResultsExpanded}
+                  aria-label={isResultsExpanded ? "Collapse results tracking" : "Expand results tracking"}
+                >
+                  {isResultsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
                 </Button>
-                <Button variant={isResultsEditing ? "pink" : "outline"} size="sm" onClick={() => setIsResultsEditing((current) => !current)}>
-                  <Pencil className="h-4 w-4" />
-                  {isResultsEditing ? "View" : "Edit"}
-                </Button>
+                <div className="min-w-0">
+                  <CardTitle>Results Tracking</CardTitle>
+                  <CardDescription>
+                    {isResultsExpanded || isSettledStage
+                      ? "Settlement and disbursement tracking. Import from the RJL Cases Disbursing sheet to pull all rows for this case # (one row per party). Disburse date sets the result quarter automatically."
+                      : "Collapsed by default until Settled — expand when you need to review or enter settlement and disbursement details."}
+                  </CardDescription>
+                </div>
               </div>
+              {isResultsExpanded ? (
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" size="sm" disabled={isSyncingSheet} onClick={() => void syncFromDisbursingSheet()}>
+                    <RefreshCw className={`h-4 w-4 ${isSyncingSheet ? "animate-spin" : ""}`} />
+                    {isSyncingSheet ? "Importing..." : "Import disbursing sheet"}
+                  </Button>
+                  <Button variant={isResultsEditing ? "pink" : "outline"} size="sm" onClick={() => setIsResultsEditing((current) => !current)}>
+                    <Pencil className="h-4 w-4" />
+                    {isResultsEditing ? "View" : "Edit"}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           </CardHeader>
-          {sheetSyncMessage ? <p className="px-6 text-sm text-muted-foreground">{sheetSyncMessage}</p> : null}
-          <CardContent className="grid gap-4 md:grid-cols-3">
+          {isResultsExpanded ? (
+            <>
+              {sheetSyncMessage ? <p className="px-6 text-sm text-muted-foreground">{sheetSyncMessage}</p> : null}
+              <CardContent className="grid gap-4 md:grid-cols-3">
             {!isResultsEditing ? (
               <>
                 <Info label="Settlement Date" value={formatDate(tracker.result.settlementDate)} />
@@ -1108,10 +1137,12 @@ export function CaseDetailView({
                 />
               </>
             )}
-          </CardContent>
+              </CardContent>
+            </>
+          ) : null}
         </Card>
 
-        {(isResultsEditing || tracker.multipleDisbursementsEnabled || tracker.disbursements.length > 0) ? (
+        {isResultsExpanded && (isResultsEditing || tracker.multipleDisbursementsEnabled || tracker.disbursements.length > 0) ? (
           <DisbursementPartiesCard
             record={record}
             editing={isResultsEditing}
