@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import { AchievementCard, QuarterlyGoalChart } from "@/components/goals/goal-achievement-summary";
 import { QuarterPerformanceTables } from "@/components/goals/quarter-performance-tables";
 import { type ViewerContext } from "@/lib/auth/access";
 import {
@@ -42,17 +42,18 @@ export function GoalsView({
 
   const firmTotals = {
     annualGrossGoal: sum(scopedGoals.map((goal) => goal.annualGrossGoal)),
+    annualRjlFeesGoal: sum(scopedGoals.map((goal) => goal.annualRjlFeesGoal)),
     grossDisbursed: sum(progress.map((item) => item.actualGrossDisbursed)),
-    planGross: sum(progress.map((item) => item.planGross)),
     disbursedFees: sum(progress.map((item) => item.actualDisbursedFees)),
-    commissionThreshold: sum(scopedGoals.map((goal) => goal.commissionThreshold)),
     yearElapsed:
       progress.length > 0
         ? progress.reduce((total, item) => total + item.yearElapsed, 0) / progress.length
         : 0,
   };
-  const firmAnnualProgress =
+  const firmGrossProgress =
     firmTotals.annualGrossGoal > 0 ? (firmTotals.grossDisbursed / firmTotals.annualGrossGoal) * 100 : 0;
+  const firmFeeProgress =
+    firmTotals.annualRjlFeesGoal > 0 ? (firmTotals.disbursedFees / firmTotals.annualRjlFeesGoal) * 100 : 0;
 
   return (
     <div className="space-y-10">
@@ -64,28 +65,29 @@ export function GoalsView({
                 <div>
                   <CardTitle>Firm overall</CardTitle>
                   <CardDescription>
-                    Current commission year totals across {progress.length} attorneys. Per-attorney commission years and
-                    quarterly detail are below.
+                    Combined totals across {progress.length} attorneys for the current commission year.
                   </CardDescription>
                 </div>
-                <Badge variant={firmAnnualProgress >= firmTotals.yearElapsed ? "success" : "warning"}>
-                  {firmAnnualProgress >= firmTotals.yearElapsed ? "Ahead" : "Behind"}
+                <Badge variant={firmGrossProgress >= firmTotals.yearElapsed ? "success" : "warning"}>
+                  {firmGrossProgress >= firmTotals.yearElapsed ? "Ahead" : "Behind"}
                 </Badge>
               </div>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <div className="mb-2 flex justify-between text-sm">
-                  <span className="text-muted-foreground">Combined annual progress (gross disbursed)</span>
-                  <span className="font-semibold">{percent(firmAnnualProgress)}</span>
-                </div>
-                <Progress value={firmAnnualProgress} />
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <GoalStat label="Combined gross goal" value={formatCurrency(firmTotals.annualGrossGoal)} />
-                <GoalStat label="Gross disbursed" value={formatCurrency(firmTotals.grossDisbursed)} />
-                <GoalStat label="Plan (bottom-up)" value={formatCurrency(firmTotals.planGross)} />
-                <GoalStat label="RJL fees disbursed" value={formatCurrency(firmTotals.disbursedFees)} />
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <AchievementCard
+                  label="Gross disbursements"
+                  achievedPercent={firmGrossProgress}
+                  actual={firmTotals.grossDisbursed}
+                  goal={firmTotals.annualGrossGoal}
+                />
+                <AchievementCard
+                  label="RJL attorney fees"
+                  achievedPercent={firmFeeProgress}
+                  actual={firmTotals.disbursedFees}
+                  goal={firmTotals.annualRjlFeesGoal}
+                />
+                <GoalStat label="Year elapsed" value={percent(firmTotals.yearElapsed)} />
               </div>
             </CardContent>
           </Card>
@@ -108,47 +110,38 @@ export function GoalsView({
                   <div>
                     <CardTitle>{attorney?.name ?? "Attorney"}</CardTitle>
                     <CardDescription>
-                      {item.goal.year} commission year · {commissionPeriod} · starts {startMonthLabel} · gross goal{" "}
-                      {formatCurrency(item.goal.annualGrossGoal)} · RJL fees goal{" "}
-                      {formatCurrency(item.goal.annualRjlFeesGoal)} · commission threshold{" "}
-                      {formatCurrency(item.goal.commissionThreshold)}
+                      {item.goal.year} commission year · {commissionPeriod} · starts {startMonthLabel}
                     </CardDescription>
                   </div>
                   <Badge variant={item.pace === "ahead" ? "success" : "warning"}>
-                    {item.pace === "ahead" ? "Ahead" : "Behind"}
+                    {item.pace === "ahead" ? "Ahead" : "Behind"} pace
                   </Badge>
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div>
-                  <div className="mb-2 flex justify-between text-sm">
-                    <span className="text-muted-foreground">Gross progress (disbursed vs gross goal)</span>
-                    <span className="font-semibold">{percent(item.annualProgress)}</span>
-                  </div>
-                  <Progress value={item.annualProgress} />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {formatCurrency(item.actualGrossDisbursed)} of {formatCurrency(item.goal.annualGrossGoal)}
-                  </p>
-                </div>
-                <div>
-                  <div className="mb-2 flex justify-between text-sm">
-                    <span className="text-muted-foreground">Fees progress (disbursed vs fees goal)</span>
-                    <span className="font-semibold">{percent(item.feeProgress)}</span>
-                  </div>
-                  <Progress value={item.feeProgress} />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {formatCurrency(item.actualDisbursedFees)} of {formatCurrency(item.goal.annualRjlFeesGoal)}
-                  </p>
-                </div>
-                <div className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-5">
-                  <GoalStat label="Gross disbursed" value={formatCurrency(item.actualGrossDisbursed)} />
-                  <GoalStat label="Plan (bottom-up)" value={formatCurrency(item.planGross)} />
-                  <GoalStat label="RJL fees disbursed" value={formatCurrency(item.actualDisbursedFees)} />
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <AchievementCard
+                    label="Gross disbursements"
+                    achievedPercent={item.annualProgress}
+                    actual={item.actualGrossDisbursed}
+                    goal={item.goal.annualGrossGoal}
+                  />
+                  <AchievementCard
+                    label="RJL attorney fees"
+                    achievedPercent={item.feeProgress}
+                    actual={item.actualDisbursedFees}
+                    goal={item.goal.annualRjlFeesGoal}
+                  />
                   <GoalStat
                     label="Commission threshold"
                     value={item.thresholdMet ? "Met" : formatCurrency(item.goal.commissionThreshold)}
                   />
                   <GoalStat label="Year elapsed" value={percent(item.yearElapsed)} />
+                </div>
+
+                <div className="grid gap-4 xl:grid-cols-2">
+                  <QuarterlyGoalChart title="Gross disbursements by quarter" rows={grossRows} />
+                  <QuarterlyGoalChart title="RJL attorney fees by quarter" rows={feeRows} />
                 </div>
               </CardContent>
             </Card>
@@ -167,9 +160,9 @@ export function GoalsView({
 
 function GoalStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border bg-white p-3">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 font-semibold text-navy-950">{value}</p>
+    <div className="rounded-lg border bg-white p-4">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight text-navy-950">{value}</p>
     </div>
   );
 }
