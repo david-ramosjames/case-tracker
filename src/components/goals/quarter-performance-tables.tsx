@@ -18,12 +18,11 @@ export function QuarterPerformanceTables({
 
   return (
     <div className="grid gap-6 xl:grid-cols-2">
-      <QuarterTable title="Gross Settlements Disbursed" rows={grossRows} description={tableDescription} />
+      <QuarterTable title="Gross Disbursements" rows={grossRows} description={tableDescription} />
       <QuarterTable
         title="RJL Attorney Fees Disbursed"
         rows={feeRows}
-        description="Plan and actual by quarter. No top-down fee goal — commissions use the annual threshold on the Goals page."
-        hideTarget
+        description={tableDescription}
       />
     </div>
   );

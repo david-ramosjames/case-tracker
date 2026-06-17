@@ -109,7 +109,8 @@ export function GoalsView({
                     <CardTitle>{attorney?.name ?? "Attorney"}</CardTitle>
                     <CardDescription>
                       {item.goal.year} commission year · {commissionPeriod} · starts {startMonthLabel} · gross goal{" "}
-                      {formatCurrency(item.goal.annualGrossGoal)} · commission threshold{" "}
+                      {formatCurrency(item.goal.annualGrossGoal)} · RJL fees goal{" "}
+                      {formatCurrency(item.goal.annualRjlFeesGoal)} · commission threshold{" "}
                       {formatCurrency(item.goal.commissionThreshold)}
                     </CardDescription>
                   </div>

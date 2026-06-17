@@ -108,12 +108,39 @@ export function deriveQuarterGoalsFromMonthly(
 export function monthlyGoalsFromQuarterGoals(
   goal: Pick<
     AttorneyGoal,
-    "year" | "commissionYearStartMonth" | "commissionMonthCount" | "q1Goal" | "q2Goal" | "q3Goal" | "q4Goal"
+    | "year"
+    | "commissionYearStartMonth"
+    | "commissionMonthCount"
+    | "q1Goal"
+    | "q2Goal"
+    | "q3Goal"
+    | "q4Goal"
   >,
 ): MonthlyGoals {
+  return monthlyGoalsFromQuarterAmounts(goal, [goal.q1Goal, goal.q2Goal, goal.q3Goal, goal.q4Goal]);
+}
+
+export function monthlyFeeGoalsFromQuarterGoals(
+  goal: Pick<
+    AttorneyGoal,
+    | "year"
+    | "commissionYearStartMonth"
+    | "commissionMonthCount"
+    | "feeQ1Goal"
+    | "feeQ2Goal"
+    | "feeQ3Goal"
+    | "feeQ4Goal"
+  >,
+): MonthlyGoals {
+  return monthlyGoalsFromQuarterAmounts(goal, [goal.feeQ1Goal, goal.feeQ2Goal, goal.feeQ3Goal, goal.feeQ4Goal]);
+}
+
+function monthlyGoalsFromQuarterAmounts(
+  goal: Pick<AttorneyGoal, "year" | "commissionYearStartMonth" | "commissionMonthCount">,
+  quarterGoals: number[],
+) {
   const monthCount = goal.commissionMonthCount ?? 12;
   const windows = getCommissionYearQuarterWindows(goal.year, goal.commissionYearStartMonth, monthCount);
-  const quarterGoals = [goal.q1Goal, goal.q2Goal, goal.q3Goal, goal.q4Goal];
   const monthly: MonthlyGoals = {};
 
   windows.forEach((window, quarterIndex) => {
@@ -140,6 +167,13 @@ export function resolveMonthlyGoals(goal: AttorneyGoal): MonthlyGoals {
   return monthlyGoalsFromQuarterGoals(goal);
 }
 
+export function resolveMonthlyFeeGoals(goal: AttorneyGoal): MonthlyGoals {
+  if (goal.monthlyFeeGoals && Object.keys(goal.monthlyFeeGoals).length > 0) {
+    return goal.monthlyFeeGoals;
+  }
+  return monthlyFeeGoalsFromQuarterGoals(goal);
+}
+
 export function inferCommissionMonthCount(goal: AttorneyGoal): CommissionPeriodMonthCount {
   if (goal.commissionMonthCount === 13) return 13;
   const storedCount = Object.keys(goal.monthlyGoals ?? {}).length;
@@ -152,24 +186,27 @@ export function parseMonthlyGoalsInput(values: Record<string, string>) {
   for (const [monthKey, raw] of Object.entries(values)) {
     const numeric = Number(String(raw).replace(/[$,\s]/g, ""));
     if (Number.isFinite(numeric) && numeric > 0) {
-      monthlyGoals[monthKey] = numeric;
+      monthlyGoals[monthKey] = Math.round(numeric);
     }
   }
   return monthlyGoals;
 }
 
 export function monthlyGoalInputFromResolved(monthlyGoals: MonthlyGoals) {
-  return Object.fromEntries(Object.entries(monthlyGoals).map(([key, value]) => [key, String(value || "")]));
+  return Object.fromEntries(
+    Object.entries(monthlyGoals).map(([key, value]) => [key, value > 0 ? String(Math.round(value)) : ""]),
+  );
 }
 
 export function spreadEvenMonthlyGoals(total: number, monthKeys: string[]) {
   const count = monthKeys.length;
-  if (count === 0 || !Number.isFinite(total) || total <= 0) {
+  const roundedTotal = Math.round(total);
+  if (count === 0 || !Number.isFinite(roundedTotal) || roundedTotal <= 0) {
     return Object.fromEntries(monthKeys.map((monthKey) => [monthKey, ""]));
   }
 
-  const perMonth = Math.floor((total * 100) / count) / 100;
-  const remainder = Math.round((total - perMonth * count) * 100) / 100;
+  const perMonth = Math.floor(roundedTotal / count);
+  const remainder = roundedTotal - perMonth * count;
   const values: Record<string, string> = {};
 
   monthKeys.forEach((monthKey, index) => {

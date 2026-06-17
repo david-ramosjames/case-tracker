@@ -122,7 +122,7 @@ export function DashboardView({
         <Card>
           <CardHeader>
             <CardTitle>Attorney Goal Progress</CardTitle>
-            <CardDescription>Annual pacing for gross settlements disbursed vs top-down goal.</CardDescription>
+            <CardDescription>Annual pacing for gross disbursements vs top-down goal.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             {goalProgress.map((item) => {

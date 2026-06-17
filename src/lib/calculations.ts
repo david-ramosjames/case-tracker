@@ -318,6 +318,7 @@ export function getAttorneyCommissionQuarterRows(
   const monthCount = goal.commissionMonthCount ?? 12;
   const windows = getCommissionYearQuarterWindows(goal.year, goal.commissionYearStartMonth, monthCount);
   const grossQuarterTargets = [goal.q1Goal, goal.q2Goal, goal.q3Goal, goal.q4Goal];
+  const feeQuarterTargets = [goal.feeQ1Goal, goal.feeQ2Goal, goal.feeQ3Goal, goal.feeQ4Goal];
   const attorneyRecords = records.filter(
     (record) => record.shared.attorneyId === goal.attorneyId && isRecordInGoalCommissionYear(record, goal),
   );
@@ -370,7 +371,7 @@ export function getAttorneyCommissionQuarterRows(
         window.quarter as CommissionYearQuarter,
         monthCount,
       ),
-      target: mode === "gross" ? (grossQuarterTargets[window.quarter - 1] ?? 0) : 0,
+      target: mode === "gross" ? (grossQuarterTargets[window.quarter - 1] ?? 0) : (feeQuarterTargets[window.quarter - 1] ?? 0),
       plan,
       actual,
     };
@@ -400,11 +401,13 @@ export function getFirmOutputMetrics(
       : records;
 
   const annualGrossGoal = sum(scopedGoals.map((goal) => goal.annualGrossGoal));
+  const annualRjlFeesGoal = sum(scopedGoals.map((goal) => goal.annualRjlFeesGoal));
   const yearElapsed =
     scopedGoals.length === 1
       ? getCommissionYearElapsedPercentage(scopedGoals[0])
       : getYearElapsedPercentage();
   const pacingGrossGoal = Math.round(annualGrossGoal * (yearElapsed / 100));
+  const pacingFeesGoal = Math.round(annualRjlFeesGoal * (yearElapsed / 100));
 
   const settledRecords = scopedRecords.filter((record) => record.tracker.result.settlementAmount);
   const disbursedRecords = scopedRecords.filter((record) => record.tracker.result.checkDisbursedAt);
@@ -433,7 +436,9 @@ export function getFirmOutputMetrics(
       feesSettled,
       feesDisbursed,
       annualGrossGoal,
+      annualRjlFeesGoal,
       pacingGrossGoal,
+      pacingFeesGoal,
       yearElapsed,
       commissionThreshold,
       commissionableAmount,
@@ -443,7 +448,7 @@ export function getFirmOutputMetrics(
     },
     caseStatuses: getCaseStatusRollup(records, pipelineGoals ?? goals),
     grossQuarterRows: getQuarterRows(scopedRecords, annualGrossGoal, "gross", scopedGoals),
-    feeQuarterRows: getQuarterRows(scopedRecords, 0, "fees", scopedGoals),
+    feeQuarterRows: getQuarterRows(scopedRecords, annualRjlFeesGoal, "fees", scopedGoals),
   };
 }
 

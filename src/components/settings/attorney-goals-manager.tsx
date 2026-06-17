@@ -14,6 +14,7 @@ import {
   monthlyGoalInputFromResolved,
   parseMonthlyGoalsInput,
   resolveMonthlyGoals,
+  resolveMonthlyFeeGoals,
   spreadEvenMonthlyGoals,
 } from "@/lib/attorney-goal-months";
 import { Badge } from "@/components/ui/badge";
@@ -33,17 +34,23 @@ type GoalDraft = {
   endYear: string;
   monthCount: string;
   annualGrossGoalTotal: string;
+  annualRjlFeesGoalTotal: string;
   monthKeys: string[];
   monthlyValues: Record<string, string>;
+  monthlyFeeValues: Record<string, string>;
 };
 
 function parseGoalAmount(value: string) {
   const numeric = Number(value.replace(/[$,\s]/g, ""));
-  return Number.isFinite(numeric) ? numeric : 0;
+  return Number.isFinite(numeric) ? Math.round(numeric) : 0;
 }
 
 function sumDraftMonthlyGoals(draft: Pick<GoalDraft, "monthKeys" | "monthlyValues">) {
   return draft.monthKeys.reduce((total, monthKey) => total + parseGoalAmount(draft.monthlyValues[monthKey] ?? ""), 0);
+}
+
+function sumDraftMonthlyFeeGoals(draft: Pick<GoalDraft, "monthKeys" | "monthlyFeeValues">) {
+  return draft.monthKeys.reduce((total, monthKey) => total + parseGoalAmount(draft.monthlyFeeValues[monthKey] ?? ""), 0);
 }
 
 function getPeriodFromDraft(draft: GoalDraft) {
@@ -58,10 +65,12 @@ function applyPeriodChange(draft: GoalDraft, patch: Partial<Pick<GoalDraft, "end
   const nextDraft = { ...draft, ...patch };
   const period = getPeriodFromDraft(nextDraft);
   const monthlyValues = spreadEvenMonthlyGoals(parseGoalAmount(nextDraft.annualGrossGoalTotal), period.monthKeys);
+  const monthlyFeeValues = spreadEvenMonthlyGoals(parseGoalAmount(nextDraft.annualRjlFeesGoalTotal), period.monthKeys);
   return {
     ...nextDraft,
     monthKeys: period.monthKeys,
     monthlyValues,
+    monthlyFeeValues,
   };
 }
 
@@ -71,19 +80,28 @@ function buildDraftFromGoal(goal: AttorneyGoal): GoalDraft {
   const { endYear, endMonth } = getCommissionPeriodEndFromStart(goal.year, startMonth, monthCount);
   const resolved =
     goal.monthlyGoals && Object.keys(goal.monthlyGoals).length > 0 ? goal.monthlyGoals : resolveMonthlyGoals(goal);
+  const resolvedFees =
+    goal.monthlyFeeGoals && Object.keys(goal.monthlyFeeGoals).length > 0
+      ? goal.monthlyFeeGoals
+      : resolveMonthlyFeeGoals(goal);
   const period = getCommissionPeriodFromEnd(endMonth, endYear, monthCount);
   const annualTotal = Object.values(resolved).reduce((sum, value) => sum + value, 0);
+  const annualFeeTotal = Object.values(resolvedFees).reduce((sum, value) => sum + value, 0);
 
   return {
     attorneyId: goal.attorneyId,
-    commissionThreshold: String(goal.commissionThreshold),
+    commissionThreshold: String(Math.round(goal.commissionThreshold)),
     endMonth: String(endMonth),
     endYear: String(endYear),
     monthCount: String(monthCount),
-    annualGrossGoalTotal: annualTotal > 0 ? String(annualTotal) : "",
+    annualGrossGoalTotal: annualTotal > 0 ? String(Math.round(annualTotal)) : "",
+    annualRjlFeesGoalTotal: annualFeeTotal > 0 ? String(Math.round(annualFeeTotal)) : "",
     monthKeys: period.monthKeys,
     monthlyValues: monthlyGoalInputFromResolved(
       Object.fromEntries(period.monthKeys.map((monthKey) => [monthKey, resolved[monthKey] ?? 0])),
+    ),
+    monthlyFeeValues: monthlyGoalInputFromResolved(
+      Object.fromEntries(period.monthKeys.map((monthKey) => [monthKey, resolvedFees[monthKey] ?? 0])),
     ),
   };
 }
@@ -98,8 +116,10 @@ function createEmptyDraft(attorneyId: string, endYear: number): GoalDraft {
     endYear: String(endYear),
     monthCount: "12",
     annualGrossGoalTotal: "",
+    annualRjlFeesGoalTotal: "",
     monthKeys: period.monthKeys,
     monthlyValues: {},
+    monthlyFeeValues: {},
   };
 }
 
@@ -156,8 +176,17 @@ export function AttorneyGoalsManager({
     const monthlyGoals = parseMonthlyGoalsInput(
       Object.fromEntries(period.monthKeys.map((monthKey) => [monthKey, draft.monthlyValues[monthKey] ?? ""])),
     );
+    const monthlyFeeGoals = parseMonthlyGoalsInput(
+      Object.fromEntries(period.monthKeys.map((monthKey) => [monthKey, draft.monthlyFeeValues[monthKey] ?? ""])),
+    );
     const derived = deriveQuarterGoalsFromMonthly(
       monthlyGoals,
+      period.commissionYear,
+      period.startMonth,
+      period.monthCount,
+    );
+    const derivedFees = deriveQuarterGoalsFromMonthly(
+      monthlyFeeGoals,
       period.commissionYear,
       period.startMonth,
       period.monthCount,
@@ -171,14 +200,20 @@ export function AttorneyGoalsManager({
         attorneyName,
         year: period.commissionYear,
         annualGrossGoal: derived.annualGrossGoal,
+        annualRjlFeesGoal: derivedFees.annualGrossGoal,
         commissionThreshold: parseGoalAmount(draft.commissionThreshold),
         commissionYearStartMonth: period.startMonth,
         commissionMonthCount: period.monthCount,
         monthlyGoals,
+        monthlyFeeGoals,
         q1Goal: derived.q1Goal,
         q2Goal: derived.q2Goal,
         q3Goal: derived.q3Goal,
         q4Goal: derived.q4Goal,
+        feeQ1Goal: derivedFees.q1Goal,
+        feeQ2Goal: derivedFees.q2Goal,
+        feeQ3Goal: derivedFees.q3Goal,
+        feeQ4Goal: derivedFees.q4Goal,
       }),
     });
     const body = (await response.json()) as { error?: string };
@@ -261,9 +296,9 @@ export function AttorneyGoalsManager({
           <div>
             <CardTitle>Attorney Goals</CardTitle>
             <CardDescription>
-              Set the top-down <strong>gross settlements disbursed</strong> goal (tracked vs bottom-up plan on Output).
-              The <strong>commission threshold</strong> is RJL attorney fees disbursed — commissions start once fees
-              exceed that amount.
+              Set top-down <strong>gross disbursements</strong> and <strong>RJL attorney fees</strong> goals for each
+              commission year. The <strong>commission threshold</strong> is separate — commissions start once disbursed
+              fees exceed that amount.
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -390,7 +425,10 @@ export function AttorneyGoalsManager({
         <p className="text-xs text-muted-foreground">
           Saved total{yearFilter === "all" ? "" : ` for ${yearFilter}`}:{" "}
           <Badge variant="outline">
-            {formatCurrency(displayedGoals.reduce((sum, goal) => sum + goal.annualGrossGoal, 0))} gross disbursed
+            {formatCurrency(displayedGoals.reduce((sum, goal) => sum + goal.annualGrossGoal, 0))} gross disbursements
+          </Badge>
+          <Badge variant="outline" className="ml-2">
+            {formatCurrency(displayedGoals.reduce((sum, goal) => sum + goal.annualRjlFeesGoal, 0))} RJL fees
           </Badge>
         </p>
       </CardContent>
@@ -416,18 +454,35 @@ function GoalEditorCard({
   const monthlyGoals = parseMonthlyGoalsInput(
     Object.fromEntries(draft.monthKeys.map((monthKey) => [monthKey, draft.monthlyValues[monthKey] ?? ""])),
   );
+  const monthlyFeeGoals = parseMonthlyGoalsInput(
+    Object.fromEntries(draft.monthKeys.map((monthKey) => [monthKey, draft.monthlyFeeValues[monthKey] ?? ""])),
+  );
   const quarterSummaries = getCommissionQuarterSummaries(
     period.commissionYear,
     period.startMonth,
     monthlyGoals,
     period.monthCount,
   );
+  const feeQuarterSummaries = getCommissionQuarterSummaries(
+    period.commissionYear,
+    period.startMonth,
+    monthlyFeeGoals,
+    period.monthCount,
+  );
   const annualTotal = sumDraftMonthlyGoals(draft);
+  const annualFeeTotal = sumDraftMonthlyFeeGoals(draft);
 
-  function spreadTotal() {
+  function spreadGrossTotal() {
     onDraftChange({
       ...draft,
       monthlyValues: spreadEvenMonthlyGoals(parseGoalAmount(draft.annualGrossGoalTotal), draft.monthKeys),
+    });
+  }
+
+  function spreadFeeTotal() {
+    onDraftChange({
+      ...draft,
+      monthlyFeeValues: spreadEvenMonthlyGoals(parseGoalAmount(draft.annualRjlFeesGoalTotal), draft.monthKeys),
     });
   }
 
@@ -441,8 +496,13 @@ function GoalEditorCard({
             <span className="ml-2 text-muted-foreground/80">(starts {formatMonthKeyLabel(draft.monthKeys[0] ?? "")})</span>
           </p>
         </div>
-        <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm font-semibold text-navy-950">
-          Gross goal total: {formatCurrency(annualTotal)}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm font-semibold text-navy-950">
+            Gross disbursements: {formatCurrency(annualTotal)}
+          </div>
+          <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm font-semibold text-navy-950">
+            RJL fees: {formatCurrency(annualFeeTotal)}
+          </div>
         </div>
       </div>
 
@@ -499,7 +559,7 @@ function GoalEditorCard({
 
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end">
         <label className="flex-1">
-          <span className="mb-1 block text-xs font-medium text-muted-foreground">Total gross settlements goal</span>
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">Total gross disbursements goal</span>
           <Input
             inputMode="decimal"
             placeholder="0"
@@ -507,13 +567,13 @@ function GoalEditorCard({
             onChange={(event) => onDraftChange({ ...draft, annualGrossGoalTotal: event.target.value })}
           />
         </label>
-        <Button variant="outline" size="sm" onClick={spreadTotal} disabled={!draft.annualGrossGoalTotal.trim()}>
+        <Button variant="outline" size="sm" onClick={spreadGrossTotal} disabled={!draft.annualGrossGoalTotal.trim()}>
           Spread evenly across {draft.monthKeys.length} months
         </Button>
       </div>
 
       <div className="space-y-2">
-        <p className="text-xs font-medium text-muted-foreground">Monthly gross settlements disbursed targets</p>
+        <p className="text-xs font-medium text-muted-foreground">Monthly gross disbursements targets</p>
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {draft.monthKeys.map((monthKey) => (
             <label key={monthKey}>
@@ -536,8 +596,55 @@ function GoalEditorCard({
 
       <div className="mt-4 flex flex-wrap gap-2">
         {quarterSummaries.map((summary) => (
-          <Badge key={summary.quarter} variant="outline" className="text-xs">
-            CY Q{summary.quarter} ({summary.period}): {formatCurrency(summary.total)}
+          <Badge key={`gross-${summary.quarter}`} variant="outline" className="text-xs">
+            Gross CY Q{summary.quarter} ({summary.period}): {formatCurrency(summary.total)}
+          </Badge>
+        ))}
+      </div>
+
+      <div className="my-6 border-t" />
+
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end">
+        <label className="flex-1">
+          <span className="mb-1 block text-xs font-medium text-muted-foreground">Total RJL attorney fees goal</span>
+          <Input
+            inputMode="decimal"
+            placeholder="0"
+            value={draft.annualRjlFeesGoalTotal}
+            onChange={(event) => onDraftChange({ ...draft, annualRjlFeesGoalTotal: event.target.value })}
+          />
+        </label>
+        <Button variant="outline" size="sm" onClick={spreadFeeTotal} disabled={!draft.annualRjlFeesGoalTotal.trim()}>
+          Spread evenly across {draft.monthKeys.length} months
+        </Button>
+      </div>
+
+      <div className="space-y-2">
+        <p className="text-xs font-medium text-muted-foreground">Monthly RJL attorney fees targets</p>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {draft.monthKeys.map((monthKey) => (
+            <label key={`fee-${monthKey}`}>
+              <span className="mb-1 block text-xs text-muted-foreground">{formatMonthKeyLabel(monthKey)}</span>
+              <Input
+                inputMode="decimal"
+                placeholder="0"
+                value={draft.monthlyFeeValues[monthKey] ?? ""}
+                onChange={(event) =>
+                  onDraftChange({
+                    ...draft,
+                    monthlyFeeValues: { ...draft.monthlyFeeValues, [monthKey]: event.target.value },
+                  })
+                }
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2">
+        {feeQuarterSummaries.map((summary) => (
+          <Badge key={`fee-${summary.quarter}`} variant="outline" className="text-xs">
+            Fees CY Q{summary.quarter} ({summary.period}): {formatCurrency(summary.total)}
           </Badge>
         ))}
       </div>

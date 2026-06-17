@@ -238,17 +238,24 @@ export type AttorneyGoal = {
   id: string;
   attorneyId: string;
   year: number;
-  /** Top-down target for gross settlement dollars disbursed in the commission year. */
+  /** Top-down target for gross disbursement dollars in the commission year. */
   annualGrossGoal: number;
+  /** Top-down target for RJL attorney fees disbursed in the commission year. */
+  annualRjlFeesGoal: number;
   /** RJL attorney fees disbursed must exceed this before commissions are earned. */
   commissionThreshold: number;
   commissionYearStartMonth: number;
   commissionMonthCount: number;
   monthlyGoals: Record<string, number>;
+  monthlyFeeGoals: Record<string, number>;
   q1Goal: number;
   q2Goal: number;
   q3Goal: number;
   q4Goal: number;
+  feeQ1Goal: number;
+  feeQ2Goal: number;
+  feeQ3Goal: number;
+  feeQ4Goal: number;
 };
 
 export type CaseCompletionLevel = "complete" | "good" | "attention" | "critical";
