@@ -1044,8 +1044,8 @@ export function CaseDetailView({
                 <Info label="Release" value={tracker.result.releaseStatus} />
                 <Info label="Closing" value={tracker.result.closingStatus} />
                 <Info label="Check" value={tracker.result.checkStatus} />
-                <Info label="Disbursed" value={tracker.result.disbursedStatus} />
                 <Info label="Reductions" value={coerceReductionsStatus(tracker.result.reductionsStatus)} />
+                <Info label="Disbursed" value={tracker.result.disbursedStatus} />
                 <Info label="Disburse Date" value={formatDate(tracker.result.disburseDate)} />
                 <Info label="Result Quarter" value={tracker.result.resultQuarter ?? "Not set"} />
               </>
@@ -1097,21 +1097,21 @@ export function CaseDetailView({
                     ))}
                   </Select>
                 </Field>
-                <Field label="Disbursed">
-                  <Select value={tracker.result.disbursedStatus} onChange={(event) => updateResultWorkflow("disbursedStatus", event.target.value as DisbursedStatus)}>
-                    {DISBURSED_STATUS_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
                 <Field label="Reductions">
                   <Select
                     value={coerceReductionsStatus(tracker.result.reductionsStatus)}
                     onChange={(event) => updateResult("reductionsStatus", event.target.value as ReductionsStatus)}
                   >
                     {REDUCTIONS_MANUAL_STATUS_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Disbursed">
+                  <Select value={tracker.result.disbursedStatus} onChange={(event) => updateResultWorkflow("disbursedStatus", event.target.value as DisbursedStatus)}>
+                    {DISBURSED_STATUS_OPTIONS.map((option) => (
                       <option key={option} value={option}>
                         {option}
                       </option>

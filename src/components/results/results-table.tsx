@@ -333,17 +333,6 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="w-32 align-top">
-                  <HeaderFilter
-                    label="Disbursed"
-                    value={disbursed}
-                    onChange={setDisbursed}
-                    options={[
-                      { value: "all", label: "All" },
-                      ...DISBURSED_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
-                    ]}
-                  />
-                </TableHead>
                 <TableHead className="w-36 align-top">
                   <HeaderFilter
                     label="Reductions"
@@ -352,6 +341,17 @@ export function ResultsTable({
                     options={[
                       { value: "all", label: "All" },
                       ...REDUCTIONS_MANUAL_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="w-32 align-top">
+                  <HeaderFilter
+                    label="Disbursed"
+                    value={disbursed}
+                    onChange={setDisbursed}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...DISBURSED_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
                     ]}
                   />
                 </TableHead>
@@ -410,11 +410,6 @@ export function ResultsTable({
                         {CHECK_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                       </InlineSelect>
                     </TableCell>
-                    <TableCell className="w-32">
-                      <InlineSelect value={result.disbursedStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "disbursedStatus", value as DisbursedStatus)}>
-                        {DISBURSED_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-                      </InlineSelect>
-                    </TableCell>
                     <TableCell className="w-36">
                       <InlineSelect
                         value={coerceReductionsStatus(result.reductionsStatus)}
@@ -430,6 +425,11 @@ export function ResultsTable({
                             {option}
                           </option>
                         ))}
+                      </InlineSelect>
+                    </TableCell>
+                    <TableCell className="w-32">
+                      <InlineSelect value={result.disbursedStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "disbursedStatus", value as DisbursedStatus)}>
+                        {DISBURSED_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                       </InlineSelect>
                     </TableCell>
                     <TableCell className="w-36 whitespace-nowrap text-sm text-muted-foreground">

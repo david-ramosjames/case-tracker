@@ -288,24 +288,28 @@ export function applyDerivedResultQuarter<T extends { disburseDate: string | nul
   return { ...result, resultQuarter: deriveResultQuarterFromDisburseDate(result.disburseDate) };
 }
 
-export function applyDerivedResultFields<
-  T extends { disburseDate: string | null; resultQuarter: string | null },
->(result: T): T {
-  return applyDerivedResultQuarter(result);
+/** When a final disburse date is set, downstream workflow steps are implied. */
+export function applyDerivedWorkflowFromDisburseDate<T extends SettlementResult>(result: T): T {
+  if (!result.disburseDate?.trim()) return result;
+
+  const dateOnly = result.disburseDate.trim().slice(0, 10);
+  const checkDisbursedAt = /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)
+    ? new Date(`${dateOnly}T12:00:00.000Z`).toISOString()
+    : new Date(result.disburseDate).toISOString();
+
+  return {
+    ...result,
+    releaseStatus: "Signed",
+    closingStatus: "Signed",
+    checkStatus: "Deposited",
+    reductionsStatus: "Approved",
+    disbursedStatus: "Yes",
+    checkDisbursedAt,
+  };
 }
 
-/** @deprecated Reductions is independent of disburse date — do not use for new logic. */
-export function deriveReductionsStatusFromDisburseDate(
-  _disburseDate: string | null | undefined,
-): ReductionsStatus | null {
-  return null;
-}
-
-/** @deprecated Reductions is no longer derived from disburse date. */
-export function applyDerivedReductionsStatus<T extends { disburseDate: string | null; reductionsStatus: ReductionsStatus }>(
-  result: T,
-): T {
-  return result;
+export function applyDerivedResultFields<T extends SettlementResult>(result: T): T {
+  return applyDerivedWorkflowFromDisburseDate(applyDerivedResultQuarter(result));
 }
 
 export type ApplyDerivedSettlementResultOptions = {
