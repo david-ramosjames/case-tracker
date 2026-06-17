@@ -434,10 +434,34 @@ export async function updateTrackerEntry(
 
 export async function importCaseBackfillCsv(
   csvText: string,
-  options: { actor?: TrackerActor; dryRun?: boolean } = {},
+  options: {
+    actor?: TrackerActor;
+    dryRun?: boolean;
+    onProgress?: (progress: CaseBackfillImportProgress) => void;
+  } = {},
 ): Promise<CaseBackfillImportResult> {
   const parsedRows = parseCaseBackfillCsv(csvText);
-  const cases = await getCases();
+  return importCaseBackfillRows(parsedRows, options);
+}
+
+export type CaseBackfillImportProgress = {
+  processed: number;
+  total: number;
+  updated: number;
+  failed: number;
+  currentCaseNumber?: string;
+};
+
+export async function importCaseBackfillRows(
+  parsedRows: ParsedCaseBackfillRow[],
+  options: {
+    actor?: TrackerActor;
+    dryRun?: boolean;
+    cases?: CaseRecord[];
+    onProgress?: (progress: CaseBackfillImportProgress) => void;
+  } = {},
+): Promise<CaseBackfillImportResult> {
+  const cases = options.cases ?? (await getCases());
   const byCaseNumber = buildCaseBackfillLookup(cases);
 
   const preview: CaseBackfillImportResult["preview"] = [];
@@ -448,7 +472,8 @@ export async function importCaseBackfillCsv(
   let updated = 0;
   let skipped = 0;
 
-  for (const row of parsedRows) {
+  for (let index = 0; index < parsedRows.length; index += 1) {
+    const row = parsedRows[index];
     const existing = byCaseNumber.get(row.caseNumber);
     const fieldCount = countBackfillFields(row);
     const importable = Boolean(existing && isLinkedDocketFlowCase(existing));
@@ -457,86 +482,115 @@ export async function importCaseBackfillCsv(
 
     if (!existing) {
       unmatched.push(row.caseNumber);
+      options.onProgress?.({
+        processed: index + 1,
+        total: parsedRows.length,
+        updated,
+        failed: failed.length,
+        currentCaseNumber: row.caseNumber,
+      });
       continue;
     }
 
     if (!importable) {
       unlinked.push(row.caseNumber);
+      options.onProgress?.({
+        processed: index + 1,
+        total: parsedRows.length,
+        updated,
+        failed: failed.length,
+        currentCaseNumber: row.caseNumber,
+      });
       continue;
     }
 
     matched += 1;
     if (fieldCount === 0) {
       skipped += 1;
+      options.onProgress?.({
+        processed: index + 1,
+        total: parsedRows.length,
+        updated,
+        failed: failed.length,
+        currentCaseNumber: row.caseNumber,
+      });
       continue;
     }
 
-    if (options.dryRun) continue;
+    if (!options.dryRun) {
+      const caseId = existing.shared.id;
 
-    const caseId = existing.shared.id;
+      try {
+        if (Object.keys(row.shared).length > 0) {
+          await updateSharedCaseFields(
+            caseId,
+            row.shared,
+            row.shared.status ? { explicitStatus: row.shared.status } : undefined,
+          );
+        }
 
-    try {
-      if (Object.keys(row.shared).length > 0) {
-        await updateSharedCaseFields(
-          caseId,
-          row.shared,
-          row.shared.status ? { explicitStatus: row.shared.status } : undefined,
-        );
-      }
+        const trackerPatch = row.tracker;
+        const resultPatch = row.result;
+        const hasTrackerPatch = Object.keys(trackerPatch).length > 0;
+        const hasResultPatch = Object.keys(resultPatch).length > 0;
 
-      const trackerPatch = row.tracker;
-      const resultPatch = row.result;
-      const hasTrackerPatch = Object.keys(trackerPatch).length > 0;
-      const hasResultPatch = Object.keys(resultPatch).length > 0;
-
-      if (hasTrackerPatch || hasResultPatch) {
-        const mergedTracker = mergeTrackerImport(existing.tracker, trackerPatch);
-        const mergedResult = hasResultPatch ? { ...existing.tracker.result, ...resultPatch } : undefined;
-        await updateTrackerEntry(
-          caseId,
-          {
-            ...mergedTracker,
-            ...(mergedResult ? { result: mergedResult } : {}),
-          },
-          {
-            actor: options.actor,
-            shared: Object.keys(row.shared).length > 0 ? row.shared : undefined,
-            markReviewed: false,
-            changeInput: {
-              ...trackerPatch,
-              ...(hasResultPatch ? { result: resultPatch as SettlementResult } : {}),
+        if (hasTrackerPatch || hasResultPatch) {
+          const mergedTracker = mergeTrackerImport(existing.tracker, trackerPatch);
+          const mergedResult = hasResultPatch ? { ...existing.tracker.result, ...resultPatch } : undefined;
+          await updateTrackerEntry(
+            caseId,
+            {
+              ...mergedTracker,
+              ...(mergedResult ? { result: mergedResult } : {}),
             },
-          },
-        );
-      } else if (Object.keys(row.shared).length > 0) {
-        await createActivityEntry(
-          caseId,
-          "CSV backfill",
-          buildTrackerActivityDescription(
-            describeTrackerChanges(existing.tracker, {}, {
-              before: {
-                status: existing.shared.status,
-                caseType: existing.shared.caseType,
-                dateSigned: existing.shared.dateSigned,
-                dateOfIncident: existing.shared.dateOfIncident,
+            {
+              actor: options.actor,
+              shared: Object.keys(row.shared).length > 0 ? row.shared : undefined,
+              markReviewed: false,
+              changeInput: {
+                ...trackerPatch,
+                ...(hasResultPatch ? { result: resultPatch as SettlementResult } : {}),
               },
-              after: row.shared,
-            }),
-            false,
-          ),
-          options.actor,
-          { source: "csv_backfill", trackerEntryId: existing.tracker.id },
-          existing,
-        );
-      }
+            },
+          );
+        } else if (Object.keys(row.shared).length > 0) {
+          await createActivityEntry(
+            caseId,
+            "CSV backfill",
+            buildTrackerActivityDescription(
+              describeTrackerChanges(existing.tracker, {}, {
+                before: {
+                  status: existing.shared.status,
+                  caseType: existing.shared.caseType,
+                  dateSigned: existing.shared.dateSigned,
+                  dateOfIncident: existing.shared.dateOfIncident,
+                },
+                after: row.shared,
+              }),
+              false,
+            ),
+            options.actor,
+            { source: "csv_backfill", trackerEntryId: existing.tracker.id },
+            existing,
+          );
+        }
 
-      updated += 1;
-    } catch (error) {
-      failed.push({
-        caseNumber: row.caseNumber,
-        message: error instanceof Error ? error.message : "Import failed for this row.",
-      });
+        updated += 1;
+      } catch (error) {
+        failed.push({
+          caseNumber: row.caseNumber,
+          message: error instanceof Error ? error.message : "Import failed for this row.",
+        });
+      }
     }
+
+    options.onProgress?.({
+      processed: index + 1,
+      total: parsedRows.length,
+      updated,
+      failed: failed.length,
+      currentCaseNumber: row.caseNumber,
+    });
   }
 
   return {

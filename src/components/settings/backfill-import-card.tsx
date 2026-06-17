@@ -6,6 +6,7 @@ import { CheckCircle2, Loader2, Upload } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   CASE_BACKFILL_ALL_HEADERS,
@@ -22,6 +23,14 @@ import {
 import { parseCsv } from "@/lib/csv/parse";
 import { type CaseBackfillImportResult } from "@/lib/types";
 
+type ImportProgress = {
+  processed: number;
+  total: number;
+  updated: number;
+  failed: number;
+  currentCaseNumber?: string;
+};
+
 export function BackfillImportCard() {
   const router = useRouter();
   const [fileName, setFileName] = useState<string | null>(null);
@@ -33,6 +42,7 @@ export function BackfillImportCard() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
 
   const hasCaseNumberHeader = useMemo(
     () => CASE_BACKFILL_CASE_NUMBER_HEADERS.some((header) => headers.some((item) => item.toLowerCase() === header.toLowerCase())),
@@ -94,24 +104,74 @@ export function BackfillImportCard() {
   async function runImport() {
     if (!csvText) return;
     setIsImporting(true);
+    setImportProgress(null);
     setErrorMessage(null);
     try {
       const response = await fetch("/api/import/backfill", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ csv: csvText, dryRun: false }),
+        body: JSON.stringify({ csv: csvText, dryRun: false, stream: true }),
       });
-      const payload = (await response.json()) as CaseBackfillImportResult & { error?: string };
-      if (!response.ok) throw new Error(payload.error ?? "Import failed.");
-      setImportResult(payload);
-      setPreview(payload);
+
+      if (!response.ok) {
+        const payload = (await response.json()) as { error?: string };
+        throw new Error(payload.error ?? "Import failed.");
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error("Import failed: no response stream.");
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalResult: CaseBackfillImportResult | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as
+            | ({ type: "progress" } & ImportProgress)
+            | { type: "complete"; result: CaseBackfillImportResult }
+            | { type: "error"; error: string };
+
+          if (event.type === "progress") {
+            setImportProgress({
+              processed: event.processed,
+              total: event.total,
+              updated: event.updated,
+              failed: event.failed,
+              currentCaseNumber: event.currentCaseNumber,
+            });
+          } else if (event.type === "complete") {
+            finalResult = event.result;
+          } else if (event.type === "error") {
+            throw new Error(event.error);
+          }
+        }
+      }
+
+      if (!finalResult) throw new Error("Import finished without a result.");
+      setImportResult(finalResult);
+      setPreview(finalResult);
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Import failed.");
     } finally {
       setIsImporting(false);
+      setImportProgress(null);
     }
   }
+
+  const importPercent =
+    importProgress && importProgress.total > 0
+      ? Math.round((importProgress.processed / importProgress.total) * 100)
+      : 0;
 
   return (
     <Card>
@@ -154,14 +214,33 @@ export function BackfillImportCard() {
               </Button>
               <Button variant="outline" disabled={!canImport || isImporting || isPreviewing} onClick={() => void runImport()}>
                 {isImporting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Import to tracker
+                {isImporting && importProgress
+                  ? `Importing ${importProgress.processed}/${importProgress.total}`
+                  : "Import to tracker"}
               </Button>
             </div>
           </div>
+          {isImporting && importProgress ? (
+            <div className="mt-4 space-y-2 rounded-lg border border-pink-100 bg-pink-50/40 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+                <span className="font-medium text-navy-950">
+                  Processing row {importProgress.processed} of {importProgress.total}
+                  {importProgress.currentCaseNumber ? (
+                    <span className="font-normal text-muted-foreground"> · Case #{importProgress.currentCaseNumber}</span>
+                  ) : null}
+                </span>
+                <span className="font-semibold text-pink-600">{importPercent}%</span>
+              </div>
+              <Progress value={importPercent} />
+              <p className="text-xs text-muted-foreground">
+                {importProgress.updated} updated · {importProgress.failed} failed
+              </p>
+            </div>
+          ) : null}
           {fileName ? (
             <div className="mt-4 flex flex-wrap gap-2 text-sm">
               <Badge variant={hasCaseNumberHeader ? "success" : "warning"}>{hasCaseNumberHeader ? "Ready" : "Missing case # column"}</Badge>
-              {isPreviewing ? <Badge variant="outline">Checking matches…</Badge> : null}
+              {isPreviewing ? <Badge variant="outline">Analyzing {rowCount} rows…</Badge> : null}
               {preview ? (
                 <>
                   <Badge variant="success">{preview.matched} matched</Badge>
