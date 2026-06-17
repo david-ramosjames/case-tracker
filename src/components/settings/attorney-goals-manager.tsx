@@ -381,7 +381,7 @@ export function AttorneyGoalsManager({
             )}
           </p>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-5">
             {displayedGoals.map((goal) => {
               const attorney = attorneys.find((user) => user.id === goal.attorneyId);
               const draft = getDraft(goal);
@@ -487,169 +487,210 @@ function GoalEditorCard({
   }
 
   return (
-    <div className="rounded-lg border bg-muted/20 p-4">
-      <div className="mb-4 flex flex-col justify-between gap-3 md:flex-row md:items-start">
-        <div>
-          <p className="text-sm font-semibold text-navy-950">{title}</p>
-          <p className="text-xs text-muted-foreground">
-            Commission period: {periodLabel}
-            <span className="ml-2 text-muted-foreground/80">(starts {formatMonthKeyLabel(draft.monthKeys[0] ?? "")})</span>
+    <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+      <div className="flex flex-col gap-3 border-b bg-muted/30 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-base font-semibold text-navy-950">{title}</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            {periodLabel}
+            <span className="text-muted-foreground/70"> · starts {formatMonthKeyLabel(draft.monthKeys[0] ?? "")}</span>
           </p>
         </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm font-semibold text-navy-950">
-            Gross disbursements: {formatCurrency(annualTotal)}
-          </div>
-          <div className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm font-semibold text-navy-950">
-            RJL fees: {formatCurrency(annualFeeTotal)}
-          </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <SummaryPill label="Gross disbursements" value={formatCurrency(annualTotal)} />
+          <SummaryPill label="RJL fees" value={formatCurrency(annualFeeTotal)} />
         </div>
       </div>
 
-      <div className="mb-4 grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-        <label>
-          <span className="mb-1 block text-xs font-medium text-muted-foreground">Ends in month</span>
-          <Select
-            value={draft.endMonth}
-            onChange={(event) => onDraftChange(applyPeriodChange(draft, { endMonth: event.target.value }))}
-          >
-            {COMMISSION_YEAR_MONTH_OPTIONS.map((month) => (
-              <option key={month.value} value={month.value}>
-                {month.label}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <label>
-          <span className="mb-1 block text-xs font-medium text-muted-foreground">Ends in year</span>
-          <Select
-            value={draft.endYear}
-            onChange={(event) => onDraftChange(applyPeriodChange(draft, { endYear: event.target.value }))}
-          >
-            {endYearOptions.map((year) => (
-              <option key={year} value={year}>
-                {year}
-              </option>
-            ))}
-          </Select>
-        </label>
-        <label>
-          <span className="mb-1 block text-xs font-medium text-muted-foreground">Months in period</span>
-          <Select
-            value={draft.monthCount}
-            onChange={(event) => onDraftChange(applyPeriodChange(draft, { monthCount: event.target.value }))}
-          >
-            {COMMISSION_PERIOD_MONTH_OPTIONS.map((count) => (
-              <option key={count} value={count}>
-                {count} months
-              </option>
-            ))}
-          </Select>
-        </label>
-        <label>
-          <span className="mb-1 block text-xs font-medium text-muted-foreground">Commission threshold (RJL fees disbursed)</span>
-          <Input
-            inputMode="decimal"
-            placeholder="0"
-            value={draft.commissionThreshold}
-            onChange={(event) => onDraftChange({ ...draft, commissionThreshold: event.target.value })}
-          />
-        </label>
-      </div>
+      <div className="space-y-6 px-5 py-5">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Field label="Ends in month">
+            <Select
+              value={draft.endMonth}
+              onChange={(event) => onDraftChange(applyPeriodChange(draft, { endMonth: event.target.value }))}
+            >
+              {COMMISSION_YEAR_MONTH_OPTIONS.map((month) => (
+                <option key={month.value} value={month.value}>
+                  {month.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Ends in year">
+            <Select
+              value={draft.endYear}
+              onChange={(event) => onDraftChange(applyPeriodChange(draft, { endYear: event.target.value }))}
+            >
+              {endYearOptions.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Months in period">
+            <Select
+              value={draft.monthCount}
+              onChange={(event) => onDraftChange(applyPeriodChange(draft, { monthCount: event.target.value }))}
+            >
+              {COMMISSION_PERIOD_MONTH_OPTIONS.map((count) => (
+                <option key={count} value={count}>
+                  {count} months
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Commission threshold">
+            <Input
+              inputMode="decimal"
+              placeholder="0"
+              value={draft.commissionThreshold}
+              onChange={(event) => onDraftChange({ ...draft, commissionThreshold: event.target.value })}
+            />
+            <span className="mt-1 block text-[11px] leading-tight text-muted-foreground">
+              RJL fees disbursed before commissions start
+            </span>
+          </Field>
+        </div>
 
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end">
-        <label className="flex-1">
-          <span className="mb-1 block text-xs font-medium text-muted-foreground">Total gross disbursements goal</span>
-          <Input
-            inputMode="decimal"
-            placeholder="0"
-            value={draft.annualGrossGoalTotal}
-            onChange={(event) => onDraftChange({ ...draft, annualGrossGoalTotal: event.target.value })}
+        <div className="grid gap-6 xl:grid-cols-2">
+          <GoalMetricSection
+            title="Gross disbursements"
+            annualLabel="Annual goal"
+            annualValue={draft.annualGrossGoalTotal}
+            onAnnualChange={(value) => onDraftChange({ ...draft, annualGrossGoalTotal: value })}
+            onSpread={spreadGrossTotal}
+            spreadDisabled={!draft.annualGrossGoalTotal.trim()}
+            monthCount={draft.monthKeys.length}
+            monthKeys={draft.monthKeys}
+            monthlyValues={draft.monthlyValues}
+            onMonthlyChange={(monthKey, value) =>
+              onDraftChange({
+                ...draft,
+                monthlyValues: { ...draft.monthlyValues, [monthKey]: value },
+              })
+            }
+            quarterSummaries={quarterSummaries}
           />
-        </label>
-        <Button variant="outline" size="sm" onClick={spreadGrossTotal} disabled={!draft.annualGrossGoalTotal.trim()}>
-          Spread evenly across {draft.monthKeys.length} months
-        </Button>
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-muted-foreground">Monthly gross disbursements targets</p>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {draft.monthKeys.map((monthKey) => (
-            <label key={monthKey}>
-              <span className="mb-1 block text-xs text-muted-foreground">{formatMonthKeyLabel(monthKey)}</span>
-              <Input
-                inputMode="decimal"
-                placeholder="0"
-                value={draft.monthlyValues[monthKey] ?? ""}
-                onChange={(event) =>
-                  onDraftChange({
-                    ...draft,
-                    monthlyValues: { ...draft.monthlyValues, [monthKey]: event.target.value },
-                  })
-                }
-              />
-            </label>
-          ))}
+          <GoalMetricSection
+            title="RJL attorney fees"
+            annualLabel="Annual goal"
+            annualValue={draft.annualRjlFeesGoalTotal}
+            onAnnualChange={(value) => onDraftChange({ ...draft, annualRjlFeesGoalTotal: value })}
+            onSpread={spreadFeeTotal}
+            spreadDisabled={!draft.annualRjlFeesGoalTotal.trim()}
+            monthCount={draft.monthKeys.length}
+            monthKeys={draft.monthKeys}
+            monthlyValues={draft.monthlyFeeValues}
+            onMonthlyChange={(monthKey, value) =>
+              onDraftChange({
+                ...draft,
+                monthlyFeeValues: { ...draft.monthlyFeeValues, [monthKey]: value },
+              })
+            }
+            quarterSummaries={feeQuarterSummaries}
+          />
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap gap-2">
-        {quarterSummaries.map((summary) => (
-          <Badge key={`gross-${summary.quarter}`} variant="outline" className="text-xs">
-            Gross CY Q{summary.quarter} ({summary.period}): {formatCurrency(summary.total)}
-          </Badge>
-        ))}
-      </div>
-
-      <div className="my-6 border-t" />
-
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-end">
-        <label className="flex-1">
-          <span className="mb-1 block text-xs font-medium text-muted-foreground">Total RJL attorney fees goal</span>
-          <Input
-            inputMode="decimal"
-            placeholder="0"
-            value={draft.annualRjlFeesGoalTotal}
-            onChange={(event) => onDraftChange({ ...draft, annualRjlFeesGoalTotal: event.target.value })}
-          />
-        </label>
-        <Button variant="outline" size="sm" onClick={spreadFeeTotal} disabled={!draft.annualRjlFeesGoalTotal.trim()}>
-          Spread evenly across {draft.monthKeys.length} months
-        </Button>
-      </div>
-
-      <div className="space-y-2">
-        <p className="text-xs font-medium text-muted-foreground">Monthly RJL attorney fees targets</p>
-        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {draft.monthKeys.map((monthKey) => (
-            <label key={`fee-${monthKey}`}>
-              <span className="mb-1 block text-xs text-muted-foreground">{formatMonthKeyLabel(monthKey)}</span>
-              <Input
-                inputMode="decimal"
-                placeholder="0"
-                value={draft.monthlyFeeValues[monthKey] ?? ""}
-                onChange={(event) =>
-                  onDraftChange({
-                    ...draft,
-                    monthlyFeeValues: { ...draft.monthlyFeeValues, [monthKey]: event.target.value },
-                  })
-                }
-              />
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        {feeQuarterSummaries.map((summary) => (
-          <Badge key={`fee-${summary.quarter}`} variant="outline" className="text-xs">
-            Fees CY Q{summary.quarter} ({summary.period}): {formatCurrency(summary.total)}
-          </Badge>
-        ))}
-      </div>
-
-      <div className="mt-4">{actions}</div>
+      <div className="flex items-center gap-2 border-t bg-muted/20 px-5 py-3">{actions}</div>
     </div>
+  );
+}
+
+function SummaryPill({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-background px-3 py-2 text-sm">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="font-semibold text-navy-950">{value}</p>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-medium text-muted-foreground">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function GoalMetricSection({
+  title,
+  annualLabel,
+  annualValue,
+  onAnnualChange,
+  onSpread,
+  spreadDisabled,
+  monthCount,
+  monthKeys,
+  monthlyValues,
+  onMonthlyChange,
+  quarterSummaries,
+}: {
+  title: string;
+  annualLabel: string;
+  annualValue: string;
+  onAnnualChange: (value: string) => void;
+  onSpread: () => void;
+  spreadDisabled: boolean;
+  monthCount: number;
+  monthKeys: string[];
+  monthlyValues: Record<string, string>;
+  onMonthlyChange: (monthKey: string, value: string) => void;
+  quarterSummaries: ReturnType<typeof getCommissionQuarterSummaries>;
+}) {
+  return (
+    <section className="rounded-lg border bg-muted/10 p-4">
+      <h4 className="text-sm font-semibold text-navy-950">{title}</h4>
+
+      <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
+        <Field label={annualLabel}>
+          <Input
+            inputMode="decimal"
+            placeholder="0"
+            className="sm:max-w-[11rem]"
+            value={annualValue}
+            onChange={(event) => onAnnualChange(event.target.value)}
+          />
+        </Field>
+        <Button variant="outline" size="sm" className="shrink-0" onClick={onSpread} disabled={spreadDisabled}>
+          Spread across {monthCount} months
+        </Button>
+      </div>
+
+      <div className="mt-4">
+        <p className="mb-2 text-xs font-medium text-muted-foreground">Monthly targets</p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          {monthKeys.map((monthKey) => (
+            <label key={monthKey}>
+              <span className="mb-1 block truncate text-[11px] text-muted-foreground">
+                {formatMonthKeyLabel(monthKey)}
+              </span>
+              <Input
+                inputMode="decimal"
+                placeholder="0"
+                className="h-9"
+                value={monthlyValues[monthKey] ?? ""}
+                onChange={(event) => onMonthlyChange(monthKey, event.target.value)}
+              />
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {quarterSummaries.map((summary) => (
+          <div key={summary.quarter} className="rounded-md border bg-background px-3 py-2">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-xs font-medium text-navy-950">CY Q{summary.quarter}</span>
+              <span className="text-sm font-semibold text-navy-950">{formatCurrency(summary.total)}</span>
+            </div>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">{summary.period}</p>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
