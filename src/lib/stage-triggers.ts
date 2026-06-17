@@ -1,13 +1,22 @@
-import { deriveResultFeePercent } from "@/lib/calculations";
+import { deriveForecastFeePercent, resolveSettledFeePercent } from "@/lib/calculations";
 import { type CaseRecord, type CaseStage, type ExpectedLitigationStatus, type SettlementResult } from "@/lib/types";
-import { daysSince } from "@/lib/utils";
+import { daysSince, getCalculatedAttorneyFees } from "@/lib/utils";
 
 export type PulseSignal = "disbursed";
 
 /** Days after date signed before auto-promoting Onboarding → Treatment (Txt). */
 export const TREATMENT_AUTO_DAYS = 10;
 
-const CONFIRMATION_REQUIRED_STAGES = new Set<CaseStage>(["Dmd", "Lit", "Disengaged", "Terminated", "Referred"]);
+const CONFIRMATION_REQUIRED_STAGES = new Set<CaseStage>([
+  "Onboarding",
+  "Txt",
+  "Dmd",
+  "Lit",
+  "Settled",
+  "Disengaged",
+  "Terminated",
+  "Referred",
+]);
 
 export function stageRequiresSlackConfirmation(stage: CaseStage) {
   return CONFIRMATION_REQUIRED_STAGES.has(stage);
@@ -56,10 +65,28 @@ export function normalizePulseStageLabel(raw: string): CaseStage {
   return parsePulseStageLabel(raw) ?? "Onboarding";
 }
 
-export function shouldSkipPulseSuggestion(record: CaseRecord, suggestedStage: CaseStage) {
-  if (!record.tracker.isActive && suggestedStage !== "Disengaged" && suggestedStage !== "Terminated" && suggestedStage !== "Referred") {
+export function shouldSkipPulseSuggestion(
+  record: CaseRecord,
+  item: { suggestedStage: CaseStage; pulseSignal?: PulseSignal | null },
+) {
+  if (item.pulseSignal === "disbursed") {
+    if (record.tracker.caseStage === "Settled" && record.tracker.result.disbursedStatus === "Yes") {
+      return "already_applied";
+    }
+    return null;
+  }
+
+  if (record.tracker.caseStage === item.suggestedStage) return "already_at_stage";
+
+  if (
+    !record.tracker.isActive &&
+    item.suggestedStage !== "Disengaged" &&
+    item.suggestedStage !== "Terminated" &&
+    item.suggestedStage !== "Referred"
+  ) {
     return "inactive_tracker";
   }
+
   return null;
 }
 
@@ -77,7 +104,6 @@ export function buildStagePatchFromConfirmation(
   stage: CaseStage,
   options?: { markDisbursed?: boolean },
 ) {
-  const expectedLitigation = stage === "Lit" ? "Lit" : record.tracker.expectedLitigation;
   const patch: {
     caseStage: CaseStage;
     expectedLitigation?: ExpectedLitigationStatus;
@@ -91,15 +117,29 @@ export function buildStagePatchFromConfirmation(
     patch.expectedLitigation = "Lit";
   }
 
-  if (record.tracker.minimumValue) {
-    patch.estimatedFeeValue = Math.round(
-      record.tracker.minimumValue *
-        deriveResultFeePercent({
-          caseStage: stage,
-          expectedLitigation,
+  const priorStage = record.tracker.caseStage;
+  const forecastRate =
+    stage === "Settled"
+      ? resolveSettledFeePercent({
+          feePercent: record.tracker.result.feePercent,
+          priorCaseStage: priorStage,
+          expectedLitigation: record.tracker.expectedLitigation,
           referralFee: record.tracker.referralFee,
-        }),
-    );
+        })
+      : deriveForecastFeePercent({ caseStage: stage, referralFee: record.tracker.referralFee });
+
+  if (record.tracker.minimumValue) {
+    patch.estimatedFeeValue = Math.round(record.tracker.minimumValue * forecastRate);
+  }
+
+  if (stage === "Settled") {
+    patch.result = {
+      ...record.tracker.result,
+      feePercent: forecastRate,
+      attorneyFees:
+        getCalculatedAttorneyFees(record.tracker.result.settlementAmount, forecastRate) ??
+        record.tracker.result.attorneyFees,
+    };
   }
 
   if (options?.markDisbursed) {

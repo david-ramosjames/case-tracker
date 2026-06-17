@@ -5,7 +5,6 @@ export const ALLOWED_EMAIL_DOMAIN = "ramosjames.com";
 export const ADMIN_EMAILS = [
   "david@ramosjames.com",
   "jon@ramosjames.com",
-  "ryan@ramosjames.com",
   "laura@ramosjames.com",
 ] as const;
 

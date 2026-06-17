@@ -45,24 +45,46 @@ export function formatNumberInput(value: string | number) {
   return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(numeric);
 }
 
+/** Parse a calendar date without UTC midnight shifting the displayed day in US timezones. */
+export function parseCalendarDate(value: string): Date | null {
+  const trimmed = value.trim();
+  const match = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]) - 1;
+    const day = Number(match[3]);
+    const date = new Date(year, month, day);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 export function formatDate(value: string | null | undefined) {
   if (!value) return "Not reviewed";
+
+  const date = parseCalendarDate(value);
+  if (!date) return "Not reviewed";
 
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 export function formatOptionalDate(value: string | null | undefined) {
   if (!value) return "Not set";
 
+  const date = parseCalendarDate(value);
+  if (!date) return "Not set";
+
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
-  }).format(new Date(value));
+  }).format(date);
 }
 
 export function getCurrentQuarter(date = new Date()) {
@@ -85,7 +107,11 @@ export function getYearElapsedPercentage(date = new Date()) {
 
 export function daysSince(value: string | null | undefined) {
   if (!value) return Number.POSITIVE_INFINITY;
-  const diff = Date.now() - new Date(value).getTime();
+  const date = parseCalendarDate(value);
+  if (!date) return Number.POSITIVE_INFINITY;
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const diff = startOfToday.getTime() - date.getTime();
   return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 

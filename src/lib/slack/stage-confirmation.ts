@@ -67,6 +67,7 @@ export function buildStageConfirmationMessage(input: {
   caseId: string;
   topicMentions?: string;
   markDisbursed?: boolean;
+  currentStage?: CaseStage;
 }) {
   const stage = stageDisplay(input.suggestedStage);
   const confidence = input.confidence.toLowerCase();
@@ -76,17 +77,25 @@ export function buildStageConfirmationMessage(input: {
     lines.push(input.topicMentions);
   }
 
+  lines.push("*Pending pulse update — the case tracker has not been changed yet.*");
+
+  if (input.currentStage && input.currentStage !== input.suggestedStage) {
+    lines.push(`Current tracker stage: *${stageDisplay(input.currentStage)}*`);
+  }
+
   if (input.markDisbursed) {
     lines.push(
-      `Bot suggests case status is: *${stage}* and *Disbursed: Yes* (${confidence} confidence)`,
+      `Pulse suggests: *${stage}* and *Disbursed: Yes* (${confidence} confidence)`,
       "",
-      "Reply in this thread with ✅ or `confirmed` to set stage to Settled and mark disbursed Yes.",
+      "Reply in this thread with ✅ or `confirmed` to apply this to the case tracker.",
+      "Reply `no` or `dismiss` to ignore — no change will be made.",
     );
   } else {
     lines.push(
-      `Bot suggests case status is: *${stage}* (${confidence} confidence)`,
+      `Pulse suggests: *${stage}* (${confidence} confidence)`,
       "",
-      "Reply in this thread with ✅, `confirmed`, or the correct stage (e.g. `status: Litigation`).",
+      "Reply in this thread with ✅, `confirmed`, or the correct stage (e.g. `status: Litigation`) to apply.",
+      "Reply `no` or `dismiss` to ignore — no change will be made.",
     );
   }
 
@@ -127,6 +136,7 @@ export async function postStageConfirmationForSuggestion(
     caseId,
     topicMentions,
     markDisbursed: item.pulseSignal === "disbursed",
+    currentStage: record?.tracker.caseStage,
   });
 
   const posted = await postSlackMessage({ channel: channelId, text });
@@ -281,9 +291,10 @@ async function fanOutPulseItem(
   const resolvedRecord = record ?? (await getCaseById(match.caseId));
   if (!resolvedRecord) return "skipped_no_case";
 
-  const skipReason =
-    item.pulseSignal === "disbursed" ? null : shouldSkipPulseSuggestion(resolvedRecord, item.suggestedStage);
+  const skipReason = shouldSkipPulseSuggestion(resolvedRecord, item);
   if (skipReason === "inactive_tracker") return "skipped_inactive_tracker";
+  if (skipReason === "already_at_stage") return "skipped_already_at_stage";
+  if (skipReason === "already_applied") return "skipped_already_applied";
 
   const existingLine = await findPulseLineSuggestion(match.caseId, pulseMessageTs, item.channelRef);
   if (existingLine?.confirmationPostedAt) return "skipped_already_posted";
@@ -311,6 +322,7 @@ async function fanOutPulseItem(
       slackChannelId: match.slackChannelId,
     }));
 
+  // Post Slack confirmation only — tracker updates happen in applyConfirmedStage after ✅ / confirmed.
   const postResult = await postStageConfirmationForSuggestion(
     suggestion.id,
     match.caseId,
@@ -363,6 +375,9 @@ export async function handleStageUpdateNotificationReply(threadTs: string, text:
 export async function handleStageConfirmationReply(threadTs: string, text: string, actorName = "Slack") {
   const suggestion = await findStageSuggestionByConfirmationThread(threadTs);
   if (!suggestion) return { handled: false as const, reason: "no_pending_suggestion" };
+  if (suggestion.source === "pulse" && !suggestion.confirmationPostedAt) {
+    return { handled: false as const, reason: "pulse_confirmation_not_posted" };
+  }
 
   const parsed = parseStageConfirmationText(text, suggestion.suggestedStage);
   if (!parsed) return { handled: false as const, reason: "unrecognized_reply" };
@@ -389,6 +404,9 @@ export async function handleStageConfirmationReaction(threadTs: string, reaction
 
   const suggestion = await findStageSuggestionByConfirmationThread(threadTs);
   if (!suggestion) return { handled: false as const, reason: "no_pending_suggestion" };
+  if (suggestion.source === "pulse" && !suggestion.confirmationPostedAt) {
+    return { handled: false as const, reason: "pulse_confirmation_not_posted" };
+  }
 
   const caseId = await getCaseIdForSuggestion(suggestion.id);
   if (!caseId) return { handled: false as const, reason: "case_not_found" };

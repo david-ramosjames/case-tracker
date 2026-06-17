@@ -1,5 +1,5 @@
 import { getAggregatedResultFromDisbursements } from "@/lib/disbursements";
-import { deriveResultFeePercent } from "@/lib/fee-percent";
+import { deriveForecastFeePercent, resolveSettledFeePercent } from "@/lib/fee-percent";
 import {
   type CaseStage,
   type CaseStatus,
@@ -141,6 +141,25 @@ export const EXPECTED_LITIGATION_FILTER_OPTIONS = [
   { value: "Expect", label: "Expected" },
   { value: "Lit", label: "Lit" },
 ] as const;
+
+export const NOT_SET_FILTER_VALUE = "__not-set__";
+
+export function notSetFilterOption() {
+  return { value: NOT_SET_FILTER_VALUE, label: "Not set" } as const;
+}
+
+export function matchesOptionalFieldFilter(filter: string, value: string | null | undefined) {
+  if (filter === "all") return true;
+  if (filter === NOT_SET_FILTER_VALUE) return value == null || value.trim() === "";
+  return value === filter;
+}
+
+export function matchesTargetPeriodFilter(filter: string, value: string | null | undefined) {
+  if (filter === "all") return true;
+  const standard = toStandardTargetPeriodLabel(value);
+  if (filter === NOT_SET_FILTER_VALUE) return standard == null;
+  return standard === filter;
+}
 
 export function matchesExpectedLitigationFilter(filter: string, value: ExpectedLitigationStatus | null) {
   if (filter === "all") return true;
@@ -353,7 +372,15 @@ export function applyDerivedSettlementResult<
     });
   }
 
-  const feePercent = deriveResultFeePercent(tracker);
+  const feePercent =
+    tracker.caseStage === "Settled"
+      ? resolveSettledFeePercent({
+          feePercent: withWorkflow.feePercent,
+          expectedLitigation: tracker.expectedLitigation,
+          referralFee: tracker.referralFee,
+        })
+      : deriveForecastFeePercent(tracker);
+
   return {
     ...withWorkflow,
     feePercent,

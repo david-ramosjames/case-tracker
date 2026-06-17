@@ -17,11 +17,10 @@ import {
   caseTypeSelectOptions,
   CASE_SIZE_OPTIONS,
   deriveCaseSizeFromMinimumValue,
-  EXPECTED_LITIGATION_FILTER_OPTIONS,
-  EXPECTED_LITIGATION_OPTIONS,
   coerceExpectedLitigationForStage,
-  formatExpectedLitigationLabel,
-  matchesExpectedLitigationFilter,
+  matchesOptionalFieldFilter,
+  matchesTargetPeriodFilter,
+  notSetFilterOption,
   LIABILITY_OPTIONS,
   getTargetPeriodFilterOptions,
   getTargetPeriodSelectOptions,
@@ -29,7 +28,7 @@ import {
 } from "@/lib/case-options";
 import { CaseAttorneyScoreCell } from "@/components/attorney-score/attorney-score";
 import { getCaseAttorneyScore } from "@/lib/attorney-score";
-import { getCaseCompletionScore } from "@/lib/calculations";
+import { deriveResultFeePercent, getCaseCompletionScore } from "@/lib/calculations";
 import { getCasePipelineFilter, type CasePipelineFilter, type ViewerContext } from "@/lib/auth/access";
 import {
   getCaseListQualityFilterLabel,
@@ -42,11 +41,10 @@ import {
   type CaseRecord,
   type CaseStage,
   type CaseTrackerSettings,
-  type ExpectedLitigationStatus,
   type TrackerEntry,
   type TrackerUpdateInput,
 } from "@/lib/types";
-import { cn, formatDate, formatOptionalDate } from "@/lib/utils";
+import { cn, formatDate, formatOptionalDate, parseCalendarDate } from "@/lib/utils";
 import { cleanCaseNumber, compareCaseNumbers } from "@/lib/csv/parse";
 import { type ReactNode, type RefObject, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
 
@@ -98,7 +96,6 @@ export function CaseTable({
   const [caseType, setCaseType] = useState("all");
   const [liability, setLiability] = useState("all");
   const [caseSize, setCaseSize] = useState("all");
-  const [expectedLitigation, setExpectedLitigation] = useState("all");
   const [quarter, setQuarter] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("attorneyScore");
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
@@ -134,7 +131,6 @@ export function CaseTable({
     quarter !== "all",
     caseSize !== "all",
     stage !== "all",
-    expectedLitigation !== "all",
     qualityFilter != null,
   ].filter(Boolean).length;
 
@@ -172,13 +168,9 @@ export function CaseTable({
         const pipeline = getCasePipelineFilter(record, goals);
         if (status !== "all" && pipeline !== status) return false;
         if (caseType !== "all" && record.shared.caseType !== caseType) return false;
-        if (liability !== "all" && record.tracker.liability !== liability) return false;
-        if (caseSize !== "all" && record.tracker.caseSize !== caseSize) return false;
-        if (!matchesExpectedLitigationFilter(
-          expectedLitigation,
-          coerceExpectedLitigationForStage(record.tracker.caseStage, record.tracker.expectedLitigation),
-        )) return false;
-        if (quarter !== "all" && toStandardTargetPeriodLabel(record.tracker.targetResolutionQuarter) !== quarter) return false;
+        if (liability !== "all" && !matchesOptionalFieldFilter(liability, record.tracker.liability)) return false;
+        if (caseSize !== "all" && !matchesOptionalFieldFilter(caseSize, record.tracker.caseSize)) return false;
+        if (quarter !== "all" && !matchesTargetPeriodFilter(quarter, record.tracker.targetResolutionQuarter)) return false;
         if (qualityFilter && !matchesCaseListQualityFilter(record, qualityFilter, settings)) return false;
 
         return true;
@@ -219,8 +211,8 @@ export function CaseTable({
         }
 
         if (sortKey === "dol") {
-          const aTime = a.shared.dateOfIncident ? new Date(a.shared.dateOfIncident).getTime() : 0;
-          const bTime = b.shared.dateOfIncident ? new Date(b.shared.dateOfIncident).getTime() : 0;
+          const aTime = a.shared.dateOfIncident ? (parseCalendarDate(a.shared.dateOfIncident)?.getTime() ?? 0) : 0;
+          const bTime = b.shared.dateOfIncident ? (parseCalendarDate(b.shared.dateOfIncident)?.getTime() ?? 0) : 0;
           const cmp = aTime - bTime;
           return cmp !== 0 ? dir * cmp : tieBreak();
         }
@@ -237,7 +229,7 @@ export function CaseTable({
         const cmp = aValue - bValue;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [attorneyIds, caseSize, caseType, expectedLitigation, goals, liability, paralegal, qualityFilter, quarter, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
+  }, [attorneyIds, caseSize, caseType, goals, liability, paralegal, qualityFilter, quarter, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
 
   function requestSort(nextKey: SortKey) {
     if (nextKey === sortKey) {
@@ -272,7 +264,6 @@ export function CaseTable({
     setCaseType("all");
     setLiability("all");
     setCaseSize("all");
-    setExpectedLitigation("all");
     setQuarter("all");
     setQualityFilter(null);
   }
@@ -455,7 +446,7 @@ export function CaseTable({
     );
   }
 
-  function updateTrackerField<K extends "caseStage" | "targetResolutionQuarter" | "liability" | "minimumValue" | "referralFee" | "policyLimits" | "expectedLitigation">(
+  function updateTrackerField<K extends "caseStage" | "targetResolutionQuarter" | "liability" | "minimumValue" | "referralFee" | "policyLimits">(
     recordId: string,
     key: K,
     value: TrackerEntry[K],
@@ -467,21 +458,24 @@ export function CaseTable({
         if (record.shared.id !== recordId) return record;
 
         const nextStage = key === "caseStage" ? (value as CaseStage) : record.tracker.caseStage;
-        const nextExpectedLitigation =
-          key === "expectedLitigation"
-            ? (value as TrackerEntry["expectedLitigation"])
-            : key === "caseStage" && value === "Lit"
-              ? "Lit"
-              : record.tracker.expectedLitigation;
-        const tracker = {
+        const tracker: TrackerEntry = {
           ...record.tracker,
           [key]: value,
-          expectedLitigation: coerceExpectedLitigationForStage(nextStage, nextExpectedLitigation),
+          ...(key === "caseStage"
+            ? { expectedLitigation: coerceExpectedLitigationForStage(nextStage, record.tracker.expectedLitigation) }
+            : {}),
           ...(key === "minimumValue"
             ? { caseSize: deriveCaseSizeFromMinimumValue(value as number | null) }
             : {}),
         };
-        persistPatch = buildTrackerPersistPatch(record, key, value, tracker.expectedLitigation);
+
+        if (key === "caseStage" || key === "referralFee" || key === "minimumValue") {
+          tracker.estimatedFeeValue = tracker.minimumValue
+            ? Math.round(tracker.minimumValue * deriveResultFeePercent(tracker))
+            : tracker.estimatedFeeValue;
+        }
+
+        persistPatch = buildTrackerPersistPatch(record, key, value, tracker);
         return {
           ...record,
           tracker,
@@ -498,18 +492,23 @@ export function CaseTable({
     }
   }
 
-  function buildTrackerPersistPatch<K extends "caseStage" | "targetResolutionQuarter" | "liability" | "minimumValue" | "referralFee" | "policyLimits" | "expectedLitigation">(
+  function buildTrackerPersistPatch<K extends "caseStage" | "targetResolutionQuarter" | "liability" | "minimumValue" | "referralFee" | "policyLimits">(
     record: CaseRecord,
     key: K,
     value: TrackerEntry[K],
-    coercedExpectedLitigation?: TrackerEntry["expectedLitigation"],
+    tracker: TrackerEntry,
   ): CaseTablePersistPatch {
     const patch: TrackerUpdateInput = { [key]: value };
     if (key === "minimumValue") {
       patch.caseSize = deriveCaseSizeFromMinimumValue(value as number | null);
+      patch.estimatedFeeValue = tracker.estimatedFeeValue ?? undefined;
     }
     if (key === "caseStage") {
-      patch.expectedLitigation = coercedExpectedLitigation ?? record.tracker.expectedLitigation;
+      patch.expectedLitigation = tracker.expectedLitigation ?? undefined;
+      patch.estimatedFeeValue = tracker.estimatedFeeValue ?? undefined;
+    }
+    if (key === "referralFee") {
+      patch.estimatedFeeValue = tracker.estimatedFeeValue ?? undefined;
     }
     return { tracker: patch };
   }
@@ -634,6 +633,7 @@ export function CaseTable({
                     onChange={setLiability}
                     options={[
                       { value: "all", label: "All" },
+                      notSetFilterOption(),
                       ...LIABILITY_OPTIONS.map((item) => ({ value: item, label: item })),
                     ]}
                   />
@@ -645,6 +645,7 @@ export function CaseTable({
                     onChange={setQuarter}
                     options={[
                       { value: "all", label: "All" },
+                      notSetFilterOption(),
                       ...quarterFilterOptions.map((item) => ({ value: item, label: item })),
                     ]}
                   />
@@ -656,6 +657,7 @@ export function CaseTable({
                     onChange={setCaseSize}
                     options={[
                       { value: "all", label: "All" },
+                      notSetFilterOption(),
                       ...CASE_SIZE_OPTIONS.map((item) => ({ value: item, label: item })),
                     ]}
                   />
@@ -671,17 +673,6 @@ export function CaseTable({
                     options={[
                       { value: "all", label: "All" },
                       ...CASE_STAGE_OPTIONS.map((item) => ({ value: item, label: item })),
-                    ]}
-                  />
-                </TableHead>
-                <TableHead className="w-44 align-top">
-                  <HeaderFilter
-                    label="Expected Lit"
-                    value={expectedLitigation}
-                    onChange={setExpectedLitigation}
-                    options={[
-                      { value: "all", label: "All" },
-                      ...EXPECTED_LITIGATION_FILTER_OPTIONS.map((item) => ({ value: item.value, label: item.label })),
                     ]}
                   />
                 </TableHead>
@@ -764,24 +755,6 @@ export function CaseTable({
                         {CASE_STAGE_OPTIONS.map((option) => (
                           <option key={option} value={option}>{option}</option>
                         ))}
-                      </InlineSelect>
-                    </TableCell>
-                    <TableCell>
-                      <InlineSelect
-                        value={coerceExpectedLitigationForStage(record.tracker.caseStage, record.tracker.expectedLitigation) ?? ""}
-                        disabled={record.tracker.caseStage === "Lit"}
-                        onChange={(value) => updateTrackerField(record.shared.id, "expectedLitigation", (value || null) as TrackerEntry["expectedLitigation"])}
-                      >
-                        {record.tracker.caseStage === "Lit" ? (
-                          <option value="Lit">{formatExpectedLitigationLabel("Lit")}</option>
-                        ) : (
-                          <>
-                            <option value="">{formatExpectedLitigationLabel(null)}</option>
-                            {EXPECTED_LITIGATION_OPTIONS.map((option) => (
-                              <option key={option} value={option}>{formatExpectedLitigationLabel(option)}</option>
-                            ))}
-                          </>
-                        )}
                       </InlineSelect>
                     </TableCell>
                     <TableCell>

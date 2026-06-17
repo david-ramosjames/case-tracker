@@ -128,6 +128,8 @@ export type SettlementResult = {
   checkDisbursedAt: string | null;
   disburseDate: string | null;
   resultQuarter: string | null;
+  /** When true, amounts/dates came from CSV financial backfill — sheet sync skips this case. */
+  financialBackfillLocked?: boolean;
 };
 
 export type TrackerEntry = {

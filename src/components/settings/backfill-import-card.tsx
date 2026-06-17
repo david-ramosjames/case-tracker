@@ -125,36 +125,41 @@ export function BackfillImportCard() {
       let buffer = "";
       let finalResult: CaseBackfillImportResult | null = null;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      function handleStreamLine(line: string) {
+        if (!line.trim()) return;
+        const event = JSON.parse(line) as
+          | ({ type: "progress" } & ImportProgress)
+          | { type: "complete"; result: CaseBackfillImportResult }
+          | { type: "error"; error: string };
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          const event = JSON.parse(line) as
-            | ({ type: "progress" } & ImportProgress)
-            | { type: "complete"; result: CaseBackfillImportResult }
-            | { type: "error"; error: string };
-
-          if (event.type === "progress") {
-            setImportProgress({
-              processed: event.processed,
-              total: event.total,
-              updated: event.updated,
-              failed: event.failed,
-              currentCaseNumber: event.currentCaseNumber,
-            });
-          } else if (event.type === "complete") {
-            finalResult = event.result;
-          } else if (event.type === "error") {
-            throw new Error(event.error);
-          }
+        if (event.type === "progress") {
+          setImportProgress({
+            processed: event.processed,
+            total: event.total,
+            updated: event.updated,
+            failed: event.failed,
+            currentCaseNumber: event.currentCaseNumber,
+          });
+        } else if (event.type === "complete") {
+          finalResult = event.result;
+        } else if (event.type === "error") {
+          throw new Error(event.error);
         }
       }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (value) buffer += decoder.decode(value, { stream: !done });
+
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) handleStreamLine(line);
+
+        if (done) break;
+      }
+
+      buffer += decoder.decode();
+      if (buffer.trim()) handleStreamLine(buffer);
 
       if (!finalResult) throw new Error("Import finished without a result.");
       setImportResult(finalResult);

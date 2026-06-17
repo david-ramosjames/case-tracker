@@ -28,8 +28,6 @@ function completenessFieldExampleLine(fieldId: CompletenessFieldId) {
       return "Referral fee: 33%";
     case "policyLimits":
       return "Policy limits: 100000";
-    case "expectedLit":
-      return "Expected lit: Pre";
     case "sources":
       return "Sources: Updated treatment status...";
   }

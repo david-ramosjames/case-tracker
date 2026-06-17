@@ -25,9 +25,7 @@ import {
   CHECK_STATUS_OPTIONS,
   CLOSING_STATUS_OPTIONS,
   DISBURSED_STATUS_OPTIONS,
-  EXPECTED_LITIGATION_OPTIONS,
   coerceExpectedLitigationForStage,
-  formatExpectedLitigationLabel,
   LIABILITY_OPTIONS,
   RELEASE_STATUS_OPTIONS,
   getTargetPeriodSelectOptions,
@@ -48,6 +46,7 @@ import { ResultDateInput } from "@/components/cases/result-date-input";
 import { dateInputToDateOnly, toDateInput } from "@/lib/date-input";
 import { disbursementWeight } from "@/lib/disbursements";
 import { type SessionUser } from "@/lib/auth/types";
+import { STAGE_SLACK_LABELS } from "@/lib/slack/enum-replies";
 import { formatSlackChannelLabel, getSlackChannelArchiveUrl } from "@/lib/slack/links";
 import {
   type ActivityLogEntry,
@@ -138,6 +137,11 @@ export function CaseDetailView({
   const slackChannelUrl = slackChannel ? getSlackChannelArchiveUrl(slackChannel) : null;
   const slackChannelLabel = slackChannel ? formatSlackChannelLabel(slackChannel.slackChannelName) : null;
 
+  function recalcEstimatedFee(next: TrackerEntry) {
+    if (!next.minimumValue) return next.estimatedFeeValue;
+    return Math.round(next.minimumValue * deriveResultFeePercent(next));
+  }
+
   function updateField<K extends keyof TrackerEntry>(key: K, value: TrackerEntry[K]) {
     setTracker((current) => {
       const next = { ...current, [key]: value };
@@ -148,7 +152,10 @@ export function CaseDetailView({
           status: deriveCaseStatusFromTracker(next.caseStage, next.result.disbursedStatus),
         }));
       }
-      if (key === "caseStage" || key === "expectedLitigation" || key === "referralFee") {
+      if (key === "caseStage" || key === "referralFee" || key === "minimumValue") {
+        next.estimatedFeeValue = recalcEstimatedFee(next);
+      }
+      if (key === "caseStage" || key === "referralFee") {
         return { ...next, result: applyDerivedSettlementResult(next.result, next, { skipDisbursementAggregation: true }) };
       }
       return next;
@@ -346,7 +353,7 @@ export function CaseDetailView({
     return { tracker: body.tracker, activity: body.activity };
   }
 
-  async function saveTracker(options?: { markReviewed?: boolean }) {
+  async function saveTracker(options?: { markReviewed?: boolean; exitOverviewEdit?: boolean }) {
     const markReviewed = options?.markReviewed ?? true;
     const now = new Date().toISOString();
     const nextTracker = {
@@ -374,8 +381,13 @@ export function CaseDetailView({
         setActivity((current) => [savedActivity, ...current]);
       }
       setSavedAt(now);
+      if (options?.exitOverviewEdit) {
+        setIsOverviewEditing(false);
+      }
+      return true;
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to save tracker entry.");
+      return false;
     } finally {
       setIsSaving(false);
     }
@@ -436,7 +448,6 @@ export function CaseDetailView({
                 current.minimumValue *
                   deriveResultFeePercent({
                     caseStage: signal.suggestedStage,
-                    expectedLitigation: signal.suggestedExpectedLitigation,
                     referralFee: current.referralFee,
                   }),
               )
@@ -627,7 +638,7 @@ export function CaseDetailView({
                 Suggested Stage Update
               </CardTitle>
               <CardDescription>
-                The system can use Slack, workflow, and matter events to suggest changes. Attorneys only need to confirm or dismiss.
+                Confirm or dismiss — the tracker is not updated until you do. These usually come from the daily pulse recap.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -637,7 +648,13 @@ export function CaseDetailView({
                     <Badge variant="pink">{signal.source}</Badge>
                     <Badge variant="outline">{signal.confidence} confidence</Badge>
                     <span className="text-sm font-semibold text-navy-950">
-                      Looks like this case may now be in {signal.suggestedExpectedLitigation.toLowerCase()}.
+                      Suggested stage: {STAGE_SLACK_LABELS[signal.suggestedStage] ?? signal.suggestedStage}
+                      {record.tracker.caseStage !== signal.suggestedStage ? (
+                        <span className="font-normal text-muted-foreground">
+                          {" "}
+                          (currently {STAGE_SLACK_LABELS[record.tracker.caseStage] ?? record.tracker.caseStage})
+                        </span>
+                      ) : null}
                     </span>
                   </div>
                   <p className="text-sm leading-6 text-muted-foreground">{signal.excerpt}</p>
@@ -715,10 +732,29 @@ export function CaseDetailView({
                   Amber fields are your responsibility as attorney. Gray fields sync from DocketFlow or are calculated by the tracker.
                 </CardDescription>
               </div>
-              <Button variant={isOverviewEditing ? "pink" : "outline"} size="sm" onClick={() => setIsOverviewEditing((current) => !current)}>
-                <Pencil className="h-4 w-4" />
-                {isOverviewEditing ? "View" : "Edit"}
-              </Button>
+              <div className="flex shrink-0 items-center gap-2">
+                {isOverviewEditing ? (
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => setIsOverviewEditing(false)} disabled={isSaving}>
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="pink"
+                      size="sm"
+                      disabled={isSaving}
+                      onClick={() => saveTracker({ exitOverviewEdit: true })}
+                    >
+                      <Save className="h-4 w-4" />
+                      {isSaving ? "Saving..." : "Save"}
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="outline" size="sm" onClick={() => setIsOverviewEditing(true)}>
+                    <Pencil className="h-4 w-4" />
+                    Edit
+                  </Button>
+                )}
+              </div>
             </div>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -748,14 +784,8 @@ export function CaseDetailView({
                       <p className="mt-1 text-sm font-medium text-navy-950">{tracker.caseSize ?? "Not set"}</p>
                       <p className="mt-1 text-xs text-muted-foreground">Calculated from minimum value.</p>
                     </div>
-                    <Info
-                      label="Expected Lit"
-                      value={formatExpectedLitigationLabel(
-                        coerceExpectedLitigationForStage(tracker.caseStage, tracker.expectedLitigation),
-                      )}
-                    />
                     <Info label="Policy Source" value={tracker.policyInfoSource ?? "Not set"} />
-                    <Info label="Projected firm fee" value={formatCurrency(tracker.estimatedFeeValue)} />
+                    <Info label="Projected firm fee" value={formatCurrency(getProjectedFeeValue(record))} />
                   </div>
                 </div>
 
@@ -815,42 +845,6 @@ export function CaseDetailView({
                         ))}
                       </Select>
                     </Field>
-                    <Field label="Expected Lit">
-                      <Select
-                        value={coerceExpectedLitigationForStage(tracker.caseStage, tracker.expectedLitigation) ?? ""}
-                        disabled={tracker.caseStage === "Lit"}
-                        onChange={(event) => {
-                          const expectedLitigation = event.target.value as TrackerEntry["expectedLitigation"];
-                          updateField("expectedLitigation", expectedLitigation || null);
-                          if (tracker.minimumValue) {
-                            updateField(
-                              "estimatedFeeValue",
-                              Math.round(
-                                tracker.minimumValue *
-                                  deriveResultFeePercent({
-                                    caseStage: tracker.caseStage,
-                                    expectedLitigation: expectedLitigation || null,
-                                    referralFee: tracker.referralFee,
-                                  }),
-                              ),
-                            );
-                          }
-                        }}
-                      >
-                        {tracker.caseStage === "Lit" ? (
-                          <option value="Lit">{formatExpectedLitigationLabel("Lit")}</option>
-                        ) : (
-                          <>
-                            <option value="">{formatExpectedLitigationLabel(null)}</option>
-                            {EXPECTED_LITIGATION_OPTIONS.map((status) => (
-                              <option key={status} value={status}>
-                                {formatExpectedLitigationLabel(status)}
-                              </option>
-                            ))}
-                          </>
-                        )}
-                      </Select>
-                    </Field>
                     <Field label="Source of Policy Information">
                       <Input value={tracker.policyInfoSource ?? ""} placeholder="Declarations page, carrier email, adjuster call..." onChange={(event) => updateField("policyInfoSource", event.target.value || null)} />
                     </Field>
@@ -869,9 +863,6 @@ export function CaseDetailView({
                           </option>
                         ))}
                       </Select>
-                    </Field>
-                    <Field label="Projected firm fee">
-                      <FormattedNumberInput prefix="$" value={tracker.estimatedFeeValue} onValueChange={(value) => updateField("estimatedFeeValue", value)} />
                     </Field>
                     <Field className="md:col-span-2" label="Forecast notes">
                       <Textarea value={tracker.forecastNotes} onChange={(event) => updateField("forecastNotes", event.target.value)} />
@@ -926,10 +917,6 @@ export function CaseDetailView({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-3">
-                  <Button onClick={() => saveTracker()} disabled={isSaving}>
-                    <Save className="h-4 w-4" />
-                    {isSaving ? "Saving..." : "Save and mark reviewed"}
-                  </Button>
                   {savedAt ? (
                     <span className="inline-flex items-center gap-2 text-sm text-emerald-700">
                       <CheckCircle2 className="h-4 w-4" />

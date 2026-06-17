@@ -2,6 +2,10 @@ import { buildFieldValidationRowPatch } from "@/lib/attorney-score";
 import { caseNumbersMatch, cleanCaseNumber } from "@/lib/csv/parse";
 import { disbursementWeight, getAggregatedResultFromDisbursements } from "@/lib/disbursements";
 import { parseCaseBackfillCsv, type ParsedCaseBackfillRow } from "@/lib/csv/case-backfill";
+import {
+  parseSettlementFinancialBackfillCsv,
+  type ParsedSettlementFinancialBackfillRow,
+} from "@/lib/csv/settlement-financial-backfill";
 import { trackerTouchesSourcesLit } from "@/lib/slack/reminders";
 import {
   notifySlackCaseStageUpdated,
@@ -606,6 +610,145 @@ export async function importCaseBackfillRows(
   };
 }
 
+export async function importSettlementFinancialBackfillCsv(
+  csvText: string,
+  options: {
+    actor?: TrackerActor;
+    dryRun?: boolean;
+    onProgress?: (progress: CaseBackfillImportProgress) => void;
+  } = {},
+): Promise<CaseBackfillImportResult> {
+  const parsedRows = parseSettlementFinancialBackfillCsv(csvText);
+  return importSettlementFinancialBackfillRows(parsedRows, options);
+}
+
+export async function importSettlementFinancialBackfillRows(
+  parsedRows: ParsedSettlementFinancialBackfillRow[],
+  options: {
+    actor?: TrackerActor;
+    dryRun?: boolean;
+    cases?: CaseRecord[];
+    onProgress?: (progress: CaseBackfillImportProgress) => void;
+  } = {},
+): Promise<CaseBackfillImportResult> {
+  const cases = options.cases ?? (await getCases());
+  const byCaseNumber = buildCaseBackfillLookup(cases);
+  const admin = createSupabaseAdminClient();
+
+  const preview: CaseBackfillImportResult["preview"] = [];
+  const unmatched: string[] = [];
+  const failed: CaseBackfillImportResult["failed"] = [];
+  let matched = 0;
+  let updated = 0;
+  let skipped = 0;
+
+  for (let index = 0; index < parsedRows.length; index += 1) {
+    const row = parsedRows[index];
+    const existing = byCaseNumber.get(row.caseNumber);
+    const fieldCount = Object.keys(row.tracker).length + Object.keys(row.result).length;
+
+    preview.push({ caseNumber: row.caseNumber, matched: Boolean(existing), fieldCount });
+
+    if (!existing) {
+      unmatched.push(row.caseNumber);
+      options.onProgress?.({
+        processed: index + 1,
+        total: parsedRows.length,
+        updated,
+        failed: failed.length,
+        currentCaseNumber: row.caseNumber,
+      });
+      continue;
+    }
+
+    matched += 1;
+    if (fieldCount === 0) {
+      skipped += 1;
+      options.onProgress?.({
+        processed: index + 1,
+        total: parsedRows.length,
+        updated,
+        failed: failed.length,
+        currentCaseNumber: row.caseNumber,
+      });
+      continue;
+    }
+
+    if (!options.dryRun) {
+      const caseId = existing.shared.id;
+
+      try {
+        const mergedTracker = mergeTrackerImport(existing.tracker, row.tracker);
+        const mergedResult = { ...existing.tracker.result, ...row.result };
+        await updateTrackerEntry(
+          caseId,
+          {
+            ...mergedTracker,
+            result: mergedResult,
+          },
+          {
+            actor: options.actor,
+            markReviewed: false,
+            changeInput: {
+              ...row.tracker,
+              result: mergedResult,
+            },
+          },
+        );
+
+        if (admin) {
+          const trackerEntryId = existing.tracker.id;
+          const linkedCaseId = isLinkedDocketFlowCase(existing) ? existing.shared.id : null;
+          if (row.lockFinancialBackfill) {
+            const filter = linkedCaseId
+              ? `tracker_entry_id.eq.${trackerEntryId},case_id.eq.${linkedCaseId}`
+              : `tracker_entry_id.eq.${trackerEntryId}`;
+            const { error: lockError } = await admin
+              .from("case_tracker_results")
+              .update({ financial_backfill_locked: true })
+              .or(filter);
+            if (lockError) throw new Error(lockError.message);
+          }
+          if (row.lockReferralFee) {
+            const { error: referralLockError } = await admin
+              .from("case_tracker_entries")
+              .update({ referral_fee_backfill_locked: true })
+              .eq("id", trackerEntryId);
+            if (referralLockError) throw new Error(referralLockError.message);
+          }
+        }
+
+        updated += 1;
+      } catch (error) {
+        failed.push({
+          caseNumber: row.caseNumber,
+          message: error instanceof Error ? error.message : "Import failed for this row.",
+        });
+      }
+    }
+
+    options.onProgress?.({
+      processed: index + 1,
+      total: parsedRows.length,
+      updated,
+      failed: failed.length,
+      currentCaseNumber: row.caseNumber,
+    });
+  }
+
+  return {
+    totalRows: parsedRows.length,
+    matched,
+    updated: options.dryRun ? 0 : updated,
+    skipped,
+    unmatched,
+    unlinked: [],
+    failed,
+    preview,
+    dryRun: Boolean(options.dryRun),
+  };
+}
+
 export async function updateSharedCaseFields(
   caseId: string,
   input: { status?: CaseStatus; caseType?: string; dateSigned?: string; dateOfIncident?: string | null },
@@ -1059,6 +1202,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
   let settlementsUpdated = 0;
   let stagesAutoSettled = 0;
   let skippedNoTracker = 0;
+  let skippedFinancialLocked = 0;
   const syncedAt = new Date().toISOString();
 
   for (const item of cases) {
@@ -1074,6 +1218,21 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     const resolvedCaseNumber = cleanCaseNumber(toString(trackerRow.case_number, "") || caseNumber);
     const trackerEntryId = toString(trackerRow.id, "");
     const linkedCaseId = linkedDocketFlowCaseId(trackerRow);
+
+    const { data: existingResultForLock } = await admin
+      .from("case_tracker_results")
+      .select("financial_backfill_locked")
+      .or(
+        linkedCaseId
+          ? `tracker_entry_id.eq.${trackerEntryId},case_id.eq.${linkedCaseId}`
+          : `tracker_entry_id.eq.${trackerEntryId}`,
+      )
+      .maybeSingle();
+
+    if (existingResultForLock?.financial_backfill_locked) {
+      skippedFinancialLocked += 1;
+      continue;
+    }
 
     const attorneyExpected = Math.max(1, toNumber(trackerRow.expected_disbursement_count) ?? 1);
     const totalSlots = Math.max(attorneyExpected, item.sheetRowCount);
@@ -1229,7 +1388,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     }
   }
 
-  return { casesProcessed, disbursementsSynced, settlementsUpdated, stagesAutoSettled, skippedNoTracker };
+  return { casesProcessed, disbursementsSynced, settlementsUpdated, stagesAutoSettled, skippedNoTracker, skippedFinancialLocked };
 }
 
 export async function createTrackerComment(
@@ -1894,6 +2053,7 @@ function rowToResult(row: ResultRow | null): SettlementResult {
     checkDisbursedAt: toStringOrNull(row?.check_disbursed_at),
     disburseDate: toStringOrNull(row?.disburse_date),
     resultQuarter: toStringOrNull(row?.result_quarter),
+    financialBackfillLocked: toBoolean(row?.financial_backfill_locked, false),
   });
 }
 
@@ -2130,10 +2290,12 @@ function normalizeOptionalDate(value: string | number | null | undefined): strin
   if (typeof value === "number") {
     const milliseconds = value > 10_000_000_000 ? value : value * 1000;
     const parsed = new Date(milliseconds);
-    return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+    return Number.isNaN(parsed.getTime()) ? null : toDateOnly(parsed.toISOString());
   }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+  const trimmed = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : toDateOnly(parsed.toISOString());
 }
 
 function toDateOnly(value: string) {

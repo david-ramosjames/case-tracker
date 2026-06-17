@@ -141,13 +141,11 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
         tracker.minimumValue = minimumValue;
         tracker.estimatedSettlementValue = minimumValue;
         tracker.caseSize = deriveCaseSizeFromMinimumValue(minimumValue);
-        const normalizedExpected = expectedLit ? normalizeExpectedLitigation(expectedLit, tracker.caseStage ?? "Onboarding") : null;
         if (minimumValue != null) {
           tracker.estimatedFeeValue = Math.round(
             minimumValue *
               deriveResultFeePercent({
                 caseStage: tracker.caseStage ?? "Onboarding",
-                expectedLitigation: normalizedExpected,
                 referralFee: tracker.referralFee ?? null,
               }),
           );
@@ -247,7 +245,6 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       if (result.feePercent == null && (result.settlementAmount != null || result.settlementDate)) {
         result.feePercent = deriveResultFeePercent({
           caseStage: tracker.caseStage ?? "Onboarding",
-          expectedLitigation: tracker.expectedLitigation ?? null,
           referralFee: tracker.referralFee ?? null,
         });
       }

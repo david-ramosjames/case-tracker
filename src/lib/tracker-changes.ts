@@ -41,6 +41,7 @@ const RESULT_FIELD_LABELS: Record<keyof SettlementResult, string> = {
   checkDisbursedAt: "Check disbursed",
   disburseDate: "Disburse date",
   resultQuarter: "Result quarter",
+  financialBackfillLocked: "Financial backfill locked",
 };
 
 const SHARED_FIELD_LABELS: Record<string, string> = {

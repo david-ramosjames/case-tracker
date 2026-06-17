@@ -30,11 +30,11 @@ import {
 } from "@/lib/types";
 import { daysSince, getCurrentQuarter, getQuarterElapsedPercentage, getYearElapsedPercentage } from "@/lib/utils";
 
-import { deriveResultFeePercent } from "@/lib/fee-percent";
+import { deriveForecastFeePercent, deriveResultFeePercent, resolveSettledFeePercent } from "@/lib/fee-percent";
 import { QUARTERLY_REVIEW_DAYS, SOURCES_LIT_REVIEW_DAYS } from "@/lib/slack/config";
 import { normalizeTargetQuarter } from "@/lib/target-quarter";
 
-export { deriveResultFeePercent, referralFeeToDecimal, wasEverInLitigation } from "@/lib/fee-percent";
+export { deriveForecastFeePercent, deriveResultFeePercent, referralFeeToDecimal, resolveSettledFeePercent, wasEverInLitigation } from "@/lib/fee-percent";
 
 const QUARTERLY_CHECK_IN_FIELDS = ["targetResolutionQuarter", "minimumValue"] as const;
 const SOURCES_LIT_FIELDS = ["sources", "injuries", "caseDescription"] as const;
@@ -143,7 +143,6 @@ export function getCaseCompletionChecks(record: CaseRecord): CompletionCheck[] {
     { id: "sources", complete: Boolean(tracker.sources?.trim()) },
     { id: "description", complete: Boolean(tracker.caseDescription?.trim()) },
     { id: "confidence", complete: Boolean(tracker.confidenceLevel) },
-    { id: "expected-lit", complete: Boolean(tracker.expectedLitigation) },
   ];
 }
 
@@ -262,7 +261,14 @@ export function sum(values: Array<number | null | undefined>) {
 }
 
 export function getFeePercent(record: CaseRecord) {
-  return deriveResultFeePercent(record.tracker);
+  if (record.tracker.caseStage === "Settled") {
+    return resolveSettledFeePercent({
+      feePercent: record.tracker.result.feePercent,
+      expectedLitigation: record.tracker.expectedLitigation,
+      referralFee: record.tracker.referralFee,
+    });
+  }
+  return deriveForecastFeePercent(record.tracker);
 }
 
 export function getProjectedFeeValue(record: CaseRecord) {

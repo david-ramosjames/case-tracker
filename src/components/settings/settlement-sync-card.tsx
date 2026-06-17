@@ -21,6 +21,7 @@ export function SettlementSyncCard() {
         disbursementsSynced?: number;
         settlementsUpdated?: number;
         skippedNoTracker?: number;
+        skippedFinancialLocked?: number;
         error?: string;
       };
       if (!response.ok) throw new Error(body.error ?? "Sync failed.");
@@ -28,8 +29,12 @@ export function SettlementSyncCard() {
         body.skippedNoTracker && body.skippedNoTracker > 0
           ? ` ${body.skippedNoTracker} sheet case(s) had no matching tracker row.`
           : "";
+      const lockedNote =
+        body.skippedFinancialLocked && body.skippedFinancialLocked > 0
+          ? ` ${body.skippedFinancialLocked} case(s) skipped (financial CSV backfill is source of truth).`
+          : "";
       setMessage(
-        `Synced ${body.disbursementsSynced ?? 0} disbursement row(s) across ${body.casesProcessed ?? 0} case(s). Updated ${body.settlementsUpdated ?? 0} settlement/disburse fields.${skippedNote}`,
+        `Synced ${body.disbursementsSynced ?? 0} disbursement row(s) across ${body.casesProcessed ?? 0} case(s). Updated ${body.settlementsUpdated ?? 0} settlement/disburse fields.${skippedNote}${lockedNote}`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed.");
