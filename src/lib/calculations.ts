@@ -235,6 +235,7 @@ export function getAttorneyGoalProgress(records: CaseRecord[], goals: AttorneyGo
     );
     const quarterGoal = [goal.q1Goal, goal.q2Goal, goal.q3Goal, goal.q4Goal][currentQuarterNumber - 1];
     const annualProgress = goal.annualGrossGoal > 0 ? (actualGrossDisbursed / goal.annualGrossGoal) * 100 : 0;
+    const feeProgress = goal.annualRjlFeesGoal > 0 ? (actualDisbursedFees / goal.annualRjlFeesGoal) * 100 : 0;
     const quarterProgress = quarterGoal > 0 ? (actualGrossDisbursed / quarterGoal) * 100 : 0;
     const commissionableAmount = Math.max(actualDisbursedFees - goal.commissionThreshold, 0);
 
@@ -246,6 +247,7 @@ export function getAttorneyGoalProgress(records: CaseRecord[], goals: AttorneyGo
       actualDisbursedFees,
       commissionableAmount,
       annualProgress,
+      feeProgress,
       quarterProgress,
       yearElapsed,
       quarterElapsed,

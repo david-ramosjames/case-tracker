@@ -31,6 +31,20 @@ export function formatCurrency(value: number | null | undefined) {
   }).format(value);
 }
 
+export function parseNumberInput(value: string) {
+  const cleaned = String(value).replace(/[$,\s]/g, "");
+  if (!cleaned) return 0;
+  const numeric = Number(cleaned);
+  return Number.isFinite(numeric) ? Math.round(numeric) : 0;
+}
+
+export function formatNumberInput(value: string | number) {
+  if (typeof value === "string" && value.replace(/[$,\s]/g, "") === "") return "";
+  const numeric = typeof value === "number" ? Math.round(value) : parseNumberInput(value);
+  if (!Number.isFinite(numeric)) return "";
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(numeric);
+}
+
 export function formatDate(value: string | null | undefined) {
   if (!value) return "Not reviewed";
 

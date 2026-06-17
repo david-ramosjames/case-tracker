@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { type CommissionQuarterPerformanceRow } from "@/lib/calculations";
+import { sum, type CommissionQuarterPerformanceRow } from "@/lib/calculations";
 import { formatCurrency } from "@/lib/utils";
 
 export function QuarterPerformanceTables({
@@ -39,6 +39,12 @@ function QuarterTable({
   description: string;
   hideTarget?: boolean;
 }) {
+  const totals = {
+    target: sum(rows.map((row) => row.target)),
+    plan: sum(rows.map((row) => row.plan)),
+    actual: sum(rows.map((row) => row.actual)),
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -66,6 +72,13 @@ function QuarterTable({
                 <TableCell>{formatCurrency(row.actual)}</TableCell>
               </TableRow>
             ))}
+            <TableRow className="bg-muted/30">
+              <TableCell className="font-semibold">Total</TableCell>
+              <TableCell className="text-sm text-muted-foreground">—</TableCell>
+              {hideTarget ? null : <TableCell className="font-semibold">{formatCurrency(totals.target)}</TableCell>}
+              <TableCell className="font-semibold">{formatCurrency(totals.plan)}</TableCell>
+              <TableCell className="font-semibold">{formatCurrency(totals.actual)}</TableCell>
+            </TableRow>
           </TableBody>
         </Table>
       </CardContent>

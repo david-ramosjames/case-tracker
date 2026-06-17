@@ -25,7 +25,7 @@ import { Select } from "@/components/ui/select";
 import { getGoalYearOptions } from "@/lib/case-options";
 import { COMMISSION_PERIOD_MONTH_OPTIONS, COMMISSION_YEAR_MONTH_OPTIONS } from "@/lib/commission-year";
 import { type AppUser, type AttorneyGoal } from "@/lib/types";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, formatNumberInput, parseNumberInput } from "@/lib/utils";
 
 type GoalDraft = {
   attorneyId: string;
@@ -41,8 +41,7 @@ type GoalDraft = {
 };
 
 function parseGoalAmount(value: string) {
-  const numeric = Number(value.replace(/[$,\s]/g, ""));
-  return Number.isFinite(numeric) ? Math.round(numeric) : 0;
+  return parseNumberInput(value);
 }
 
 function sumDraftMonthlyGoals(draft: Pick<GoalDraft, "monthKeys" | "monthlyValues">) {
@@ -90,12 +89,12 @@ function buildDraftFromGoal(goal: AttorneyGoal): GoalDraft {
 
   return {
     attorneyId: goal.attorneyId,
-    commissionThreshold: String(Math.round(goal.commissionThreshold)),
+    commissionThreshold: goal.commissionThreshold > 0 ? formatNumberInput(goal.commissionThreshold) : "",
     endMonth: String(endMonth),
     endYear: String(endYear),
     monthCount: String(monthCount),
-    annualGrossGoalTotal: annualTotal > 0 ? String(Math.round(annualTotal)) : "",
-    annualRjlFeesGoalTotal: annualFeeTotal > 0 ? String(Math.round(annualFeeTotal)) : "",
+    annualGrossGoalTotal: annualTotal > 0 ? formatNumberInput(annualTotal) : "",
+    annualRjlFeesGoalTotal: annualFeeTotal > 0 ? formatNumberInput(annualFeeTotal) : "",
     monthKeys: period.monthKeys,
     monthlyValues: monthlyGoalInputFromResolved(
       Object.fromEntries(period.monthKeys.map((monthKey) => [monthKey, resolved[monthKey] ?? 0])),
@@ -541,11 +540,9 @@ function GoalEditorCard({
             </Select>
           </Field>
           <Field label="Commission threshold">
-            <Input
-              inputMode="decimal"
-              placeholder="0"
+            <GoalAmountInput
               value={draft.commissionThreshold}
-              onChange={(event) => onDraftChange({ ...draft, commissionThreshold: event.target.value })}
+              onChange={(value) => onDraftChange({ ...draft, commissionThreshold: value })}
             />
             <span className="mt-1 block text-[11px] leading-tight text-muted-foreground">
               RJL fees disbursed before commissions start
@@ -647,12 +644,10 @@ function GoalMetricSection({
 
       <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-end">
         <Field label={annualLabel}>
-          <Input
-            inputMode="decimal"
-            placeholder="0"
+          <GoalAmountInput
             className="sm:max-w-[11rem]"
             value={annualValue}
-            onChange={(event) => onAnnualChange(event.target.value)}
+            onChange={onAnnualChange}
           />
         </Field>
         <Button variant="outline" size="sm" className="shrink-0" onClick={onSpread} disabled={spreadDisabled}>
@@ -668,12 +663,10 @@ function GoalMetricSection({
               <span className="mb-1 block truncate text-[11px] text-muted-foreground">
                 {formatMonthKeyLabel(monthKey)}
               </span>
-              <Input
-                inputMode="decimal"
-                placeholder="0"
+              <GoalAmountInput
                 className="h-9"
                 value={monthlyValues[monthKey] ?? ""}
-                onChange={(event) => onMonthlyChange(monthKey, event.target.value)}
+                onChange={(value) => onMonthlyChange(monthKey, value)}
               />
             </label>
           ))}
@@ -692,5 +685,30 @@ function GoalMetricSection({
         ))}
       </div>
     </section>
+  );
+}
+
+function GoalAmountInput({
+  value,
+  onChange,
+  className,
+  placeholder = "0",
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+  placeholder?: string;
+}) {
+  return (
+    <Input
+      inputMode="decimal"
+      placeholder={placeholder}
+      className={className}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      onBlur={() => {
+        if (value.trim()) onChange(formatNumberInput(value));
+      }}
+    />
   );
 }

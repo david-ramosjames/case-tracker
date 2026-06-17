@@ -122,10 +122,23 @@ export function GoalsView({
               <CardContent className="space-y-4">
                 <div>
                   <div className="mb-2 flex justify-between text-sm">
-                    <span className="text-muted-foreground">Annual progress</span>
+                    <span className="text-muted-foreground">Gross progress (disbursed vs gross goal)</span>
                     <span className="font-semibold">{percent(item.annualProgress)}</span>
                   </div>
                   <Progress value={item.annualProgress} />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatCurrency(item.actualGrossDisbursed)} of {formatCurrency(item.goal.annualGrossGoal)}
+                  </p>
+                </div>
+                <div>
+                  <div className="mb-2 flex justify-between text-sm">
+                    <span className="text-muted-foreground">Fees progress (disbursed vs fees goal)</span>
+                    <span className="font-semibold">{percent(item.feeProgress)}</span>
+                  </div>
+                  <Progress value={item.feeProgress} />
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {formatCurrency(item.actualDisbursedFees)} of {formatCurrency(item.goal.annualRjlFeesGoal)}
+                  </p>
                 </div>
                 <div className="grid grid-cols-2 gap-3 text-sm lg:grid-cols-5">
                   <GoalStat label="Gross disbursed" value={formatCurrency(item.actualGrossDisbursed)} />

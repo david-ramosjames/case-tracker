@@ -8,6 +8,7 @@ import {
   type CommissionPeriodMonthCount,
 } from "@/lib/commission-year";
 import { type AttorneyGoal } from "@/lib/types";
+import { formatNumberInput, parseNumberInput } from "@/lib/utils";
 
 export type MonthlyGoals = Record<string, number>;
 
@@ -184,9 +185,9 @@ export function inferCommissionMonthCount(goal: AttorneyGoal): CommissionPeriodM
 export function parseMonthlyGoalsInput(values: Record<string, string>) {
   const monthlyGoals: MonthlyGoals = {};
   for (const [monthKey, raw] of Object.entries(values)) {
-    const numeric = Number(String(raw).replace(/[$,\s]/g, ""));
-    if (Number.isFinite(numeric) && numeric > 0) {
-      monthlyGoals[monthKey] = Math.round(numeric);
+    const numeric = parseNumberInput(String(raw));
+    if (numeric > 0) {
+      monthlyGoals[monthKey] = numeric;
     }
   }
   return monthlyGoals;
@@ -194,7 +195,7 @@ export function parseMonthlyGoalsInput(values: Record<string, string>) {
 
 export function monthlyGoalInputFromResolved(monthlyGoals: MonthlyGoals) {
   return Object.fromEntries(
-    Object.entries(monthlyGoals).map(([key, value]) => [key, value > 0 ? String(Math.round(value)) : ""]),
+    Object.entries(monthlyGoals).map(([key, value]) => [key, value > 0 ? formatNumberInput(value) : ""]),
   );
 }
 
@@ -211,7 +212,7 @@ export function spreadEvenMonthlyGoals(total: number, monthKeys: string[]) {
 
   monthKeys.forEach((monthKey, index) => {
     const amount = index === count - 1 ? perMonth + remainder : perMonth;
-    values[monthKey] = String(amount);
+    values[monthKey] = formatNumberInput(amount);
   });
 
   return values;
