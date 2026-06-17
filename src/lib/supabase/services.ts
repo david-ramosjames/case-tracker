@@ -345,7 +345,7 @@ export async function updateTrackerEntry(
       if (!caseNumber) throw new Error("Case number is required to save manual disbursements.");
       await syncManualDisbursements(admin, {
         trackerEntryId: toString(data.id, ""),
-        caseId: isUuid(caseId) ? caseId : null,
+        caseId: linkedDocketFlowCaseId(data as TrackerEntryRow),
         caseNumber,
         expectedDisbursementCount: Math.max(
           1,
@@ -372,7 +372,7 @@ export async function updateTrackerEntry(
       );
       if (caseNumber) {
         await recomputeCaseResultFromDisbursements(admin, {
-          caseId,
+          caseId: linkedDocketFlowCaseId(data as TrackerEntryRow) ?? "",
           trackerEntryId: toString(data.id, ""),
           caseNumber,
         });
@@ -616,9 +616,9 @@ export async function updateSharedCaseFields(
 
   const payload: { status?: string; case_type?: string | null; date_of_incident?: string | null } = {};
 
+  const record = await getCaseById(caseId);
   let statusToWrite = options?.explicitStatus;
   if (!statusToWrite) {
-    const record = await getCaseById(caseId);
     statusToWrite = record
       ? deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result.disbursedStatus)
       : input.status;
@@ -632,8 +632,21 @@ export async function updateSharedCaseFields(
     payload.date_of_incident = input.dateOfIncident ? toDateOnly(input.dateOfIncident) : null;
   }
 
-  if (Object.keys(payload).length > 0) {
-    const { error } = await sharedClient.from("cases").update(payload).eq("id", caseId);
+  // Only write DocketFlow shared fields when this tracker row is linked to a real case.
+  const linkedCaseId = record && isLinkedDocketFlowCase(record) ? record.shared.id : null;
+  if (Object.keys(payload).length > 0 && linkedCaseId) {
+    const { error } = await sharedClient.from("cases").update(payload).eq("id", linkedCaseId);
+    if (error) throw error;
+  }
+
+  // Tracker-owned DOL for orphaned rows without a DocketFlow case.
+  if (input.dateOfIncident !== undefined && !linkedCaseId) {
+    const { error } = await trackerClient
+      .from("case_tracker_entries")
+      .update({
+        date_of_incident_override: input.dateOfIncident ? toDateOnly(input.dateOfIncident) : null,
+      })
+      .or(`case_id.eq.${caseId},id.eq.${caseId}`);
     if (error) throw error;
   }
 
@@ -817,7 +830,11 @@ async function recomputeCaseResultFromDisbursements(
       admin
         .from("case_tracker_results")
         .select("*")
-        .or(`tracker_entry_id.eq.${input.trackerEntryId},case_id.eq.${input.caseId}`)
+        .or(
+          input.caseId
+            ? `tracker_entry_id.eq.${input.trackerEntryId},case_id.eq.${input.caseId}`
+            : `tracker_entry_id.eq.${input.trackerEntryId}`,
+        )
         .maybeSingle(),
     ]);
 
@@ -858,7 +875,7 @@ async function recomputeCaseResultFromDisbursements(
   }
 
   const { error } = await admin.from("case_tracker_results").insert({
-    case_id: isUuid(input.caseId) ? input.caseId : null,
+    case_id: linkedDocketFlowCaseId(trackerRow),
     tracker_entry_id: input.trackerEntryId,
     release_status: "No",
     closing_status: "No",
@@ -1056,7 +1073,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
 
     const resolvedCaseNumber = cleanCaseNumber(toString(trackerRow.case_number, "") || caseNumber);
     const trackerEntryId = toString(trackerRow.id, "");
-    const caseId = toStringOrNull(trackerRow.case_id) ?? trackerEntryId;
+    const linkedCaseId = linkedDocketFlowCaseId(trackerRow);
 
     const attorneyExpected = Math.max(1, toNumber(trackerRow.expected_disbursement_count) ?? 1);
     const totalSlots = Math.max(attorneyExpected, item.sheetRowCount);
@@ -1081,7 +1098,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     for (const disbursement of item.disbursements) {
       const payload: DisbursementRowPayload = {
         tracker_entry_id: trackerEntryId,
-        case_id: isUuid(caseId) ? caseId : null,
+        case_id: linkedCaseId,
         case_number: resolvedCaseNumber,
         label: disbursement.partyLabel,
         disburse_date: disbursement.disburseDate ? toDateOnly(disbursement.disburseDate) : null,
@@ -1120,7 +1137,11 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     const { data: existingResult } = await admin
       .from("case_tracker_results")
       .select("*")
-      .or(`tracker_entry_id.eq.${trackerEntryId},case_id.eq.${caseId}`)
+      .or(
+        linkedCaseId
+          ? `tracker_entry_id.eq.${trackerEntryId},case_id.eq.${linkedCaseId}`
+          : `tracker_entry_id.eq.${trackerEntryId}`,
+      )
       .maybeSingle();
 
     const existingResultModel = rowToResult(existingResult);
@@ -1168,7 +1189,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
       (resolvedDisburseDate ? deriveResultQuarterFromDisburseDate(resolvedDisburseDate) : null);
 
     const resultPayload = {
-      case_id: isUuid(caseId) ? caseId : null,
+      case_id: linkedCaseId,
       tracker_entry_id: trackerEntryId,
       settlement_date: resolvedSettlementDate ? toDateOnly(resolvedSettlementDate) : null,
       settlement_amount: totalSettlementAmount,
@@ -1194,10 +1215,10 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     if (resolvedSettlementDate && item.fullSettlement) {
       const currentStage = normalizeStage(toStringOrNull(trackerRow.case_stage));
       if (currentStage !== "Settled") {
-        const record = await getCaseById(caseId);
+        const record = await getCaseById(linkedCaseId ?? trackerEntryId);
         if (record) {
           const patch = buildStagePatchFromConfirmation(record, "Settled");
-          await updateTrackerEntry(caseId, patch, {
+          await updateTrackerEntry(linkedCaseId ?? trackerEntryId, patch, {
             actor: { userName: "Disbursing spreadsheet sync" },
             markReviewed: true,
             changeInput: patch,
@@ -1586,12 +1607,13 @@ async function upsertResultRow(
   trackerRow: TrackerEntryRow,
 ): Promise<ResultRow | null> {
   const client = await createTrackerClient();
+  const linkedCaseId = linkedDocketFlowCaseId(trackerRow);
   const normalized = applyDerivedSettlementResult(result, trackerFieldsFromRow(trackerRow), {
     skipDisbursementAggregation: true,
   });
 
   const payload = {
-    case_id: caseId,
+    case_id: linkedCaseId,
     tracker_entry_id: trackerEntryId || null,
     settlement_date: normalized.settlementDate ? toDateOnly(normalized.settlementDate) : null,
     settlement_amount: normalized.settlementAmount,
@@ -1610,15 +1632,28 @@ async function upsertResultRow(
     result_quarter: normalized.resultQuarter,
   };
 
-  const { data: existing, error: updateError } = await client
+  const lookupFilter = linkedCaseId
+    ? `tracker_entry_id.eq.${trackerEntryId},case_id.eq.${linkedCaseId}`
+    : `tracker_entry_id.eq.${trackerEntryId}`;
+
+  const { data: existing, error: lookupError } = await client
     .from("case_tracker_results")
-    .update(payload)
-    .eq("case_id", caseId)
     .select("*")
+    .or(lookupFilter)
     .maybeSingle();
 
-  if (updateError) throw updateError;
-  if (existing) return existing as ResultRow;
+  if (lookupError) throw lookupError;
+
+  if (existing) {
+    const { data, error } = await client
+      .from("case_tracker_results")
+      .update(payload)
+      .eq("id", existing.id)
+      .select("*")
+      .single();
+    if (error) throw error;
+    return data as ResultRow;
+  }
 
   const { data, error } = await client.from("case_tracker_results").insert(payload).select("*").single();
   if (error) throw error;
@@ -1721,7 +1756,9 @@ function rowToCaseRecord(
         caseRow ? caseRow.case_type : toStringOrNull(trackerRow.case_type),
       ),
       dateSigned: normalizeDate(toStringOrNull(trackerRow.date_signed_override) ?? caseRow?.created_at),
-      dateOfIncident: normalizeOptionalDate(caseRow?.date_of_incident),
+      dateOfIncident: normalizeOptionalDate(
+        caseRow?.date_of_incident ?? toStringOrNull(trackerRow.date_of_incident_override),
+      ),
       createdAt: normalizeDate(caseRow?.created_at),
       updatedAt: normalizeDate(caseRow?.updated_at),
     },
@@ -1891,6 +1928,12 @@ function countBackfillFields(row: ParsedCaseBackfillRow) {
 /** Linked DocketFlow cases use the shared case id; orphan tracker rows reuse the tracker id as shared.id. */
 function isLinkedDocketFlowCase(record: CaseRecord) {
   return record.shared.id !== record.tracker.id;
+}
+
+/** case_tracker_results.case_id must reference public.cases — only set when the tracker row is linked. */
+function linkedDocketFlowCaseId(trackerRow: TrackerEntryRow | UnknownRow): string | null {
+  const caseId = toStringOrNull(trackerRow.case_id);
+  return caseId && isUuid(caseId) ? caseId : null;
 }
 
 function buildCaseBackfillLookup(records: CaseRecord[]) {
