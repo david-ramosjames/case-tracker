@@ -34,7 +34,7 @@ import { deriveForecastFeePercent, deriveResultFeePercent, resolveSettledFeePerc
 import { QUARTERLY_REVIEW_DAYS, SOURCES_LIT_REVIEW_DAYS } from "@/lib/slack/config";
 import { normalizeTargetQuarter } from "@/lib/target-quarter";
 
-export { deriveForecastFeePercent, deriveResultFeePercent, referralFeeToDecimal, resolveSettledFeePercent, wasEverInLitigation } from "@/lib/fee-percent";
+export { deriveFeePercentFromSettlement, deriveForecastFeePercent, deriveResultFeePercent, referralFeeToDecimal, resolveSettledFeePercent, wasEverInLitigation } from "@/lib/fee-percent";
 
 const QUARTERLY_CHECK_IN_FIELDS = ["targetResolutionQuarter", "minimumValue"] as const;
 const SOURCES_LIT_FIELDS = ["sources", "injuries", "caseDescription"] as const;

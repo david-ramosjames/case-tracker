@@ -9,7 +9,21 @@ export function wasEverInLitigation(input: { caseStage: CaseStage }) {
   return input.caseStage === "Lit";
 }
 
-/** Active-pipeline forecast fee: Lit = 40%, all other non-settled stages = 1/3 net of referral fee. */
+/** Gross settlement fee % from net RJL fees, referral split, and settlement amount. */
+export function deriveFeePercentFromSettlement(input: {
+  settlementAmount: number | null | undefined;
+  attorneyFees: number | null | undefined;
+  referralFee: number | null | undefined;
+}) {
+  const { settlementAmount, attorneyFees, referralFee } = input;
+  if (settlementAmount == null || attorneyFees == null || settlementAmount <= 0) return null;
+
+  const netFirmShare = 1 - referralFeeToDecimal(referralFee);
+  if (netFirmShare <= 0) return null;
+
+  return attorneyFees / netFirmShare / settlementAmount;
+}
+
 export function deriveForecastFeePercent(input: { caseStage: CaseStage; referralFee: number | null }) {
   if (input.caseStage === "Lit") return 0.4;
   return (1 / 3) * (1 - referralFeeToDecimal(input.referralFee));

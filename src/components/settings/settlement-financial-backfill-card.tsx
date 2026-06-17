@@ -185,7 +185,7 @@ export function SettlementFinancialBackfillCard() {
             <div>
               <p className="text-sm font-semibold text-navy-950">Upload CSV</p>
               <p className="text-sm text-muted-foreground">
-                Columns: Case #, Referral Fee %, Closed Date, Settlement Amount, Net Attorney Fees.
+                Columns: Case #, Referral Fee %, Closed Date, Settlement Amount, Net Attorney Fees (same as RJL Attorney Fees).
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -270,8 +270,8 @@ export function SettlementFinancialBackfillCard() {
             </li>
             <li>
               <span className="font-medium text-navy-950">Settlement Amount</span> and{" "}
-              <span className="font-medium text-navy-950">Net Attorney Fees</span> update Results; fee % is calculated from
-              those two when both are present.
+              <span className="font-medium text-navy-950">Net Attorney Fees</span> (RJL Attorney Fees) update Results.
+              Fee % = (RJL fees ÷ (1 − referral fee)) ÷ settlement amount when all three are present.
             </li>
             <li>Cases with closed date or settlement data move to stage Settled.</li>
             <li>Blank cells are skipped. Rows must match an existing case number.</li>

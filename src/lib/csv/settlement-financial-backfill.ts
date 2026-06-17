@@ -6,6 +6,7 @@ import {
 } from "@/lib/csv/case-backfill";
 import { cleanCaseNumber, getCsvCellAny, hasCsvHeaderAny, parseCsv, parseSheetDate } from "@/lib/csv/parse";
 import { deriveResultQuarterFromDisburseDate } from "@/lib/case-options";
+import { deriveFeePercentFromSettlement } from "@/lib/fee-percent";
 import { type CaseStage, type SettlementResult, type TrackerUpdateInput } from "@/lib/types";
 
 export const SETTLEMENT_FINANCIAL_CLOSED_DATE_HEADERS = ["Closed Date", "Close Date", "Date Closed"] as const;
@@ -17,6 +18,7 @@ export const SETTLEMENT_FINANCIAL_REFERRAL_FEE_HEADERS = [
 export const SETTLEMENT_FINANCIAL_ATTORNEY_FEES_HEADERS = [
   "Net Attorney Fees",
   "Net Attorney Fee",
+  "RJL Attorney Fees",
   ...CASE_BACKFILL_ATTORNEY_FEES_HEADERS,
 ] as const;
 export const SETTLEMENT_FINANCIAL_SETTLEMENT_AMOUNT_HEADERS = [
@@ -106,12 +108,13 @@ export function parseSettlementFinancialBackfillCsv(csvText: string): ParsedSett
         }
       }
 
-      if (
-        result.settlementAmount != null &&
-        result.attorneyFees != null &&
-        result.settlementAmount > 0
-      ) {
-        result.feePercent = result.attorneyFees / result.settlementAmount;
+      if (result.settlementAmount != null && result.attorneyFees != null) {
+        const feePercent = deriveFeePercentFromSettlement({
+          settlementAmount: result.settlementAmount,
+          attorneyFees: result.attorneyFees,
+          referralFee: tracker.referralFee ?? null,
+        });
+        if (feePercent != null) result.feePercent = feePercent;
       }
 
       if (lockFinancialBackfill && (parsedClosedDate || result.settlementAmount != null)) {

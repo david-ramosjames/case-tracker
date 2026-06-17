@@ -33,6 +33,7 @@ import {
   deriveResultQuarterFromDisburseDate,
   normalizeCaseType,
 } from "@/lib/case-options";
+import { deriveFeePercentFromSettlement } from "@/lib/fee-percent";
 import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import { pickNextScheduledEvents } from "@/lib/docketflow/case-events";
 import {
@@ -680,6 +681,12 @@ export async function importSettlementFinancialBackfillRows(
       try {
         const mergedTracker = mergeTrackerImport(existing.tracker, row.tracker);
         const mergedResult = { ...existing.tracker.result, ...row.result };
+        const feePercent = deriveFeePercentFromSettlement({
+          settlementAmount: mergedResult.settlementAmount,
+          attorneyFees: mergedResult.attorneyFees,
+          referralFee: mergedTracker.referralFee ?? existing.tracker.referralFee,
+        });
+        if (feePercent != null) mergedResult.feePercent = feePercent;
         await updateTrackerEntry(
           caseId,
           {
