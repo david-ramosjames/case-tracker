@@ -258,7 +258,11 @@ export type TrackerUpdateOptions = {
   shared?: { status?: CaseStatus; caseType?: string; dateSigned?: string; dateOfIncident?: string | null };
   markReviewed?: boolean;
   /** When saving a partial patch, pass the patch here so activity logs only list changed fields. */
-  changeInput?: TrackerUpdateInput & { result?: SettlementResult };
+  changeInput?: TrackerUpdateInput & {
+    result?: SettlementResult;
+    manualDisbursements?: ManualDisbursementInput[];
+    disbursementOverrides?: DisbursementPartyOverrideInput[];
+  };
 };
 
 export async function updateTrackerEntry(
@@ -646,7 +650,8 @@ export async function importSettlementFinancialBackfillRows(
   for (let index = 0; index < parsedRows.length; index += 1) {
     const row = parsedRows[index];
     const existing = byCaseNumber.get(row.caseNumber);
-    const fieldCount = Object.keys(row.tracker).length + Object.keys(row.result).length;
+    const fieldCount =
+      row.claimCount + Object.keys(row.tracker).length + Object.keys(row.result).length;
 
     preview.push({ caseNumber: row.caseNumber, matched: Boolean(existing), fieldCount });
 
@@ -679,29 +684,45 @@ export async function importSettlementFinancialBackfillRows(
       const caseId = existing.shared.id;
 
       try {
+        const caseNumber = cleanCaseNumber(existing.shared.caseNumber);
         const mergedTracker = mergeTrackerImport(existing.tracker, row.tracker);
-        const mergedResult = { ...existing.tracker.result, ...row.result };
-        const feePercent = deriveFeePercentFromSettlement({
-          settlementAmount: mergedResult.settlementAmount,
-          attorneyFees: mergedResult.attorneyFees,
-          referralFee: mergedTracker.referralFee ?? existing.tracker.referralFee,
-        });
-        if (feePercent != null) mergedResult.feePercent = feePercent;
+
+        if (admin && row.lockFinancialBackfill && caseNumber) {
+          const { error: clearError } = await admin
+            .from("case_tracker_disbursements")
+            .delete()
+            .eq("case_number", caseNumber);
+          if (clearError) throw new Error(clearError.message);
+        }
+
         await updateTrackerEntry(
           caseId,
           {
             ...mergedTracker,
-            result: mergedResult,
+            manualDisbursements: row.manualDisbursements,
           },
           {
             actor: options.actor,
             markReviewed: false,
             changeInput: {
               ...row.tracker,
-              result: mergedResult,
+              manualDisbursements: row.manualDisbursements,
             },
           },
         );
+
+        if (row.result.feePercent != null && admin) {
+          const trackerEntryId = existing.tracker.id;
+          const linkedCaseId = isLinkedDocketFlowCase(existing) ? existing.shared.id : null;
+          const filter = linkedCaseId
+            ? `tracker_entry_id.eq.${trackerEntryId},case_id.eq.${linkedCaseId}`
+            : `tracker_entry_id.eq.${trackerEntryId}`;
+          const { error: feeError } = await admin
+            .from("case_tracker_results")
+            .update({ fee_percent: row.result.feePercent })
+            .or(filter);
+          if (feeError) throw new Error(feeError.message);
+        }
 
         if (admin) {
           const trackerEntryId = existing.tracker.id;
@@ -1007,11 +1028,19 @@ async function recomputeCaseResultFromDisbursements(
   });
   if (!aggregated) return;
 
+  const referralFee = toNumber(trackerRow.referral_fee);
+  const feePercent =
+    deriveFeePercentFromSettlement({
+      settlementAmount: aggregated.settlementAmount,
+      attorneyFees: aggregated.attorneyFees,
+      referralFee,
+    }) ?? aggregated.feePercent;
+
   const resultPayload = {
     settlement_date: aggregated.settlementDate ? toDateOnly(aggregated.settlementDate) : null,
     settlement_amount: aggregated.settlementAmount,
     attorney_fees: aggregated.attorneyFees,
-    fee_percent: aggregated.feePercent,
+    fee_percent: feePercent,
     disburse_date: aggregated.disburseDate ? toDateOnly(aggregated.disburseDate) : null,
     check_disbursed_at: aggregated.checkDisbursedAt,
     disbursed_status: aggregated.disbursedStatus,

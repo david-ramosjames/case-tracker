@@ -11,6 +11,7 @@ import { CASE_BACKFILL_CASE_NUMBER_HEADERS } from "@/lib/csv/case-backfill";
 import {
   hasSettlementFinancialBackfillHeaders,
   SETTLEMENT_FINANCIAL_ATTORNEY_FEES_HEADERS,
+  SETTLEMENT_FINANCIAL_CLAIMANT_HEADERS,
   SETTLEMENT_FINANCIAL_CLOSED_DATE_HEADERS,
   SETTLEMENT_FINANCIAL_REFERRAL_FEE_HEADERS,
   SETTLEMENT_FINANCIAL_SETTLEMENT_AMOUNT_HEADERS,
@@ -47,6 +48,7 @@ export function SettlementFinancialBackfillCard() {
   const recognizedHeaders = useMemo(() => {
     const expected = [
       ...CASE_BACKFILL_CASE_NUMBER_HEADERS,
+      ...SETTLEMENT_FINANCIAL_CLAIMANT_HEADERS,
       ...SETTLEMENT_FINANCIAL_REFERRAL_FEE_HEADERS,
       ...SETTLEMENT_FINANCIAL_CLOSED_DATE_HEADERS,
       ...SETTLEMENT_FINANCIAL_SETTLEMENT_AMOUNT_HEADERS,
@@ -70,7 +72,7 @@ export function SettlementFinancialBackfillCard() {
 
     if (!hasSettlementFinancialBackfillHeaders(text)) {
       setPreview(null);
-      setErrorMessage('CSV must include a case number column (e.g. "Case #").');
+      setErrorMessage('CSV must include a case number column (e.g. "Case Num" or "Case #").');
       return;
     }
 
@@ -185,7 +187,8 @@ export function SettlementFinancialBackfillCard() {
             <div>
               <p className="text-sm font-semibold text-navy-950">Upload CSV</p>
               <p className="text-sm text-muted-foreground">
-                Columns: Case #, Referral Fee %, Closed Date, Settlement Amount, Net Attorney Fees (same as RJL Attorney Fees).
+                Columns: Case Num, Claimant name, Referral Fee %, Closed Date, Settlement Amount, Net Attorney Fees.
+                Multiple rows with the same case number are combined — each row becomes a party and totals are summed.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -263,7 +266,13 @@ export function SettlementFinancialBackfillCard() {
           <p className="font-semibold text-navy-950">How it works</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
             <li>
-              <span className="font-medium text-navy-950">Referral Fee %</span> updates the tracker referral fee.
+              <span className="font-medium text-navy-950">Multiple claims</span> — repeat the case number on each row.
+              Each row is saved as a disbursement party (claimant name optional); settlement and fees are summed for the
+              case total, same as the Google sheet sync.
+            </li>
+            <li>
+              <span className="font-medium text-navy-950">Referral Fee %</span> updates the tracker referral fee (one
+              value per case; taken from the first row that has it).
             </li>
             <li>
               <span className="font-medium text-navy-950">Closed Date</span> sets disburse / closed date and marks disbursed.
@@ -274,7 +283,7 @@ export function SettlementFinancialBackfillCard() {
               Fee % = (RJL fees ÷ (1 − referral fee)) ÷ settlement amount when all three are present.
             </li>
             <li>Cases with closed date or settlement data move to stage Settled.</li>
-            <li>Blank cells are skipped. Rows must match an existing case number.</li>
+            <li>Blank cells are skipped. Rows must match an existing case number (grouped by case before import).</li>
           </ul>
         </div>
 
