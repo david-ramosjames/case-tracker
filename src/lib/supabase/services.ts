@@ -34,7 +34,7 @@ import {
   normalizeCaseType,
 } from "@/lib/case-options";
 import { deriveFeePercentFromSettlement } from "@/lib/fee-percent";
-import { CLOSED_CASE_STAGES, deriveCaseStatusFromTracker, applyOpenSettledTrackerFallback } from "@/lib/case-status";
+import { deriveCaseStatusFromTracker, applyOpenSettledTrackerFallback } from "@/lib/case-status";
 import { pickNextScheduledEvents } from "@/lib/docketflow/case-events";
 import {
   type ActivityLogEntry,
@@ -1397,22 +1397,6 @@ async function recomputeCaseResultFromDisbursements(
       ...resultPayload,
     });
     if (error) throw new Error(error.message);
-  }
-
-  const fullyDisbursed = aggregated.disbursedStatus === "Yes" && Boolean(aggregated.disburseDate);
-  if (!fullyDisbursed) {
-    const currentStage = normalizeStage(toStringOrNull(trackerRow.case_stage));
-    const hasSettlement =
-      aggregated.settlementAmount != null ||
-      Boolean(aggregated.settlementDate) ||
-      disbursements.some((party) => party.settlementAmount != null || Boolean(party.settlementDate));
-    if (hasSettlement && !CLOSED_CASE_STAGES.has(currentStage) && currentStage !== "Settled") {
-      const { error: stageError } = await admin
-        .from("case_tracker_entries")
-        .update({ case_stage: "Settled" })
-        .eq("id", input.trackerEntryId);
-      if (stageError) throw new Error(stageError.message);
-    }
   }
 }
 

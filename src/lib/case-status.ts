@@ -10,27 +10,15 @@ export function isCaseFullyDisbursed(result: Pick<SettlementResult, "disbursedSt
   return result.disbursedStatus === "Yes" && Boolean(result.disburseDate?.trim());
 }
 
-export function hasSettlementIndicators(tracker: Pick<TrackerEntry, "result" | "disbursements">): boolean {
-  if (tracker.result.settlementAmount != null || tracker.result.settlementDate?.trim()) {
-    return true;
-  }
-  return tracker.disbursements.some(
-    (party) => party.settlementAmount != null || Boolean(party.settlementDate?.trim()),
-  );
-}
-
-/** Partial or missing disbursement keeps the case in Settled stage with an open (Active) status. */
+/** Partial or missing disbursement keeps the case open (Active) without forcing pipeline stage. */
 export function applyOpenSettledTrackerFallback<T extends Pick<TrackerEntry, "caseStage" | "result" | "disbursements">>(
   tracker: T,
 ): T {
   if (isCaseFullyDisbursed(tracker.result)) return tracker;
   if (CLOSED_CASE_STAGES.has(tracker.caseStage)) return tracker;
 
-  const caseStage = hasSettlementIndicators(tracker) ? "Settled" : tracker.caseStage;
-
   return {
     ...tracker,
-    caseStage,
     result: {
       ...tracker.result,
       disbursedStatus: "No",
