@@ -7,6 +7,8 @@ import {
   deriveQuarterGoalsFromMonthly,
   formatGoalPeriodLabel,
   formatMonthKeyLabel,
+  getCalendarGapMonthKeys,
+  getCalendarPlugYearOptions,
   getCommissionPeriodEndFromStart,
   getCommissionPeriodFromEnd,
   getCommissionQuarterSummaries,
@@ -43,6 +45,9 @@ type GoalDraft = {
   monthKeys: string[];
   monthlyValues: Record<string, string>;
   monthlyFeeValues: Record<string, string>;
+  plugCalendarYear: string;
+  calendarPlugValues: Record<string, string>;
+  calendarPlugFeeValues: Record<string, string>;
 };
 
 function parseGoalAmount(value: string) {
@@ -107,6 +112,9 @@ function buildDraftFromGoal(goal: AttorneyGoal): GoalDraft {
     monthlyFeeValues: monthlyGoalInputFromResolved(
       Object.fromEntries(period.monthKeys.map((monthKey) => [monthKey, resolvedFees[monthKey] ?? 0])),
     ),
+    plugCalendarYear: String(endYear),
+    calendarPlugValues: monthlyGoalInputFromResolved(goal.calendarPlugGoals ?? {}),
+    calendarPlugFeeValues: monthlyGoalInputFromResolved(goal.calendarPlugFeeGoals ?? {}),
   };
 }
 
@@ -124,6 +132,9 @@ function createEmptyDraft(attorneyId: string, endYear: number): GoalDraft {
     monthKeys: period.monthKeys,
     monthlyValues: {},
     monthlyFeeValues: {},
+    plugCalendarYear: String(endYear),
+    calendarPlugValues: {},
+    calendarPlugFeeValues: {},
   };
 }
 
@@ -195,6 +206,8 @@ export function AttorneyGoalsManager({
     const monthlyFeeGoals = parseMonthlyGoalsInput(
       Object.fromEntries(period.monthKeys.map((monthKey) => [monthKey, draft.monthlyFeeValues[monthKey] ?? ""])),
     );
+    const calendarPlugGoals = parseMonthlyGoalsInput(draft.calendarPlugValues);
+    const calendarPlugFeeGoals = parseMonthlyGoalsInput(draft.calendarPlugFeeValues);
     const derived = deriveQuarterGoalsFromMonthly(
       monthlyGoals,
       period.commissionYear,
@@ -223,6 +236,8 @@ export function AttorneyGoalsManager({
         commissionMonthCount: period.monthCount,
         monthlyGoals,
         monthlyFeeGoals,
+        calendarPlugGoals,
+        calendarPlugFeeGoals,
         q1Goal: derived.q1Goal,
         q2Goal: derived.q2Goal,
         q3Goal: derived.q3Goal,
@@ -497,6 +512,8 @@ export function AttorneyGoalsManager({
               title="New commission goal"
               draft={newDraft}
               endYearOptions={endYearOptions}
+              attorneyId={newAttorneyId}
+              allAttorneyGoals={attorneyGoals}
               onDraftChange={setNewDraft}
               actions={
                 <Button variant="pink" size="sm" onClick={handleAddGoal} disabled={isSaving}>
@@ -535,6 +552,8 @@ export function AttorneyGoalsManager({
                   title={title}
                   draft={draft}
                   endYearOptions={endYearOptions}
+                  attorneyId={goal.attorneyId}
+                  allAttorneyGoals={attorneyGoals}
                   onDraftChange={(next) => updateDraft(goal.id, next)}
                   actions={
                     <div className="flex items-center gap-2">
@@ -584,6 +603,8 @@ function GoalEditorCard({
   onDraftChange,
   actions,
   showCommissionThreshold = true,
+  attorneyId,
+  allAttorneyGoals = [],
 }: {
   title: string;
   draft: GoalDraft;
@@ -591,9 +612,26 @@ function GoalEditorCard({
   onDraftChange: (draft: GoalDraft) => void;
   actions: ReactNode;
   showCommissionThreshold?: boolean;
+  attorneyId?: string;
+  allAttorneyGoals?: AttorneyGoal[];
 }) {
   const period = getPeriodFromDraft(draft);
   const periodLabel = formatGoalPeriodLabel(period.commissionYear, period.startMonth, period.monthCount);
+  const showCalendarPlugs = showCommissionThreshold && Boolean(attorneyId);
+  const storedPlugKeys = [
+    ...Object.keys(draft.calendarPlugValues),
+    ...Object.keys(draft.calendarPlugFeeValues),
+  ];
+  const plugYearOptions = showCalendarPlugs
+    ? getCalendarPlugYearOptions(allAttorneyGoals, attorneyId!, period.monthKeys, storedPlugKeys)
+    : [];
+  const plugCalendarYear = plugYearOptions.includes(Number(draft.plugCalendarYear))
+    ? draft.plugCalendarYear
+    : String(plugYearOptions[0] ?? draft.endYear);
+  const plugMonthKeys =
+    showCalendarPlugs && attorneyId
+      ? getCalendarGapMonthKeys(allAttorneyGoals, attorneyId, Number(plugCalendarYear))
+      : [];
   const monthlyGoals = parseMonthlyGoalsInput(
     Object.fromEntries(draft.monthKeys.map((monthKey) => [monthKey, draft.monthlyValues[monthKey] ?? ""])),
   );
@@ -734,6 +772,88 @@ function GoalEditorCard({
             quarterSummaries={feeQuarterSummaries}
           />
         </div>
+
+        {showCalendarPlugs && plugYearOptions.length > 0 ? (
+          <section className="rounded-lg border border-dashed bg-muted/5 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h4 className="text-sm font-semibold text-navy-950">Calendar year plug months</h4>
+                <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+                  One-time targets for calendar months outside this attorney&apos;s commission period. These count toward
+                  calendar-year Output totals only — not the commission-year annual goal above.
+                </p>
+              </div>
+              <Field label="Calendar year">
+                <Select
+                  className="sm:min-w-[8rem]"
+                  value={plugCalendarYear}
+                  onChange={(event) => onDraftChange({ ...draft, plugCalendarYear: event.target.value })}
+                >
+                  {plugYearOptions.map((year) => (
+                    <option key={year} value={year}>
+                      {year}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+
+            {plugMonthKeys.length === 0 ? (
+              <p className="mt-3 text-sm text-muted-foreground">
+                All months in {plugCalendarYear} are already covered by commission goals.
+              </p>
+            ) : (
+              <div className="mt-4 grid gap-6 xl:grid-cols-2">
+                <div>
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">Gross disbursement plugs</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {plugMonthKeys.map((monthKey) => (
+                      <label key={monthKey}>
+                        <span className="mb-1 block truncate text-[11px] text-muted-foreground">
+                          {formatMonthKeyLabel(monthKey)}
+                        </span>
+                        <GoalAmountInput
+                          className="h-9"
+                          value={draft.calendarPlugValues[monthKey] ?? ""}
+                          onChange={(value) =>
+                            onDraftChange({
+                              ...draft,
+                              plugCalendarYear,
+                              calendarPlugValues: { ...draft.calendarPlugValues, [monthKey]: value },
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">RJL fee plugs</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {plugMonthKeys.map((monthKey) => (
+                      <label key={`fee-${monthKey}`}>
+                        <span className="mb-1 block truncate text-[11px] text-muted-foreground">
+                          {formatMonthKeyLabel(monthKey)}
+                        </span>
+                        <GoalAmountInput
+                          className="h-9"
+                          value={draft.calendarPlugFeeValues[monthKey] ?? ""}
+                          onChange={(value) =>
+                            onDraftChange({
+                              ...draft,
+                              plugCalendarYear,
+                              calendarPlugFeeValues: { ...draft.calendarPlugFeeValues, [monthKey]: value },
+                            })
+                          }
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </section>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-2 border-t bg-muted/20 px-5 py-3">{actions}</div>

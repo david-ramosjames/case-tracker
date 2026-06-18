@@ -1610,6 +1610,117 @@ function buildSettlementSyncCaseSummary(input: {
   return parts.join("; ");
 }
 
+export type ClearSheetSettlementSyncResult = {
+  cleared: boolean;
+  sheetDisbursementsRemoved: number;
+  stageRestored: CaseStage | null;
+  reason?: "financial_locked";
+};
+
+/** Remove sheet-sourced settlement/disbursement data when a case no longer appears on the disbursing sheet. */
+export async function clearSheetSettlementSyncForCase(input: {
+  caseNumber: string;
+  trackerEntryId: string;
+  caseId?: string | null;
+}): Promise<ClearSheetSettlementSyncResult> {
+  const admin = createSupabaseAdminClient();
+  if (!admin) throw new Error("Service role required to clear sheet settlement data.");
+
+  const caseNumber = cleanCaseNumber(input.caseNumber);
+  const trackerEntryId = input.trackerEntryId;
+  const linkedCaseId = input.caseId ?? null;
+  const resultFilter = linkedCaseId
+    ? `tracker_entry_id.eq.${trackerEntryId},case_id.eq.${linkedCaseId}`
+    : `tracker_entry_id.eq.${trackerEntryId}`;
+
+  const { data: existingResult, error: lockError } = await admin
+    .from("case_tracker_results")
+    .select("financial_backfill_locked")
+    .or(resultFilter)
+    .maybeSingle();
+  if (lockError) throw new Error(lockError.message);
+
+  if (existingResult?.financial_backfill_locked) {
+    return { cleared: false, sheetDisbursementsRemoved: 0, stageRestored: null, reason: "financial_locked" };
+  }
+
+  const { data: deletedRows, error: deleteError } = await admin
+    .from("case_tracker_disbursements")
+    .delete()
+    .eq("case_number", caseNumber)
+    .not("sheet_row_key", "is", null)
+    .select("id");
+  if (deleteError) throw new Error(deleteError.message);
+  const sheetDisbursementsRemoved = deletedRows?.length ?? 0;
+
+  const { data: remainingRows, error: remainingError } = await admin
+    .from("case_tracker_disbursements")
+    .select("id")
+    .eq("case_number", caseNumber);
+  if (remainingError) throw new Error(remainingError.message);
+  const remainingCount = remainingRows?.length ?? 0;
+
+  const { error: trackerUpdateError } = await admin
+    .from("case_tracker_entries")
+    .update({
+      expected_disbursement_count: Math.max(1, remainingCount),
+      multiple_disbursements_enabled: remainingCount > 1,
+    })
+    .eq("id", trackerEntryId);
+  if (trackerUpdateError) throw new Error(trackerUpdateError.message);
+
+  if (remainingCount > 0) {
+    await recomputeCaseResultFromDisbursements(admin, {
+      caseId: linkedCaseId ?? "",
+      trackerEntryId,
+      caseNumber,
+    });
+  } else {
+    const { error: resultError } = await admin
+      .from("case_tracker_results")
+      .update({
+        settlement_date: null,
+        settlement_amount: null,
+        attorney_fees: null,
+        fee_percent: null,
+        disburse_date: null,
+        check_disbursed_at: null,
+        disbursed_status: "No",
+        result_quarter: null,
+      })
+      .or(resultFilter);
+    if (resultError) throw new Error(resultError.message);
+  }
+
+  let stageRestored: CaseStage | null = null;
+  const { data: trackerRow, error: trackerError } = await admin
+    .from("case_tracker_entries")
+    .select("case_stage")
+    .eq("id", trackerEntryId)
+    .maybeSingle();
+  if (trackerError) throw new Error(trackerError.message);
+
+  const currentStage = normalizeStage(toStringOrNull(trackerRow?.case_stage));
+  if (currentStage === "Settled" && remainingCount === 0) {
+    stageRestored = await lookupPriorCaseStageBeforeSettlement(admin, trackerEntryId);
+    if (stageRestored) {
+      const { error: stageError } = await admin
+        .from("case_tracker_entries")
+        .update({ case_stage: toDatabaseStage(stageRestored) })
+        .eq("id", trackerEntryId);
+      if (stageError) throw new Error(stageError.message);
+    }
+  }
+
+  const refreshCaseId = linkedCaseId ?? trackerEntryId;
+  const refreshed = await getCaseById(refreshCaseId);
+  if (refreshed) {
+    await syncDerivedSharedCaseStatus(refreshCaseId, refreshed.tracker, refreshed);
+  }
+
+  return { cleared: true, sheetDisbursementsRemoved, stageRestored };
+}
+
 /** Apply settlement/disbursement rows from the settlements Google Sheet. */
 export async function syncSettlementsFromSheet(
   cases: SettlementSheetCasePayload[],
@@ -2072,6 +2183,8 @@ export type AttorneyGoalInput = {
   commissionMonthCount?: number;
   monthlyGoals?: Record<string, number>;
   monthlyFeeGoals?: Record<string, number>;
+  calendarPlugGoals?: Record<string, number>;
+  calendarPlugFeeGoals?: Record<string, number>;
   q1Goal: number;
   q2Goal: number;
   q3Goal: number;
@@ -2100,6 +2213,8 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
   const annualRjlFeesGoal = input.feeQ1Goal + input.feeQ2Goal + input.feeQ3Goal + input.feeQ4Goal;
   const monthlyGoals = input.monthlyGoals ?? {};
   const monthlyFeeGoals = input.monthlyFeeGoals ?? {};
+  const calendarPlugGoals = input.calendarPlugGoals ?? {};
+  const calendarPlugFeeGoals = input.calendarPlugFeeGoals ?? {};
 
   const commissionYearStartMonth = Math.min(12, Math.max(1, Number(input.commissionYearStartMonth ?? 1)));
   const commissionMonthCount = Number(input.commissionMonthCount ?? 12) === 13 ? 13 : 12;
@@ -2115,6 +2230,8 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     commission_month_count: commissionMonthCount,
     monthly_goals: monthlyGoals,
     monthly_fee_goals: monthlyFeeGoals,
+    calendar_plug_goals: calendarPlugGoals,
+    calendar_plug_fee_goals: calendarPlugFeeGoals,
     q1_goal: input.q1Goal,
     q2_goal: input.q2Goal,
     q3_goal: input.q3Goal,
@@ -2145,6 +2262,8 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     commissionMonthCount: Number(data.commission_month_count ?? 12) === 13 ? 13 : 12,
     monthlyGoals: parseMonthlyGoalsRow(data.monthly_goals),
     monthlyFeeGoals: parseMonthlyGoalsRow(data.monthly_fee_goals),
+    calendarPlugGoals: parseMonthlyGoalsRow(data.calendar_plug_goals),
+    calendarPlugFeeGoals: parseMonthlyGoalsRow(data.calendar_plug_fee_goals),
     q1Goal: Number(data.q1_goal ?? 0),
     q2Goal: Number(data.q2_goal ?? 0),
     q3Goal: Number(data.q3_goal ?? 0),
@@ -2195,6 +2314,8 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
 
     const monthlyGoals = parseMonthlyGoalsRow(row.monthly_goals);
     const monthlyFeeGoals = parseMonthlyGoalsRow(row.monthly_fee_goals);
+    const calendarPlugGoals = parseMonthlyGoalsRow(row.calendar_plug_goals);
+    const calendarPlugFeeGoals = parseMonthlyGoalsRow(row.calendar_plug_fee_goals);
 
     return {
       id: toStringOrNull(row.id) ?? "unknown-goal",
@@ -2210,6 +2331,8 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
       commissionMonthCount: Number(row.commission_month_count ?? 12) === 13 ? 13 : 12,
       monthlyGoals,
       monthlyFeeGoals,
+      calendarPlugGoals,
+      calendarPlugFeeGoals,
       q1Goal,
       q2Goal,
       q3Goal,

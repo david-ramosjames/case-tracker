@@ -253,6 +253,9 @@ export type AttorneyGoal = {
   commissionMonthCount: number;
   monthlyGoals: Record<string, number>;
   monthlyFeeGoals: Record<string, number>;
+  /** Calendar-year-only monthly targets outside the commission period. */
+  calendarPlugGoals: Record<string, number>;
+  calendarPlugFeeGoals: Record<string, number>;
   q1Goal: number;
   q2Goal: number;
   q3Goal: number;

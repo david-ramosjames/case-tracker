@@ -5,7 +5,12 @@ import {
   getGoogleSheetsSettlementConfig,
   isGoogleSheetsSettlementSyncConfigured,
 } from "@/lib/slack/config";
-import { syncSettlementsFromSheet, type SettlementSheetCasePayload, type SettlementSheetSyncResult as SettlementSheetSyncCoreResult } from "@/lib/supabase/services";
+import {
+  clearSheetSettlementSyncForCase,
+  syncSettlementsFromSheet,
+  type SettlementSheetCasePayload,
+  type SettlementSheetSyncResult as SettlementSheetSyncCoreResult,
+} from "@/lib/supabase/services";
 
 export type { SettlementSheetSyncCaseDetail, SettlementSheetSyncPartyDetail } from "@/lib/supabase/services";
 
@@ -13,6 +18,10 @@ export type SettlementSheetSyncResult = SettlementSheetSyncCoreResult & {
   configured: boolean;
   sheetRowsFound?: number;
   caseNumber?: string;
+  clearedSheetData?: boolean;
+  sheetDisbursementsRemoved?: number;
+  stageRestored?: string | null;
+  financialLocked?: boolean;
 };
 
 type ParsedSettlementRow = {
@@ -222,6 +231,30 @@ export async function syncSettlementsFromGoogleSheetForCaseNumber(
   );
 
   if (parsed.length === 0) {
+    if (options?.trackerEntryId) {
+      const cleared = await clearSheetSettlementSyncForCase({
+        caseNumber: targetCaseNumber,
+        trackerEntryId: options.trackerEntryId,
+        caseId: options.docketflowCaseId ?? null,
+      });
+      return {
+        casesProcessed: cleared.cleared ? 1 : 0,
+        disbursementsSynced: 0,
+        settlementsUpdated: cleared.cleared ? 1 : 0,
+        stagesAutoSettled: 0,
+        skippedNoTracker: 0,
+        skippedFinancialLocked: cleared.reason === "financial_locked" ? 1 : 0,
+        sheetCasesFound: 0,
+        details: [],
+        sheetRowsFound: 0,
+        caseNumber: targetCaseNumber,
+        clearedSheetData: cleared.cleared,
+        sheetDisbursementsRemoved: cleared.sheetDisbursementsRemoved,
+        stageRestored: cleared.stageRestored,
+        financialLocked: cleared.reason === "financial_locked",
+      };
+    }
+
     return {
       casesProcessed: 0,
       disbursementsSynced: 0,

@@ -261,6 +261,7 @@ function sumGoalMonthlyAmountsInCalendarYear(
   goals: AttorneyGoal[],
   calendarYear: number,
   monthlyResolver: (goal: AttorneyGoal) => MonthlyGoals,
+  plugField: "gross" | "fees",
 ) {
   const counted = new Set<string>();
   let total = 0;
@@ -284,13 +285,81 @@ function sumGoalMonthlyAmountsInCalendarYear(
     }
   }
 
+  const attorneyIds = [...new Set(goals.map((goal) => goal.attorneyId))];
+  for (const attorneyId of attorneyIds) {
+    const plugs = mergeCalendarPlugGoals(goals, attorneyId)[plugField];
+    for (const monthKey of getCalendarYearMonthKeys(calendarYear)) {
+      const dedupeKey = `${attorneyId}:${monthKey}`;
+      if (counted.has(dedupeKey)) continue;
+      const amount = plugs[monthKey] ?? 0;
+      if (amount <= 0) continue;
+      counted.add(dedupeKey);
+      total += amount;
+    }
+  }
+
   return total;
 }
 
 export function sumAttorneyGrossGoalsInCalendarYear(goals: AttorneyGoal[], calendarYear: number) {
-  return sumGoalMonthlyAmountsInCalendarYear(goals, calendarYear, resolveMonthlyGoals);
+  return sumGoalMonthlyAmountsInCalendarYear(goals, calendarYear, resolveMonthlyGoals, "gross");
 }
 
 export function sumAttorneyFeeGoalsInCalendarYear(goals: AttorneyGoal[], calendarYear: number) {
-  return sumGoalMonthlyAmountsInCalendarYear(goals, calendarYear, resolveMonthlyFeeGoals);
+  return sumGoalMonthlyAmountsInCalendarYear(goals, calendarYear, resolveMonthlyFeeGoals, "fees");
+}
+
+export function getAttorneyCommissionMonthKeys(goals: AttorneyGoal[], attorneyId: string) {
+  const covered = new Set<string>();
+  for (const goal of goals) {
+    if (goal.attorneyId !== attorneyId || goal.goalScope === "firm") continue;
+    for (const monthKey of getCommissionPeriodMonthKeys(
+      goal.year,
+      goal.commissionYearStartMonth,
+      goal.commissionMonthCount ?? 12,
+    )) {
+      covered.add(monthKey);
+    }
+  }
+  return covered;
+}
+
+export function getCalendarGapMonthKeys(goals: AttorneyGoal[], attorneyId: string, calendarYear: number) {
+  const covered = getAttorneyCommissionMonthKeys(goals, attorneyId);
+  return getCalendarYearMonthKeys(calendarYear).filter((monthKey) => !covered.has(monthKey));
+}
+
+export function getCalendarPlugYearOptions(
+  goals: AttorneyGoal[],
+  attorneyId: string,
+  periodMonthKeys: string[],
+  storedPlugKeys: string[] = [],
+) {
+  const years = new Set<number>();
+  for (const monthKey of periodMonthKeys) {
+    years.add(monthKeyToParts(monthKey).year);
+  }
+  for (const monthKey of storedPlugKeys) {
+    years.add(monthKeyToParts(monthKey).year);
+  }
+  const lastKey = periodMonthKeys[periodMonthKeys.length - 1];
+  if (lastKey) {
+    const { year, month } = monthKeyToParts(lastKey);
+    years.add(year);
+    if (month === 12) years.add(year + 1);
+  }
+  return [...years]
+    .filter((year) => getCalendarGapMonthKeys(goals, attorneyId, year).length > 0 || storedPlugKeys.some((key) => key.startsWith(`${year}-`)))
+    .sort((left, right) => right - left);
+}
+
+export function mergeCalendarPlugGoals(goals: AttorneyGoal[], attorneyId: string) {
+  const gross: MonthlyGoals = {};
+  const fees: MonthlyGoals = {};
+  for (const goal of goals) {
+    if (goal.attorneyId !== attorneyId) continue;
+    Object.assign(gross, goal.calendarPlugGoals ?? {});
+    Object.assign(fees, goal.calendarPlugFeeGoals ?? {});
+  }
+  return { gross, fees };
 }

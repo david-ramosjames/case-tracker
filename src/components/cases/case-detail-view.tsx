@@ -181,14 +181,31 @@ export function CaseDetailView({
       const response = await fetch(`/api/cases/${shared.id}/sync-settlements`, { method: "POST" });
       const body = (await response.json()) as {
         error?: string;
+        message?: string;
         disbursementsSynced?: number;
         sheetRowsFound?: number;
+        clearedSheetData?: boolean;
+        sheetDisbursementsRemoved?: number;
+        stageRestored?: string | null;
       };
       if (!response.ok) throw new Error(body.error ?? "Unable to import from disbursing sheet.");
 
-      setSheetSyncMessage(
-        `Imported ${body.disbursementsSynced ?? 0} disbursement party row(s) from the sheet.`,
-      );
+      if (body.clearedSheetData) {
+        const parts = [
+          body.message ??
+            `No rows on the disbursing sheet — cleared stale settlement data${
+              body.sheetDisbursementsRemoved ? ` (${body.sheetDisbursementsRemoved} sheet party row(s) removed)` : ""
+            }.`,
+        ];
+        if (body.stageRestored) {
+          parts.push(`Stage restored to ${body.stageRestored}.`);
+        }
+        setSheetSyncMessage(parts.join(" "));
+      } else {
+        setSheetSyncMessage(
+          `Imported ${body.disbursementsSynced ?? 0} disbursement party row(s) from the sheet.`,
+        );
+      }
       router.refresh();
     } catch (error) {
       setSheetSyncMessage(error instanceof Error ? error.message : "Unable to import from disbursing sheet.");

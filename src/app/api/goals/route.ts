@@ -30,6 +30,8 @@ export async function POST(request: Request) {
       commissionThreshold: Number(input.commissionThreshold ?? 0),
       monthlyGoals: input.monthlyGoals ?? {},
       monthlyFeeGoals: input.monthlyFeeGoals ?? {},
+      calendarPlugGoals: input.calendarPlugGoals ?? {},
+      calendarPlugFeeGoals: input.calendarPlugFeeGoals ?? {},
       q1Goal: Number(input.q1Goal ?? 0),
       q2Goal: Number(input.q2Goal ?? 0),
       q3Goal: Number(input.q3Goal ?? 0),

@@ -19,6 +19,21 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ca
       docketflowCaseId: isOrphanTrackerRecord(record) ? undefined : record.shared.id,
     });
     if (result.sheetRowsFound === 0) {
+      if (result.clearedSheetData) {
+        return NextResponse.json({
+          message: `No rows on the disbursing sheet for case ${result.caseNumber}. Cleared stale sheet settlement data.`,
+          ...result,
+        });
+      }
+      if (result.financialLocked) {
+        return NextResponse.json(
+          {
+            error: `No rows on the disbursing sheet for case ${result.caseNumber}, but financial backfill is locked — settlement data was not cleared.`,
+            ...result,
+          },
+          { status: 409 },
+        );
+      }
       return NextResponse.json(
         {
           error: `No rows found on the disbursing sheet for case ${result.caseNumber}.`,
