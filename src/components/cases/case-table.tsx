@@ -29,7 +29,7 @@ import {
 import { CaseAttorneyScoreCell } from "@/components/attorney-score/attorney-score";
 import { getCaseAttorneyScore } from "@/lib/attorney-score";
 import { deriveResultFeePercent, getCaseCompletionScore } from "@/lib/calculations";
-import { getCasePipelineFilter, type CasePipelineFilter, type ViewerContext } from "@/lib/auth/access";
+import { getCasePipelineFilter, isActivePipelineCase, type CasePipelineFilter, type ViewerContext } from "@/lib/auth/access";
 import {
   getCaseListQualityFilterLabel,
   matchesCaseListQualityFilter,
@@ -56,10 +56,37 @@ type CaseTablePersistPatch = {
   tracker?: TrackerUpdateInput;
 };
 
-const AUTOSAVE_DELAY_MS = 350;
 const SAVED_INDICATOR_MS = 2500;
 
 type RowSaveStatus = "saving" | "saved";
+
+function stageSelectOptions(current: CaseStage) {
+  if (CASE_STAGE_OPTIONS.includes(current)) return CASE_STAGE_OPTIONS;
+  return [current, ...CASE_STAGE_OPTIONS];
+}
+
+function assertTrackerPatchApplied(tracker: TrackerEntry, patch: CaseTablePersistPatch) {
+  const t = patch.tracker;
+  if (!t) return;
+  if (t.caseStage !== undefined && tracker.caseStage !== t.caseStage) {
+    throw new Error(`Stage did not save (still "${tracker.caseStage}"). You may need database migration 030 for your role.`);
+  }
+  if (t.liability !== undefined && tracker.liability !== t.liability) {
+    throw new Error("Liability did not save.");
+  }
+  if (t.targetResolutionQuarter !== undefined && tracker.targetResolutionQuarter !== t.targetResolutionQuarter) {
+    throw new Error("Expected disbursement quarter did not save.");
+  }
+  if (t.minimumValue !== undefined && tracker.minimumValue !== t.minimumValue) {
+    throw new Error("Minimum value did not save.");
+  }
+  if (t.referralFee !== undefined && tracker.referralFee !== t.referralFee) {
+    throw new Error("Referral fee did not save.");
+  }
+  if (t.policyLimits !== undefined && tracker.policyLimits !== t.policyLimits) {
+    throw new Error("Policy limits did not save.");
+  }
+}
 
 export function CaseTable({
   records,
@@ -82,11 +109,17 @@ export function CaseTable({
 }) {
   const [workingRecords, setWorkingRecords] = useState(records);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [rowSaveErrors, setRowSaveErrors] = useState<Record<string, string>>({});
   const [rowSaveStatus, setRowSaveStatus] = useState<Record<string, RowSaveStatus>>({});
   const pendingPatchesRef = useRef(new Map<string, CaseTablePersistPatch>());
-  const persistTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const preEditSnapshotsRef = useRef(new Map<string, CaseRecord>());
+  const persistChainRef = useRef(new Map<string, Promise<void>>());
   const savedIndicatorTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const recordsRef = useRef(records);
+  const recordsVersion = useMemo(
+    () => records.map((record) => `${record.shared.id}:${record.tracker.updatedAt}:${record.shared.caseType}`).join("|"),
+    [records],
+  );
   const [search, setSearch] = useState(initialSearch);
   const [attorneyIds, setAttorneyIds] = useState<string[]>([]);
   const [paralegal, setParalegal] = useState("all");
@@ -104,9 +137,14 @@ export function CaseTable({
   const tableRef = useRef<HTMLTableElement>(null);
   const [scrollWidth, setScrollWidth] = useState(2140);
 
+  const activeRecords = useMemo(
+    () => workingRecords.filter((record) => isActivePipelineCase(record, goals)),
+    [goals, workingRecords],
+  );
+
   const needsAttentionCount = useMemo(
-    () => workingRecords.filter((record) => getCaseCompletionScore(record, settings).percent < 85).length,
-    [settings, workingRecords],
+    () => activeRecords.filter((record) => getCaseCompletionScore(record, settings).percent < 85).length,
+    [activeRecords, settings],
   );
 
   const attorneys = users.filter((user) => user.role === "attorney");
@@ -280,29 +318,45 @@ export function CaseTable({
         if (pendingCaseIds.has(record.shared.id)) {
           return currentById.get(record.shared.id) ?? record;
         }
+        const currentRecord = currentById.get(record.shared.id);
+        if (currentRecord && currentRecord.tracker.updatedAt > record.tracker.updatedAt) {
+          return currentRecord;
+        }
         return record;
       });
     });
-  }, [records]);
+  }, [recordsVersion]);
 
   useEffect(() => {
+    function flushAllPendingWithKeepalive() {
+      for (const [caseId, patch] of pendingPatchesRef.current.entries()) {
+        const hasSharedChanges = patch.shared && Object.keys(patch.shared).length > 0;
+        const hasTrackerChanges = patch.tracker && Object.keys(patch.tracker).length > 0;
+        if (!hasSharedChanges && !hasTrackerChanges) continue;
+        void fetch(`/api/tracker/${caseId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...(hasSharedChanges ? { shared: patch.shared } : {}),
+            ...(hasTrackerChanges ? { tracker: patch.tracker, changeInput: patch.tracker } : {}),
+            markReviewed: true,
+          }),
+          keepalive: true,
+        });
+      }
+      pendingPatchesRef.current.clear();
+    }
+
     function flushAllPending() {
       for (const caseId of [...pendingPatchesRef.current.keys()]) {
-        const existingTimer = persistTimersRef.current.get(caseId);
-        if (existingTimer) {
-          clearTimeout(existingTimer);
-          persistTimersRef.current.delete(caseId);
-        }
         void flushPersist(caseId);
       }
     }
 
-    window.addEventListener("beforeunload", flushAllPending);
+    window.addEventListener("beforeunload", flushAllPendingWithKeepalive);
     return () => {
-      window.removeEventListener("beforeunload", flushAllPending);
+      window.removeEventListener("beforeunload", flushAllPendingWithKeepalive);
       flushAllPending();
-      for (const timer of persistTimersRef.current.values()) clearTimeout(timer);
-      persistTimersRef.current.clear();
       for (const timer of savedIndicatorTimersRef.current.values()) clearTimeout(timer);
       savedIndicatorTimersRef.current.clear();
     };
@@ -347,6 +401,12 @@ export function CaseTable({
     });
   }
 
+  function ensurePreEditSnapshot(caseId: string) {
+    if (preEditSnapshotsRef.current.has(caseId)) return;
+    const record = recordsRef.current.find((entry) => entry.shared.id === caseId);
+    if (record) preEditSnapshotsRef.current.set(caseId, structuredClone(record));
+  }
+
   function mergePersistPatch(caseId: string, patch: CaseTablePersistPatch) {
     const existing = pendingPatchesRef.current.get(caseId) ?? {};
     pendingPatchesRef.current.set(caseId, {
@@ -355,29 +415,19 @@ export function CaseTable({
     });
   }
 
-  function schedulePersist(caseId: string) {
-    const existingTimer = persistTimersRef.current.get(caseId);
-    if (existingTimer) clearTimeout(existingTimer);
-    const timer = setTimeout(() => {
-      persistTimersRef.current.delete(caseId);
-      void flushPersist(caseId);
-    }, AUTOSAVE_DELAY_MS);
-    persistTimersRef.current.set(caseId, timer);
-  }
-
-  function queuePersist(caseId: string, patch: CaseTablePersistPatch, options?: { immediate?: boolean }) {
+  function queuePersist(caseId: string, patch: CaseTablePersistPatch) {
+    ensurePreEditSnapshot(caseId);
     mergePersistPatch(caseId, patch);
     markRowSaving(caseId);
-    if (options?.immediate) {
-      const existingTimer = persistTimersRef.current.get(caseId);
-      if (existingTimer) {
-        clearTimeout(existingTimer);
-        persistTimersRef.current.delete(caseId);
-      }
-      void flushPersist(caseId);
-      return;
-    }
-    schedulePersist(caseId);
+    setRowSaveErrors((current) => {
+      if (!current[caseId]) return current;
+      const next = { ...current };
+      delete next[caseId];
+      return next;
+    });
+    const prior = persistChainRef.current.get(caseId) ?? Promise.resolve();
+    const next = prior.then(() => flushPersist(caseId));
+    persistChainRef.current.set(caseId, next);
   }
 
   async function flushPersist(caseId: string) {
@@ -393,7 +443,8 @@ export function CaseTable({
       }
 
       pendingPatchesRef.current.delete(caseId);
-      const snapshotBefore = recordsRef.current.find((record) => record.shared.id === caseId);
+      const snapshotBefore =
+        preEditSnapshotsRef.current.get(caseId) ?? recordsRef.current.find((record) => record.shared.id === caseId);
       if (!snapshotBefore) continue;
 
       setSaveMessage(null);
@@ -415,6 +466,10 @@ export function CaseTable({
         }
 
         const body = (await response.json()) as { tracker?: TrackerEntry };
+        if (body.tracker && hasTrackerChanges) {
+          assertTrackerPatchApplied(body.tracker, patch);
+        }
+
         if (body.tracker) {
           setWorkingRecords((current) =>
             current.map((record) => {
@@ -440,13 +495,18 @@ export function CaseTable({
             ),
           );
         }
+
+        preEditSnapshotsRef.current.delete(caseId);
         markRowSaved(caseId);
       } catch (error) {
         clearRowSaveStatus(caseId);
+        preEditSnapshotsRef.current.delete(caseId);
+        const message = error instanceof Error ? error.message : "Unable to save inline case update.";
         setWorkingRecords((current) =>
           current.map((record) => (record.shared.id === caseId ? snapshotBefore : record)),
         );
-        setSaveMessage(error instanceof Error ? error.message : "Unable to save inline case update.");
+        setSaveMessage(message);
+        setRowSaveErrors((current) => ({ ...current, [caseId]: message }));
       }
     }
   }
@@ -455,7 +515,6 @@ export function CaseTable({
     recordId: string,
     updater: (record: CaseRecord) => CaseRecord,
     persistPatch?: CaseTablePersistPatch,
-    options?: { immediate?: boolean },
   ) {
     setWorkingRecords((current) =>
       current.map((record) => {
@@ -465,7 +524,7 @@ export function CaseTable({
     );
 
     if (persistPatch) {
-      queuePersist(recordId, persistPatch, options);
+      queuePersist(recordId, persistPatch);
     }
   }
 
@@ -480,7 +539,6 @@ export function CaseTable({
         },
       }),
       { shared: { [key]: value } },
-      { immediate: true },
     );
   }
 
@@ -526,9 +584,7 @@ export function CaseTable({
     );
 
     if (persistPatch) {
-      queuePersist(recordId, persistPatch, {
-        immediate: key === "caseStage" || key === "targetResolutionQuarter" || key === "liability",
-      });
+      queuePersist(recordId, persistPatch);
     }
   }
 
@@ -570,19 +626,25 @@ export function CaseTable({
               </Button>
             ) : null}
             <p className="text-sm text-muted-foreground lg:ml-auto">
-              {status === "all" ? (
-                <>Showing {filteredRecords.length} of {workingRecords.length} cases</>
+              {status === "Active" ? (
+                filteredRecords.length === activeRecords.length ? (
+                  <>{activeRecords.length} active case{activeRecords.length === 1 ? "" : "s"}</>
+                ) : (
+                  <>
+                    Showing {filteredRecords.length} of {activeRecords.length} active case{activeRecords.length === 1 ? "" : "s"}
+                  </>
+                )
+              ) : status === "all" ? (
+                <>{activeRecords.length} active case{activeRecords.length === 1 ? "" : "s"}</>
               ) : (
                 <>
-                  Showing {filteredRecords.length} {status.toLowerCase()} case{filteredRecords.length === 1 ? "" : "s"}
-                  {filteredRecords.length !== workingRecords.length ? (
-                    <> of {workingRecords.length} total</>
-                  ) : null}
+                  {filteredRecords.length} {status.toLowerCase()} case{filteredRecords.length === 1 ? "" : "s"}
                 </>
               )}
             </p>
           </div>
-          {saveMessage ? <p className="text-sm font-medium text-pink-500">{saveMessage}</p> : null}
+          {saveMessage ? <p className="text-sm font-medium text-pink-600">{saveMessage}</p> : null}
+          <p className="text-xs text-muted-foreground">Changes save automatically when you update a field. A green checkmark confirms the server accepted the update.</p>
 
           {qualityFilter ? (
             <div className="rounded-lg border border-pink-200 bg-pink-50 px-4 py-3 text-sm text-navy-950">
@@ -592,7 +654,7 @@ export function CaseTable({
 
           {needsAttentionCount > 0 ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-              <span className="font-semibold">{needsAttentionCount} case{needsAttentionCount === 1 ? "" : "s"}</span> below 85% complete — sort by{" "}
+              <span className="font-semibold">{needsAttentionCount} active case{needsAttentionCount === 1 ? "" : "s"}</span> below 85% complete — sort by{" "}
               <strong>% Complete</strong> (lowest first). Use column header dropdowns to filter.
             </div>
           ) : null}
@@ -722,6 +784,7 @@ export function CaseTable({
             <TableBody>
               {filteredRecords.map((record) => {
                 const saveStatus = rowSaveStatus[record.shared.id];
+                const saveError = rowSaveErrors[record.shared.id];
 
                 return (
                   <TableRow key={record.shared.id}>
@@ -792,32 +855,35 @@ export function CaseTable({
                     </TableCell>
                     <TableCell>
                       <InlineSelect value={record.tracker.caseStage} onChange={(value) => updateTrackerField(record.shared.id, "caseStage", value as CaseStage)}>
-                        {CASE_STAGE_OPTIONS.map((option) => (
+                        {stageSelectOptions(record.tracker.caseStage).map((option) => (
                           <option key={option} value={option}>{option}</option>
                         ))}
                       </InlineSelect>
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        {saveStatus === "saving" ? (
-                          <span className="inline-flex w-5 shrink-0 justify-center" title="Saving…">
-                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
-                            <span className="sr-only">Saving</span>
-                          </span>
-                        ) : saveStatus === "saved" ? (
-                          <span className="inline-flex w-5 shrink-0 justify-center" title="Saved">
-                            <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
-                            <span className="sr-only">Saved</span>
-                          </span>
-                        ) : (
-                          <span className="w-5 shrink-0" aria-hidden />
-                        )}
-                        <Button asChild variant="outline" size="sm">
-                          <Link href={`/cases/${record.shared.id}`} target="_blank" rel="noopener noreferrer">
-                            <Eye className="h-4 w-4" />
-                            View
-                          </Link>
-                        </Button>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          {saveStatus === "saving" ? (
+                            <span className="inline-flex w-5 shrink-0 justify-center" title="Saving…">
+                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+                              <span className="sr-only">Saving</span>
+                            </span>
+                          ) : saveStatus === "saved" ? (
+                            <span className="inline-flex w-5 shrink-0 justify-center" title="Saved">
+                              <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
+                              <span className="sr-only">Saved</span>
+                            </span>
+                          ) : (
+                            <span className="w-5 shrink-0" aria-hidden />
+                          )}
+                          <Button asChild variant="outline" size="sm">
+                            <Link href={`/cases/${record.shared.id}`} target="_blank" rel="noopener noreferrer">
+                              <Eye className="h-4 w-4" />
+                              View
+                            </Link>
+                          </Button>
+                        </div>
+                        {saveError ? <p className="max-w-32 text-xs font-medium text-pink-600">{saveError}</p> : null}
                       </div>
                     </TableCell>
                   </TableRow>

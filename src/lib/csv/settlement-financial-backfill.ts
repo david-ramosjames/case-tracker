@@ -4,7 +4,7 @@ import {
   CASE_BACKFILL_REFERRAL_FEE_HEADERS,
   CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS,
 } from "@/lib/csv/case-backfill";
-import { cleanCaseNumber, getCsvCellAny, hasCsvHeaderAny, parseCsv, parseSheetDate } from "@/lib/csv/parse";
+import { cleanCaseNumber, getCsvCellAny, hasCsvHeaderAny, normalizeCsvHeader, parseCsv, parseSheetDate } from "@/lib/csv/parse";
 import { deriveResultQuarterFromDisburseDate } from "@/lib/case-options";
 import { deriveFeePercentFromSettlement } from "@/lib/fee-percent";
 import { type CaseStage, type ManualDisbursementInput, type SettlementResult, type TrackerUpdateInput } from "@/lib/types";
@@ -44,6 +44,7 @@ export const SETTLEMENT_FINANCIAL_SETTLEMENT_AMOUNT_HEADERS = [
 export const SETTLEMENT_FINANCIAL_FULL_SETTLEMENT_HEADERS = [
   "Status",
   "Case Status",
+  "Pipeline Status",
   "Full Settlement",
   "Full settlement",
 ] as const;
@@ -55,6 +56,7 @@ export type SettlementFinancialClaimLine = {
   settlementAmount: number | null;
   attorneyFees: number | null;
   fullSettlement: boolean;
+  statusProvided: boolean;
 };
 
 export type ParsedSettlementFinancialBackfillRow = {
@@ -65,6 +67,8 @@ export type ParsedSettlementFinancialBackfillRow = {
   manualDisbursements: ManualDisbursementInput[];
   lockFinancialBackfill: boolean;
   lockReferralFee: boolean;
+  /** Status column says Active — keep partial financial data but do not leave case on Settled. */
+  keepCaseActive: boolean;
 };
 
 export function hasSettlementFinancialBackfillHeaders(csvText: string) {
@@ -125,7 +129,7 @@ function parseClaimLine(
     attorneyFees = parseMoney(attorneyFeesRaw);
   }
 
-  const statusRaw = getCsvCellAny(row, headers, [...SETTLEMENT_FINANCIAL_FULL_SETTLEMENT_HEADERS]);
+  const statusRaw = getStatusCell(row, headers);
   const fullSettlement = parseFullSettlementCell(statusRaw);
 
   const hasData =
@@ -146,6 +150,7 @@ function parseClaimLine(
       settlementAmount,
       attorneyFees,
       fullSettlement,
+      statusProvided: Boolean(statusRaw.trim()),
     },
   };
 }
@@ -173,7 +178,9 @@ function buildGroupedBackfillRow(
       ? closedDates.sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0]
       : null;
   const hasClosedDate = Boolean(latestClosedDate);
+  const statusProvided = claims.some((claim) => claim.statusProvided);
   const fullSettlement = claims.some((claim) => claim.fullSettlement);
+  const keepCaseActive = hasClosedDate && statusProvided && !fullSettlement;
 
   let manualDisbursements: ManualDisbursementInput[] = [];
 
@@ -223,6 +230,10 @@ function buildGroupedBackfillRow(
     } else {
       result.disbursedStatus = "No";
       result.checkStatus = "No";
+      result.checkDisbursedAt = null;
+      result.disburseDate = null;
+      result.settlementDate = null;
+      result.resultQuarter = null;
       tracker.multipleDisbursementsEnabled = true;
       tracker.expectedDisbursementCount = Math.max(claims.length + 1, claims.length);
     }
@@ -240,6 +251,7 @@ function buildGroupedBackfillRow(
     manualDisbursements,
     lockFinancialBackfill,
     lockReferralFee,
+    keepCaseActive,
   };
 }
 
@@ -279,4 +291,16 @@ function parseFullSettlementCell(value: string) {
     return true;
   }
   return false;
+}
+
+function getStatusCell(row: string[], headers: string[]) {
+  const direct = getCsvCellAny(row, headers, [...SETTLEMENT_FINANCIAL_FULL_SETTLEMENT_HEADERS]);
+  if (direct) return direct;
+
+  const statusIndex = headers.findIndex((header) => {
+    const normalized = normalizeCsvHeader(header);
+    return normalized === "status" || normalized.endsWith(" status") || normalized.includes("pipeline");
+  });
+  if (statusIndex === -1) return "";
+  return row[statusIndex]?.trim() ?? "";
 }

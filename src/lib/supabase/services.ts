@@ -702,7 +702,14 @@ export async function importSettlementFinancialBackfillRows(
 
       try {
         const caseNumber = cleanCaseNumber(existing.shared.caseNumber);
-        const mergedTracker = mergeTrackerImport(existing.tracker, row.tracker);
+        let mergedTracker = mergeTrackerImport(existing.tracker, row.tracker);
+
+        if (row.keepCaseActive && existing.tracker.caseStage === "Settled" && admin) {
+          const priorStage = await lookupPriorCaseStageBeforeSettlement(admin, existing.tracker.id);
+          if (priorStage) {
+            mergedTracker = { ...mergedTracker, caseStage: priorStage };
+          }
+        }
 
         if (admin && row.lockFinancialBackfill && caseNumber) {
           const { error: clearError } = await admin
@@ -732,6 +739,34 @@ export async function importSettlementFinancialBackfillRows(
             },
           },
         );
+
+        if (admin && row.keepCaseActive) {
+          const trackerEntryId = existing.tracker.id;
+          const linkedCaseId = isLinkedDocketFlowCase(existing) ? existing.shared.id : null;
+          const filter = linkedCaseId
+            ? `tracker_entry_id.eq.${trackerEntryId},case_id.eq.${linkedCaseId}`
+            : `tracker_entry_id.eq.${trackerEntryId}`;
+          const { error: partialResultError } = await admin
+            .from("case_tracker_results")
+            .update({
+              disbursed_status: "No",
+              check_status: "No",
+              check_disbursed_at: null,
+              disburse_date: null,
+              settlement_date: null,
+              result_quarter: null,
+            })
+            .or(filter);
+          if (partialResultError) throw new Error(partialResultError.message);
+
+          if (mergedTracker.caseStage && mergedTracker.caseStage !== "Settled") {
+            const { error: stageError } = await admin
+              .from("case_tracker_entries")
+              .update({ case_stage: toDatabaseStage(mergedTracker.caseStage) })
+              .eq("id", trackerEntryId);
+            if (stageError) throw new Error(stageError.message);
+          }
+        }
 
         if (row.result.feePercent != null && admin) {
           const trackerEntryId = existing.tracker.id;
@@ -810,6 +845,7 @@ export async function updateSharedCaseFields(
   const payload: { status?: string; case_type?: string | null; date_of_incident?: string | null } = {};
 
   const record = await getCaseById(caseId);
+  const linkedCaseId = record && isLinkedDocketFlowCase(record) ? record.shared.id : null;
   let statusToWrite = options?.explicitStatus;
   if (!statusToWrite) {
     statusToWrite = record
@@ -819,14 +855,21 @@ export async function updateSharedCaseFields(
   if (statusToWrite) payload.status = statusToWrite === "Closed" ? "archived" : "active";
   if (input.caseType !== undefined) {
     const trimmed = input.caseType.trim();
-    payload.case_type = trimmed ? normalizeCaseType(trimmed) : null;
+    const normalizedType = trimmed ? normalizeCaseType(trimmed) : null;
+    if (linkedCaseId) {
+      payload.case_type = normalizedType;
+    } else {
+      const { error } = await trackerClient
+        .from("case_tracker_entries")
+        .update({ case_type: normalizedType })
+        .or(`case_id.eq.${caseId},id.eq.${caseId}`);
+      if (error) throw error;
+    }
   }
   if (input.dateOfIncident !== undefined) {
     payload.date_of_incident = input.dateOfIncident ? toDateOnly(input.dateOfIncident) : null;
   }
 
-  // Only write DocketFlow shared fields when this tracker row is linked to a real case.
-  const linkedCaseId = record && isLinkedDocketFlowCase(record) ? record.shared.id : null;
   if (Object.keys(payload).length > 0 && linkedCaseId) {
     const { error } = await sharedClient.from("cases").update(payload).eq("id", linkedCaseId);
     if (error) throw error;
@@ -1006,6 +1049,35 @@ async function syncDisbursementPartyOverrides(
     const { error } = await admin.from("case_tracker_disbursements").update(update).eq("id", override.id);
     if (error) throw new Error(error.message);
   }
+}
+
+async function lookupPriorCaseStageBeforeSettlement(
+  admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
+  trackerEntryId: string,
+): Promise<CaseStage | null> {
+  const { data, error } = await admin
+    .from("case_tracker_entry_versions")
+    .select("old_values, new_values")
+    .eq("tracker_entry_id", trackerEntryId)
+    .order("changed_at", { ascending: false })
+    .limit(30);
+
+  if (error) throw new Error(error.message);
+
+  for (const row of data ?? []) {
+    const oldValues = asObject(row.old_values);
+    const newValues = asObject(row.new_values);
+    const newStage = toStringOrNull(newValues.case_stage);
+    const oldStage = toStringOrNull(oldValues.case_stage);
+    if (!newStage || !oldStage) continue;
+    const normalizedNew = normalizeStage(newStage);
+    const normalizedOld = normalizeStage(oldStage);
+    if (normalizedNew === "Settled" && normalizedOld !== "Settled") {
+      return normalizedOld;
+    }
+  }
+
+  return null;
 }
 
 async function recomputeCaseResultFromDisbursements(
@@ -1396,11 +1468,13 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
           ? sheetSettlementDate
           : null);
     const resolvedDisburseDate =
-      aggregated?.disburseDate ?? (allPartiesDisbursed && sheetDisburseDate ? sheetDisburseDate : null);
+      aggregated?.disburseDate ?? (sheetDisburseDate ? toDateOnly(sheetDisburseDate) : null);
     const resolvedDisbursedStatus = aggregated?.disbursedStatus ?? (allPartiesDisbursed ? "Yes" : "No");
     const resolvedCheckDisbursedAt =
       aggregated?.checkDisbursedAt ??
-      (resolvedDisburseDate ? new Date(`${resolvedDisburseDate}T12:00:00.000Z`).toISOString() : null);
+      (allPartiesDisbursed && resolvedDisburseDate
+        ? new Date(`${resolvedDisburseDate}T12:00:00.000Z`).toISOString()
+        : null);
     const resolvedResultQuarter =
       aggregated?.resultQuarter ??
       (resolvedDisburseDate ? deriveResultQuarterFromDisburseDate(resolvedDisburseDate) : null);

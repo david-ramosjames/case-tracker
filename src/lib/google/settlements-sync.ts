@@ -78,6 +78,8 @@ export function parseSettlementSheetRows(rows: string[][], spreadsheetId: string
   const disbursedIdx = findSheetColumnIndex(header, [
     (cell) => cell.includes("date") && cell.includes("disburs"),
     (cell) => cell === "date disbursed" || cell === "disburse date" || cell === "disbursed date",
+    (cell) => cell.includes("disbursed") && cell.includes("date"),
+    (cell) => cell === "disbursed",
   ]);
 
   const resolvedCountIdx = countIdx >= 0 ? countIdx : 1;
@@ -100,12 +102,13 @@ export function parseSettlementSheetRows(rows: string[][], spreadsheetId: string
     const fullSettlement = parseSheetYesNo(row[resolvedFullSettlementIdx] ?? "");
     const disburseDate = parseSheetDate(row[resolvedDisbursedIdx] ?? "");
     const partyLabel = (row[resolvedClientIdx] ?? "").trim() || null;
+    const pendingRemaining = disburseDate ? false : isPendingDisbursementCountCell(countCell);
 
     parsed.push({
       sheetRowKey: `${spreadsheetId}:${sheetRowNumber}`,
       caseNumber,
       partyLabel,
-      pendingRemaining: isPendingDisbursementCountCell(countCell),
+      pendingRemaining,
       settlementDate,
       fullSettlement,
       disburseDate,

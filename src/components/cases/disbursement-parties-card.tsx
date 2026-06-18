@@ -17,7 +17,7 @@ import {
   hasMultipleDisbursements,
 } from "@/lib/disbursements";
 import { type CaseDisbursement, type CaseRecord } from "@/lib/types";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatCurrency, formatDate, formatOptionalDate } from "@/lib/utils";
 
 type DisbursementPartiesCardProps = {
   record: CaseRecord;
@@ -248,7 +248,7 @@ export function DisbursementPartiesCard({
                     </div>
                     <div>
                       <dt className="text-muted-foreground">Disburse date</dt>
-                      <dd>{formatDate(item.disburseDate) || "—"}</dd>
+                      <dd>{formatOptionalDate(item.disburseDate)}</dd>
                     </div>
                   </dl>
                 </div>
@@ -307,7 +307,7 @@ function SheetPartyView({
         </div>
         <div>
           <dt className="text-muted-foreground">Disburse date</dt>
-          <dd>{formatDate(item.disburseDate) || "—"}</dd>
+          <dd>{formatOptionalDate(item.disburseDate)}</dd>
         </div>
       </dl>
     </div>

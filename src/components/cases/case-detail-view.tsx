@@ -1024,7 +1024,7 @@ export function CaseDetailView({
               <CardContent className="grid gap-4 md:grid-cols-3">
             {!isResultsEditing ? (
               <>
-                <Info label="Settlement Date" value={formatDate(tracker.result.settlementDate)} />
+                <Info label="Settlement Date" value={formatOptionalDate(tracker.result.settlementDate)} />
                 <Info label="Settlement Amount" value={formatCurrency(tracker.result.settlementAmount)} />
                 <Info label="Fee Percent" value={`${Math.round((tracker.result.feePercent ?? 0) * 100)}%`} />
                 <Info label="RJL Attorney Fees" value={formatCurrency(tracker.result.attorneyFees)} />
@@ -1033,7 +1033,7 @@ export function CaseDetailView({
                 <Info label="Check" value={tracker.result.checkStatus} />
                 <Info label="Reductions" value={coerceReductionsStatus(tracker.result.reductionsStatus)} />
                 <Info label="Disbursed" value={tracker.result.disbursedStatus} />
-                <Info label="Disburse Date" value={formatDate(tracker.result.disburseDate)} />
+                <Info label="Disburse Date" value={formatOptionalDate(tracker.result.disburseDate)} />
                 <Info label="Result Quarter" value={tracker.result.resultQuarter ?? "Not set"} />
               </>
             ) : (
