@@ -121,12 +121,12 @@ export function OutputView({
         {
           periodMode,
           periodYear,
-          pipelineGoals: attorneyOnlyGoals,
+          pipelineGoals: goals,
           scopedAttorneyIds: attorneyIds,
           firmCalendarGoalMode,
         },
       ),
-    [attorneyIds, attorneyOnlyGoals, filteredRecords, firmCalendarGoalMode, periodMode, periodYear, scopedCommissionGoals],
+    [attorneyIds, attorneyOnlyGoals, filteredRecords, firmCalendarGoalMode, goals, periodMode, periodYear, scopedCommissionGoals],
   );
   const { results } = output;
 
