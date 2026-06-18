@@ -2206,6 +2206,39 @@ function parseMonthlyGoalsRow(value: unknown): Record<string, number> {
   return monthlyGoals;
 }
 
+function rethrowAttorneyGoalSaveError(error: unknown): never {
+  const record = error && typeof error === "object" ? (error as Record<string, unknown>) : null;
+  const message = typeof record?.message === "string" ? record.message : "";
+  const details = typeof record?.details === "string" ? record.details : "";
+  const text = `${message} ${details}`.toLowerCase();
+
+  if (text.includes("calendar_plug")) {
+    throw new Error(
+      "Calendar plug columns are missing in the database. Run supabase/sql/033_calendar_plug_goals.sql in Supabase.",
+    );
+  }
+  if (text.includes("goal_scope")) {
+    throw new Error(
+      "Goal scope column is missing in the database. Run supabase/sql/032_firm_outperform_goal.sql in Supabase.",
+    );
+  }
+  if (text.includes("monthly_fee_goals") || text.includes("fee_q1_goal")) {
+    throw new Error(
+      "RJL fee goal columns are missing in the database. Run supabase/sql/026_attorney_fee_goals.sql in Supabase.",
+    );
+  }
+  if (text.includes("monthly_goals")) {
+    throw new Error(
+      "Monthly goals column is missing in the database. Run supabase/sql/020_attorney_goals_monthly.sql in Supabase.",
+    );
+  }
+
+  const combined = [message, details].filter(Boolean).join(" — ");
+  if (combined) throw new Error(combined);
+  if (error instanceof Error && error.message) throw error;
+  throw new Error("Unable to save attorney goal.");
+}
+
 export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<AttorneyGoal> {
   const client = await createTrackerClient();
   const goalScope = normalizeGoalScope(input.goalScope);
@@ -2222,7 +2255,6 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
 
   const payload = {
     attorney_name: isFirmGoal ? FIRM_OUTPERFORM_GOAL_ATTORNEY_NAME : input.attorneyName,
-    attorney_user_id: isFirmGoal ? null : input.attorneyId || null,
     goal_scope: goalScope,
     year: input.year,
     annual_fee_goal: annualGrossGoal,
@@ -2243,28 +2275,35 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     fee_q4_goal: input.feeQ4Goal,
   };
 
-  const { data, error } = input.goalId
-    ? await client.from("attorney_goals").update(payload).eq("id", input.goalId).select("*").single()
-    : await client
-        .from("attorney_goals")
-        .upsert(payload, { onConflict: "attorney_name,year" })
-        .select("*")
-        .single();
+  try {
+    const { data, error } = input.goalId
+      ? await client.from("attorney_goals").update(payload).eq("id", input.goalId).select("*").single()
+      : await client
+          .from("attorney_goals")
+          .upsert(
+            {
+              ...payload,
+              // Contacts live in public.contacts; attorney_user_id FK references auth.users only.
+              attorney_user_id: null,
+            },
+            { onConflict: "attorney_name,year" },
+          )
+          .select("*")
+          .single();
 
-  if (error) {
-    if (error.message?.includes("calendar_plug")) {
-      throw new Error(
-        "Calendar plug columns are missing in the database. Run supabase/sql/033_calendar_plug_goals.sql in Supabase.",
-      );
+    if (error) {
+      if (input.goalId && error.code === "PGRST116") {
+        throw new Error("Goal not found. Refresh the page and try again.");
+      }
+      rethrowAttorneyGoalSaveError(error);
     }
-    if (input.goalId && error.code === "PGRST116") {
-      throw new Error("Goal not found. Refresh the page and try again.");
-    }
-    throw error;
-  }
 
-  return {
-    id: toString(data.id, "goal"),
+    if (!data) {
+      throw new Error("Goal save returned no data. Refresh the page and try again.");
+    }
+
+    return {
+      id: toString(data.id, "goal"),
     attorneyId: isFirmGoal ? FIRM_OUTPERFORM_GOAL_ATTORNEY_ID : input.attorneyId,
     goalScope,
     year: input.year,
@@ -2286,6 +2325,9 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     feeQ3Goal: Number(data.fee_q3_goal ?? 0),
     feeQ4Goal: Number(data.fee_q4_goal ?? 0),
   };
+  } catch (error) {
+    rethrowAttorneyGoalSaveError(error);
+  }
 }
 
 export async function deleteAttorneyGoal(goalId: string): Promise<void> {

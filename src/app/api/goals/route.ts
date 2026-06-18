@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
 import { FIRM_OUTPERFORM_GOAL_ATTORNEY_ID, FIRM_OUTPERFORM_GOAL_ATTORNEY_NAME } from "@/lib/firm-goals";
 import { upsertAttorneyGoal, type AttorneyGoalInput } from "@/lib/supabase/services";
+import { errorMessage } from "@/lib/utils";
 
 export async function POST(request: Request) {
   try {
@@ -47,7 +48,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ goal });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to save attorney goal.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const message = errorMessage(error);
+    return NextResponse.json({ error: message || "Unable to save attorney goal." }, { status: 500 });
   }
 }
