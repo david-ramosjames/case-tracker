@@ -331,12 +331,15 @@ export async function updateTrackerEntry(
   };
   const requestedResult = input.result;
   const previousStage = existingTracker?.caseStage;
-  const { data, error } = await client
-    .from("case_tracker_entries")
-    .update(payload)
-    .or(`case_id.eq.${caseId},id.eq.${caseId}`)
-    .select("*")
-    .maybeSingle();
+  let updateQuery = client.from("case_tracker_entries").update(payload);
+  if (hasPersistedTrackerEntry(existingTracker)) {
+    updateQuery = updateQuery.eq("id", existingTracker!.id);
+  } else if (existingRecord && isLinkedDocketFlowCase(existingRecord)) {
+    updateQuery = updateQuery.eq("case_id", existingRecord.shared.id);
+  } else {
+    updateQuery = updateQuery.or(`case_id.eq.${caseId},id.eq.${caseId}`);
+  }
+  const { data, error } = await updateQuery.select("*").maybeSingle();
 
   if (error) throw error;
   if (data) {
@@ -409,16 +412,30 @@ export async function updateTrackerEntry(
     return { tracker: refreshed?.tracker ?? tracker, activity: activity ?? undefined };
   }
 
-  if (existingTracker) {
+  if (hasPersistedTrackerEntry(existingTracker)) {
     throw new Error("Tracker entry could not be updated.");
+  }
+
+  const linkedInsertCaseId =
+    existingRecord && isLinkedDocketFlowCase(existingRecord) && isUuid(existingRecord.shared.id)
+      ? existingRecord.shared.id
+      : isUuid(caseId)
+        ? caseId
+        : null;
+  const insertRow: Record<string, unknown> = {
+    ...payload,
+    case_id: linkedInsertCaseId,
+  };
+  if (existingRecord?.shared.caseNumber) {
+    insertRow.case_number = cleanCaseNumber(existingRecord.shared.caseNumber);
+  }
+  if (existingRecord?.shared.clientName) {
+    insertRow.client_name_snapshot = existingRecord.shared.clientName;
   }
 
   const { data: inserted, error: insertError } = await client
     .from("case_tracker_entries")
-    .insert({
-      ...payload,
-      case_id: caseId,
-    })
+    .insert(insertRow)
     .select("*")
     .single();
 
@@ -699,7 +716,12 @@ export async function importSettlementFinancialBackfillRows(
           caseId,
           {
             ...mergedTracker,
-            ...(row.lockFinancialBackfill ? { manualDisbursements: row.manualDisbursements } : {}),
+            ...(row.lockFinancialBackfill
+              ? {
+                  manualDisbursements: row.manualDisbursements,
+                  result: { ...existing.tracker.result, ...row.result },
+                }
+              : {}),
           },
           {
             actor: options.actor,
@@ -2241,6 +2263,11 @@ function trackerUpdateToRow(input: TrackerUpdateInput, markReviewed = true) {
 function isUuid(value: string | null | undefined) {
   if (!value) return false;
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function hasPersistedTrackerEntry(tracker: TrackerEntry | null | undefined) {
+  if (!tracker?.id) return false;
+  return isUuid(tracker.id) && !tracker.id.startsWith("pending-");
 }
 
 function commentRowToComment(row: UnknownRow, fallbackAuthorName?: string): TrackerComment {

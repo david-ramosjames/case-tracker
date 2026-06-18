@@ -273,7 +273,34 @@ export function CaseTable({
   }, [workingRecords]);
 
   useEffect(() => {
+    setWorkingRecords((current) => {
+      const pendingCaseIds = new Set(pendingPatchesRef.current.keys());
+      const currentById = new Map(current.map((record) => [record.shared.id, record]));
+      return records.map((record) => {
+        if (pendingCaseIds.has(record.shared.id)) {
+          return currentById.get(record.shared.id) ?? record;
+        }
+        return record;
+      });
+    });
+  }, [records]);
+
+  useEffect(() => {
+    function flushAllPending() {
+      for (const caseId of [...pendingPatchesRef.current.keys()]) {
+        const existingTimer = persistTimersRef.current.get(caseId);
+        if (existingTimer) {
+          clearTimeout(existingTimer);
+          persistTimersRef.current.delete(caseId);
+        }
+        void flushPersist(caseId);
+      }
+    }
+
+    window.addEventListener("beforeunload", flushAllPending);
     return () => {
+      window.removeEventListener("beforeunload", flushAllPending);
+      flushAllPending();
       for (const timer of persistTimersRef.current.values()) clearTimeout(timer);
       persistTimersRef.current.clear();
       for (const timer of savedIndicatorTimersRef.current.values()) clearTimeout(timer);
@@ -338,9 +365,18 @@ export function CaseTable({
     persistTimersRef.current.set(caseId, timer);
   }
 
-  function queuePersist(caseId: string, patch: CaseTablePersistPatch) {
+  function queuePersist(caseId: string, patch: CaseTablePersistPatch, options?: { immediate?: boolean }) {
     mergePersistPatch(caseId, patch);
     markRowSaving(caseId);
+    if (options?.immediate) {
+      const existingTimer = persistTimersRef.current.get(caseId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        persistTimersRef.current.delete(caseId);
+      }
+      void flushPersist(caseId);
+      return;
+    }
     schedulePersist(caseId);
   }
 
@@ -419,6 +455,7 @@ export function CaseTable({
     recordId: string,
     updater: (record: CaseRecord) => CaseRecord,
     persistPatch?: CaseTablePersistPatch,
+    options?: { immediate?: boolean },
   ) {
     setWorkingRecords((current) =>
       current.map((record) => {
@@ -428,7 +465,7 @@ export function CaseTable({
     );
 
     if (persistPatch) {
-      queuePersist(recordId, persistPatch);
+      queuePersist(recordId, persistPatch, options);
     }
   }
 
@@ -443,6 +480,7 @@ export function CaseTable({
         },
       }),
       { shared: { [key]: value } },
+      { immediate: true },
     );
   }
 
@@ -488,7 +526,9 @@ export function CaseTable({
     );
 
     if (persistPatch) {
-      queuePersist(recordId, persistPatch);
+      queuePersist(recordId, persistPatch, {
+        immediate: key === "caseStage" || key === "targetResolutionQuarter" || key === "liability",
+      });
     }
   }
 
