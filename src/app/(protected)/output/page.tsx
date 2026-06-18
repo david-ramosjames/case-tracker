@@ -12,7 +12,7 @@ export default async function OutputPage() {
       <PageHeader
         eyebrow="Output"
         title="Firm results and pacing"
-        description="Roll up case statuses, settled versus disbursed results, completed disbursements, and commission threshold. Filter by attorney or paralegal."
+        description="Roll up case statuses, settled versus disbursed results, completed disbursements, and commission threshold. Filter by attorney or firm total."
       />
       <OutputView records={records} goals={goals} users={users} />
     </>

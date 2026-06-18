@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Select } from "@/components/ui/select";
@@ -20,6 +19,32 @@ import { getGoalYearOptions } from "@/lib/case-options";
 import { type AppUser, type AttorneyGoal, type CaseRecord } from "@/lib/types";
 import { formatCurrency, percent } from "@/lib/utils";
 
+const DEFAULT_FIRM_SCOPE = "firm:combined";
+
+type OutputScope =
+  | { kind: "attorney"; attorneyId: string }
+  | { kind: "firm"; goalMode: FirmCalendarGoalMode };
+
+function attorneyScopeValue(attorneyId: string) {
+  return `attorney:${attorneyId}`;
+}
+
+function parseOutputScope(value: string): OutputScope {
+  if (value.startsWith("attorney:")) {
+    return { kind: "attorney", attorneyId: value.slice("attorney:".length) };
+  }
+  if (value === "firm:attorneys") return { kind: "firm", goalMode: "attorneys" };
+  if (value === "firm:combined") return { kind: "firm", goalMode: "combined" };
+  return { kind: "firm", goalMode: "outperform" };
+}
+
+function outputScopeToValue(scope: OutputScope) {
+  if (scope.kind === "attorney") return attorneyScopeValue(scope.attorneyId);
+  if (scope.goalMode === "attorneys") return "firm:attorneys";
+  if (scope.goalMode === "combined") return "firm:combined";
+  return "firm:outperform";
+}
+
 export function OutputView({
   records,
   goals,
@@ -29,31 +54,30 @@ export function OutputView({
   goals: AttorneyGoal[];
   users: AppUser[];
 }) {
-  const [attorney, setAttorney] = useState("all");
-  const [paralegal, setParalegal] = useState("all");
+  const [scopeValue, setScopeValue] = useState(DEFAULT_FIRM_SCOPE);
   const [periodMode, setPeriodMode] = useState<OutputPeriodMode>("calendar");
   const [periodYear, setPeriodYear] = useState(() => new Date().getFullYear());
-  const [firmCalendarGoalMode, setFirmCalendarGoalMode] = useState<FirmCalendarGoalMode>("outperform");
+
+  const scope = useMemo(() => parseOutputScope(scopeValue), [scopeValue]);
+  const isFirmScope = scope.kind === "firm";
+  const selectedAttorneyId = scope.kind === "attorney" ? scope.attorneyId : null;
+  const firmCalendarGoalMode = scope.kind === "firm" ? scope.goalMode : undefined;
 
   const attorneys = users.filter((user) => user.role === "attorney");
-  const paralegals = users.filter((user) => user.role === "paralegal");
   const attorneyOnlyGoals = useMemo(() => getAttorneyOnlyGoals(goals), [goals]);
   const yearOptions = useMemo(() => getGoalYearOptions(), []);
 
   const filteredRecords = useMemo(() => {
-    return records.filter((record) => {
-      if (attorney !== "all" && record.shared.attorneyId !== attorney) return false;
-      if (paralegal !== "all" && record.shared.paralegalId !== paralegal) return false;
-      return true;
-    });
-  }, [attorney, paralegal, records]);
+    if (!selectedAttorneyId) return records;
+    return records.filter((record) => record.shared.attorneyId === selectedAttorneyId);
+  }, [records, selectedAttorneyId]);
 
   const attorneyIds = useMemo(
     () =>
-      attorney !== "all"
-        ? [attorney]
+      selectedAttorneyId
+        ? [selectedAttorneyId]
         : [...new Set(filteredRecords.map((record) => record.shared.attorneyId))],
-    [attorney, filteredRecords],
+    [filteredRecords, selectedAttorneyId],
   );
 
   const scopedCommissionGoals = useMemo(() => {
@@ -68,13 +92,13 @@ export function OutputView({
   const commissionYearOptions = useMemo(() => {
     const years = new Set<number>([...yearOptions, periodYear, new Date().getFullYear()]);
     for (const goal of attorneyOnlyGoals) {
-      if (attorney === "all" || goal.attorneyId === attorney) years.add(goal.year);
+      if (!selectedAttorneyId || goal.attorneyId === selectedAttorneyId) years.add(goal.year);
     }
     return [...years].sort((left, right) => right - left);
-  }, [attorney, attorneyOnlyGoals, periodYear, yearOptions]);
+  }, [attorneyOnlyGoals, periodYear, selectedAttorneyId, yearOptions]);
 
   useEffect(() => {
-    if (attorney === "all") {
+    if (isFirmScope) {
       setPeriodMode("calendar");
       setPeriodYear(new Date().getFullYear());
       return;
@@ -82,12 +106,12 @@ export function OutputView({
 
     setPeriodMode("commission");
     const attorneyGoal = attorneyOnlyGoals
-      .filter((goal) => goal.attorneyId === attorney)
+      .filter((goal) => goal.attorneyId === selectedAttorneyId)
       .sort((left, right) => right.year - left.year)[0];
     if (attorneyGoal) {
       setPeriodYear(attorneyGoal.year);
     }
-  }, [attorney, attorneyOnlyGoals]);
+  }, [attorneyOnlyGoals, isFirmScope, selectedAttorneyId]);
 
   const output = useMemo(
     () =>
@@ -99,18 +123,18 @@ export function OutputView({
           periodYear,
           pipelineGoals: attorneyOnlyGoals,
           scopedAttorneyIds: attorneyIds,
-          firmCalendarGoalMode: attorney === "all" ? firmCalendarGoalMode : undefined,
+          firmCalendarGoalMode,
         },
       ),
-    [attorney, attorneyIds, attorneyOnlyGoals, filteredRecords, firmCalendarGoalMode, periodMode, periodYear, scopedCommissionGoals],
+    [attorneyIds, attorneyOnlyGoals, filteredRecords, firmCalendarGoalMode, periodMode, periodYear, scopedCommissionGoals],
   );
   const { results } = output;
 
   const periodLabel = useMemo(() => {
     if (periodMode === "calendar") return String(periodYear);
     const anchorGoal =
-      (attorney !== "all"
-        ? attorneyOnlyGoals.find((goal) => goal.attorneyId === attorney && goal.year === periodYear)
+      (selectedAttorneyId
+        ? attorneyOnlyGoals.find((goal) => goal.attorneyId === selectedAttorneyId && goal.year === periodYear)
         : undefined) ??
       scopedCommissionGoals.find((goal) => goal.year === periodYear) ??
       scopedCommissionGoals[0];
@@ -118,16 +142,16 @@ export function OutputView({
       return formatCommissionYearPeriod(anchorGoal.year, anchorGoal.commissionYearStartMonth, anchorGoal.commissionMonthCount);
     }
     return String(periodYear);
-  }, [attorney, attorneyOnlyGoals, periodMode, periodYear, scopedCommissionGoals]);
+  }, [attorneyOnlyGoals, periodMode, periodYear, scopedCommissionGoals, selectedAttorneyId]);
 
   const periodDescription =
     periodMode === "calendar"
       ? `${periodYear} calendar year — settled and disbursed amounts use settlement/disburse dates in that year.`
-      : `${periodLabel} commission year — amounts use each attorney's commission period.`;
+      : `${periodLabel} commission year — amounts use this attorney's commission period.`;
 
   const goalDetailSuffix = useMemo(() => {
     if (periodMode === "calendar") {
-      if (attorney === "all") {
+      if (isFirmScope) {
         if (firmCalendarGoalMode === "combined") {
           return "goal (attorneys + Outperform for this calendar year)";
         }
@@ -139,16 +163,16 @@ export function OutputView({
       return "goal (sum of monthly targets in this calendar year)";
     }
     return results.firmOutperformGoal ? "Outperform goal" : "gross disbursements goal";
-  }, [attorney, firmCalendarGoalMode, periodMode, results.firmOutperformGoal]);
+  }, [firmCalendarGoalMode, isFirmScope, periodMode, results.firmOutperformGoal]);
 
-  const activeFilterCount = [attorney !== "all", paralegal !== "all"].filter(Boolean).length;
-  const selectedAttorneyName = attorneys.find((user) => user.id === attorney)?.name;
-  const selectedParalegalName = paralegals.find((user) => user.id === paralegal)?.name;
-
-  function clearFilters() {
-    setAttorney("all");
-    setParalegal("all");
-  }
+  const selectedScopeLabel = useMemo(() => {
+    if (scope.kind === "attorney") {
+      return attorneys.find((user) => user.id === scope.attorneyId)?.name ?? "Attorney";
+    }
+    if (scope.goalMode === "attorneys") return "Total attorney";
+    if (scope.goalMode === "combined") return "Total Firm (attorney + outperform)";
+    return "Firm Outperformance";
+  }, [attorneys, scope]);
 
   return (
     <div className="space-y-6">
@@ -158,56 +182,22 @@ export function OutputView({
             <div className="flex flex-wrap items-center gap-2">
               <SlidersHorizontal className="h-4 w-4 text-muted-foreground" />
               <span className="text-sm font-semibold text-navy-950">Filters</span>
-              {activeFilterCount > 0 ? <Badge variant="pink">{activeFilterCount}</Badge> : null}
-              {activeFilterCount > 0 ? (
-                <Button variant="ghost" size="sm" onClick={clearFilters}>
-                  Clear
-                </Button>
-              ) : null}
             </div>
             <p className="text-sm text-muted-foreground lg:ml-auto">
-              Showing {filteredRecords.length} of {records.length} cases
-              {selectedAttorneyName ? ` · ${selectedAttorneyName}` : ""}
-              {selectedParalegalName ? ` · ${selectedParalegalName}` : ""}
+              Showing {filteredRecords.length} of {records.length} cases · {selectedScopeLabel}
             </p>
           </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:max-w-4xl">
-            <Select value={attorney} onChange={(event) => setAttorney(event.target.value)} aria-label="Attorney">
-              <option value="all">All attorneys</option>
+          <div className={`mt-3 grid gap-3 ${selectedAttorneyId ? "sm:grid-cols-2 lg:grid-cols-3 lg:max-w-4xl" : "sm:grid-cols-2 lg:max-w-2xl"}`}>
+            <Select value={scopeValue} onChange={(event) => setScopeValue(event.target.value)} aria-label="View">
               {attorneys.map((item) => (
-                <option key={item.id} value={item.id}>
+                <option key={item.id} value={attorneyScopeValue(item.id)}>
                   {item.name}
                 </option>
               ))}
+              <option value="firm:attorneys">Total attorney</option>
+              <option value="firm:outperform">Firm Outperformance</option>
+              <option value="firm:combined">Total Firm (attorney + outperform)</option>
             </Select>
-            <Select value={paralegal} onChange={(event) => setParalegal(event.target.value)} aria-label="Paralegal">
-              <option value="all">All paralegals</option>
-              {paralegals.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </Select>
-            {attorney !== "all" ? (
-              <Select
-                value={periodMode}
-                onChange={(event) => setPeriodMode(event.target.value as OutputPeriodMode)}
-                aria-label="Period type"
-              >
-                <option value="calendar">Calendar year</option>
-                <option value="commission">Commission year</option>
-              </Select>
-            ) : (
-              <Select
-                value={firmCalendarGoalMode}
-                onChange={(event) => setFirmCalendarGoalMode(event.target.value as FirmCalendarGoalMode)}
-                aria-label="Firm calendar year goal"
-              >
-                <option value="outperform">Firm Outperform (calendar year)</option>
-                <option value="combined">Total firm (attorneys + Outperform)</option>
-                <option value="attorneys">Attorneys only (calendar year)</option>
-              </Select>
-            )}
             <Select
               value={String(periodYear)}
               onChange={(event) => setPeriodYear(Number(event.target.value))}
@@ -219,6 +209,16 @@ export function OutputView({
                 </option>
               ))}
             </Select>
+            {selectedAttorneyId ? (
+              <Select
+                value={periodMode}
+                onChange={(event) => setPeriodMode(event.target.value as OutputPeriodMode)}
+                aria-label="Period type"
+              >
+                <option value="calendar">Calendar year</option>
+                <option value="commission">Commission year</option>
+              </Select>
+            ) : null}
           </div>
           <p className="mt-3 text-xs text-muted-foreground">{periodDescription}</p>
         </CardContent>
@@ -245,8 +245,7 @@ export function OutputView({
         <CardHeader>
           <CardTitle>Results vs Goals</CardTitle>
           <CardDescription>
-            {periodDescription} Gross disbursements and RJL fees tracked vs top-down goals
-            {attorney !== "all" || paralegal !== "all" ? " (filtered)." : "."}
+            {periodDescription} Gross disbursements and RJL fees tracked vs top-down goals for {selectedScopeLabel}.
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
