@@ -117,9 +117,9 @@ function parseClaimLine(
   const closedDateRaw = getCsvCellAny(row, headers, [...SETTLEMENT_FINANCIAL_CLOSED_DATE_HEADERS]);
   const closedDate = closedDateRaw ? parseSheetDate(closedDateRaw)?.slice(0, 10) ?? null : null;
 
-  let settlementAmount = getCsvMoneyCellAny(row, headers, [...SETTLEMENT_FINANCIAL_SETTLEMENT_AMOUNT_HEADERS]);
+  const settlementAmount = getCsvMoneyCellAny(row, headers, [...SETTLEMENT_FINANCIAL_SETTLEMENT_AMOUNT_HEADERS]);
 
-  let attorneyFees = getCsvMoneyCellAny(row, headers, [...SETTLEMENT_FINANCIAL_ATTORNEY_FEES_HEADERS]);
+  const attorneyFees = getCsvMoneyCellAny(row, headers, [...SETTLEMENT_FINANCIAL_ATTORNEY_FEES_HEADERS]);
 
   const statusRaw = getStatusCell(row, headers);
   const fullSettlement = parseFullSettlementCell(statusRaw);

@@ -2637,39 +2637,6 @@ function buildCaseBackfillLookup(records: CaseRecord[]) {
   return byCaseNumber;
 }
 
-function mergeTrackerImport(existing: TrackerEntry, patch: TrackerUpdateInput): TrackerUpdateInput {
-  const merged = {
-    caseStage: patch.caseStage ?? existing.caseStage,
-    estimatedSettlementValue: patch.estimatedSettlementValue ?? existing.estimatedSettlementValue,
-    estimatedFeeValue: patch.estimatedFeeValue ?? existing.estimatedFeeValue,
-    targetResolutionQuarter: patch.targetResolutionQuarter ?? existing.targetResolutionQuarter,
-    confidenceLevel: patch.confidenceLevel ?? existing.confidenceLevel,
-    sourceOfEstimate: patch.sourceOfEstimate ?? existing.sourceOfEstimate,
-    liability: patch.liability ?? existing.liability,
-    caseSize: patch.caseSize ?? existing.caseSize,
-    minimumValue: patch.minimumValue ?? existing.minimumValue,
-    referralFee: patch.referralFee ?? existing.referralFee,
-    referralFeeArrangement: patch.referralFeeArrangement ?? existing.referralFeeArrangement,
-    balanceCtaInfo: patch.balanceCtaInfo ?? existing.balanceCtaInfo,
-    policyLimits: patch.policyLimits ?? existing.policyLimits,
-    policyInfoSource: patch.policyInfoSource ?? existing.policyInfoSource,
-    expectedLitigation: patch.expectedLitigation ?? existing.expectedLitigation,
-    sources: patch.sources ?? existing.sources,
-    injuries: patch.injuries ?? existing.injuries,
-    caseDescription: patch.caseDescription ?? existing.caseDescription,
-    statusNotes: patch.statusNotes ?? existing.statusNotes,
-    gvNotes: patch.gvNotes ?? existing.gvNotes,
-    lrjNotes: patch.lrjNotes ?? existing.lrjNotes,
-    lastQuarterlyCheckInAt: patch.lastQuarterlyCheckInAt ?? existing.lastQuarterlyCheckInAt,
-    lastSourcesLitUpdatedAt: patch.lastSourcesLitUpdatedAt ?? existing.lastSourcesLitUpdatedAt,
-    forecastNotes: patch.forecastNotes ?? existing.forecastNotes,
-  };
-  return {
-    ...merged,
-    expectedLitigation: coerceExpectedLitigationForStage(merged.caseStage, merged.expectedLitigation),
-  };
-}
-
 async function runSlackTrackerSideEffects(
   before: CaseRecord,
   afterTracker: TrackerEntry,

@@ -109,7 +109,7 @@ export function parseMoney(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return null;
 
-  let normalized = trimmed.replace(/[$\s]/g, "").replace(/,/g, "");
+  const normalized = trimmed.replace(/[$\s]/g, "").replace(/,/g, "");
   const kMatch = /^([\d.]+)k$/i.exec(normalized);
   if (kMatch) {
     const base = Number(kMatch[1]);
