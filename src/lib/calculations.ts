@@ -8,19 +8,28 @@ import {
 } from "@/lib/firm-goals";
 import {
   formatCommissionQuarterPeriod,
+  getCalendarYearElapsedPercentage,
   getCommissionQuarterForDate,
   getCommissionPeriodEndDate,
   getCommissionYearQuarterWindows,
   getCommissionYearStartDate,
   getCurrentCommissionYear,
   isTargetQuarterInCommissionYear,
+  parseTargetQuarterYear,
   type CommissionYearQuarter,
 } from "@/lib/commission-year";
 import {
+  getWeightedDisbursedFeesInCalendarYear,
   getWeightedDisbursedFeesInCommissionYear,
   getWeightedDisbursedFeesInCommissionQuarter,
+  getWeightedFeesSettledInCalendarYear,
+  getWeightedFeesSettledInCommissionYear,
+  getWeightedGrossDisbursedInCalendarYear,
   getWeightedGrossDisbursedInCommissionYear,
+  getWeightedGrossSettledInCalendarYear,
+  getWeightedGrossSettledInCommissionYear,
   getWeightedSettlementInCommissionQuarter,
+  recordHasDisbursementInCalendarYear,
   recordHasDisbursementInCommissionYear,
 } from "@/lib/disbursements";
 import {
@@ -35,6 +44,11 @@ import {
 } from "@/lib/types";
 import { daysSince, getCurrentQuarter, getQuarterElapsedPercentage, getYearElapsedPercentage } from "@/lib/utils";
 
+import {
+  goalOverlapsCalendarYear,
+  sumAttorneyFeeGoalsInCalendarYear,
+  sumAttorneyGrossGoalsInCalendarYear,
+} from "@/lib/attorney-goal-months";
 import { deriveForecastFeePercent, deriveResultFeePercent, resolveSettledFeePercent } from "@/lib/fee-percent";
 import { QUARTERLY_REVIEW_DAYS, SOURCES_LIT_REVIEW_DAYS } from "@/lib/slack/config";
 import { normalizeTargetQuarter } from "@/lib/target-quarter";
@@ -430,55 +444,138 @@ export function getFirmOutperformProgress(records: CaseRecord[], firmGoal: Attor
   };
 }
 
+export type OutputPeriodMode = "commission" | "calendar";
+
+export type FirmOutputMetricsOptions = {
+  periodMode?: OutputPeriodMode;
+  periodYear?: number;
+  goalYear?: number;
+  pipelineGoals?: AttorneyGoal[];
+};
+
+function sumOutputActuals(
+  records: CaseRecord[],
+  periodMode: OutputPeriodMode,
+  periodYear: number,
+  goalsByAttorney: Map<string, AttorneyGoal>,
+  firmGoal: AttorneyGoal | null,
+) {
+  let grossSettled = 0;
+  let grossDisbursed = 0;
+  let feesSettled = 0;
+  let feesDisbursed = 0;
+  let completedDisbursements = 0;
+
+  for (const record of records) {
+    if (periodMode === "calendar") {
+      grossSettled += getWeightedGrossSettledInCalendarYear(record, periodYear);
+      grossDisbursed += getWeightedGrossDisbursedInCalendarYear(record, periodYear);
+      feesSettled += getWeightedFeesSettledInCalendarYear(record, periodYear);
+      feesDisbursed += getWeightedDisbursedFeesInCalendarYear(record, periodYear);
+      if (recordHasDisbursementInCalendarYear(record, periodYear)) completedDisbursements += 1;
+      continue;
+    }
+
+    const attorneyGoal = goalsByAttorney.get(record.shared.attorneyId);
+    const commissionYear = attorneyGoal?.year ?? firmGoal?.year ?? periodYear;
+    const startMonth = attorneyGoal?.commissionYearStartMonth ?? firmGoal?.commissionYearStartMonth ?? 1;
+    grossSettled += getWeightedGrossSettledInCommissionYear(record, commissionYear, startMonth);
+    grossDisbursed += getWeightedGrossDisbursedInCommissionYear(record, commissionYear, startMonth);
+    feesSettled += getWeightedFeesSettledInCommissionYear(record, commissionYear, startMonth);
+    feesDisbursed += getWeightedDisbursedFeesInCommissionYear(record, commissionYear, startMonth);
+    if (recordHasDisbursementInCommissionYear(record, commissionYear, startMonth)) completedDisbursements += 1;
+  }
+
+  return { grossSettled, grossDisbursed, feesSettled, feesDisbursed, completedDisbursements };
+}
+
 export function getFirmOutputMetrics(
   records: CaseRecord[],
   goals: AttorneyGoal[],
-  goalYear?: number,
-  pipelineGoals?: AttorneyGoal[],
+  options: FirmOutputMetricsOptions = {},
 ) {
-  const allGoals = pipelineGoals ?? goals;
-  const attorneyScopedGoals = getAttorneyOnlyGoals(goalYear != null ? goals.filter((goal) => goal.year === goalYear) : goals);
-  const firmOutperformGoal =
-    goalYear != null
-      ? getFirmOutperformGoalForYear(allGoals, goalYear)
-      : getCurrentFirmOutperformGoal(allGoals);
-  const commissionAnchorGoal = firmOutperformGoal ?? attorneyScopedGoals[0] ?? null;
-  const scopedRecords =
-    commissionAnchorGoal != null
-      ? records.filter((record) => isRecordInGoalCommissionYear(record, commissionAnchorGoal))
-      : records;
+  const allGoals = options.pipelineGoals ?? goals;
+  const periodMode = options.periodMode ?? "commission";
+  const refDate = new Date();
+  const calendarYear = options.periodYear ?? refDate.getFullYear();
+  const commissionGoalYear =
+    periodMode === "commission" ? (options.periodYear ?? options.goalYear) : options.goalYear;
 
-  const annualGrossGoal = firmOutperformGoal?.annualGrossGoal ?? sum(attorneyScopedGoals.map((goal) => goal.annualGrossGoal));
+  const attorneyScopedGoals = getAttorneyOnlyGoals(
+    commissionGoalYear != null ? goals.filter((goal) => goal.year === commissionGoalYear) : goals,
+  );
+  const firmOutperformGoal =
+    commissionGoalYear != null
+      ? getFirmOutperformGoalForYear(allGoals, commissionGoalYear)
+      : getCurrentFirmOutperformGoal(allGoals);
+  const goalsByAttorney = new Map(attorneyScopedGoals.map((goal) => [goal.attorneyId, goal]));
+
+  const calendarAttorneyGoals =
+    periodMode === "calendar"
+      ? getAttorneyOnlyGoals(allGoals).filter((goal) => {
+          if (attorneyScopedGoals.length > 0 && !attorneyScopedGoals.some((item) => item.attorneyId === goal.attorneyId)) {
+            return false;
+          }
+          return goalOverlapsCalendarYear(goal, calendarYear);
+        })
+      : [];
+
+  const annualGrossGoal =
+    periodMode === "calendar"
+      ? firmOutperformGoal && goalOverlapsCalendarYear(firmOutperformGoal, calendarYear)
+        ? sumAttorneyGrossGoalsInCalendarYear([firmOutperformGoal], calendarYear)
+        : sumAttorneyGrossGoalsInCalendarYear(calendarAttorneyGoals, calendarYear)
+      : firmOutperformGoal?.annualGrossGoal ?? sum(attorneyScopedGoals.map((goal) => goal.annualGrossGoal));
+
   const annualRjlFeesGoal =
-    firmOutperformGoal?.annualRjlFeesGoal ?? sum(attorneyScopedGoals.map((goal) => goal.annualRjlFeesGoal));
+    periodMode === "calendar"
+      ? firmOutperformGoal && goalOverlapsCalendarYear(firmOutperformGoal, calendarYear)
+        ? sumAttorneyFeeGoalsInCalendarYear([firmOutperformGoal], calendarYear)
+        : sumAttorneyFeeGoalsInCalendarYear(calendarAttorneyGoals, calendarYear)
+      : firmOutperformGoal?.annualRjlFeesGoal ?? sum(attorneyScopedGoals.map((goal) => goal.annualRjlFeesGoal));
+
   const yearElapsed =
-    firmOutperformGoal != null
-      ? getCommissionYearElapsedPercentage(firmOutperformGoal)
-      : attorneyScopedGoals.length === 1
-        ? getCommissionYearElapsedPercentage(attorneyScopedGoals[0])
-        : getYearElapsedPercentage();
+    periodMode === "calendar"
+      ? getCalendarYearElapsedPercentage(calendarYear, refDate)
+      : firmOutperformGoal != null
+        ? getCommissionYearElapsedPercentage(firmOutperformGoal, refDate)
+        : attorneyScopedGoals.length === 1
+          ? getCommissionYearElapsedPercentage(attorneyScopedGoals[0], refDate)
+          : getYearElapsedPercentage(refDate);
+
   const pacingGrossGoal = Math.round(annualGrossGoal * (yearElapsed / 100));
   const pacingFeesGoal = Math.round(annualRjlFeesGoal * (yearElapsed / 100));
 
-  const settledRecords = scopedRecords.filter((record) => record.tracker.result.settlementAmount);
-  const disbursedRecords = scopedRecords.filter((record) => record.tracker.result.checkDisbursedAt);
-  const planRecords = scopedRecords.filter(
-    (record) =>
-      record.tracker.isActive &&
-      attorneyScopedGoals.some(
-        (goal) =>
-          record.shared.attorneyId === goal.attorneyId &&
-          isTargetQuarterInCommissionYear(record.tracker.targetResolutionQuarter, goal.year, goal.commissionYearStartMonth),
-      ),
+  const { grossSettled, grossDisbursed, feesSettled, feesDisbursed, completedDisbursements } = sumOutputActuals(
+    records,
+    periodMode,
+    periodMode === "calendar" ? calendarYear : commissionGoalYear ?? firmOutperformGoal?.year ?? calendarYear,
+    goalsByAttorney,
+    firmOutperformGoal,
   );
-  const grossSettled = sum(settledRecords.map((record) => record.tracker.result.settlementAmount));
-  const grossDisbursed = sum(disbursedRecords.map((record) => record.tracker.result.settlementAmount));
-  const feesSettled = sum(settledRecords.map((record) => record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue));
-  const feesDisbursed = sum(disbursedRecords.map((record) => record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue));
+
+  const planRecords = records.filter((record) => {
+    if (!record.tracker.isActive) return false;
+    if (periodMode === "calendar") {
+      return parseTargetQuarterYear(record.tracker.targetResolutionQuarter) === calendarYear;
+    }
+    return attorneyScopedGoals.some(
+      (goal) =>
+        record.shared.attorneyId === goal.attorneyId &&
+        isTargetQuarterInCommissionYear(record.tracker.targetResolutionQuarter, goal.year, goal.commissionYearStartMonth),
+    );
+  });
+
   const commissionThreshold = Math.round(sum(attorneyScopedGoals.map((goal) => goal.commissionThreshold)));
   const commissionableAmount = Math.max(feesDisbursed - commissionThreshold, 0);
   const planGross = sum(planRecords.map((record) => record.tracker.minimumValue));
   const planFees = sum(planRecords.map((record) => getProjectedFeeValue(record)));
+
+  const commissionAnchorGoal = firmOutperformGoal ?? attorneyScopedGoals[0] ?? null;
+  const scopedRecords =
+    periodMode === "commission" && commissionAnchorGoal != null
+      ? records.filter((record) => isRecordInGoalCommissionYear(record, commissionAnchorGoal))
+      : records;
 
   return {
     results: {
@@ -495,10 +592,12 @@ export function getFirmOutputMetrics(
       commissionableAmount,
       planGross,
       planFees,
-      completedDisbursements: disbursedRecords.length,
+      completedDisbursements,
       firmOutperformGoal: firmOutperformGoal != null,
+      periodMode,
+      periodYear: periodMode === "calendar" ? calendarYear : commissionGoalYear ?? firmOutperformGoal?.year ?? calendarYear,
     },
-    caseStatuses: getCaseStatusRollup(records, getAttorneyOnlyGoals(pipelineGoals ?? goals)),
+    caseStatuses: getCaseStatusRollup(records, getAttorneyOnlyGoals(allGoals)),
     grossQuarterRows: getQuarterRows(scopedRecords, annualGrossGoal, "gross", attorneyScopedGoals),
     feeQuarterRows: getQuarterRows(scopedRecords, annualRjlFeesGoal, "fees", attorneyScopedGoals),
   };

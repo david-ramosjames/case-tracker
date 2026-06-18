@@ -243,3 +243,49 @@ export function getCommissionQuarterSummaries(
 export function formatGoalPeriodLabel(commissionYear: number, startMonth: number, monthCount: number = 12) {
   return formatCommissionPeriod(commissionYear, startMonth, monthCount);
 }
+
+export function getCalendarYearMonthKeys(calendarYear: number) {
+  return Array.from({ length: 12 }, (_, index) => monthKeyFromDate(new Date(calendarYear, index, 1)));
+}
+
+export function goalOverlapsCalendarYear(goal: AttorneyGoal, calendarYear: number) {
+  const periodKeys = getCommissionPeriodMonthKeys(
+    goal.year,
+    goal.commissionYearStartMonth,
+    goal.commissionMonthCount ?? 12,
+  );
+  return periodKeys.some((monthKey) => monthKey.startsWith(`${calendarYear}-`));
+}
+
+function sumGoalMonthlyAmountsInCalendarYear(
+  goals: AttorneyGoal[],
+  calendarYear: number,
+  monthlyResolver: (goal: AttorneyGoal) => MonthlyGoals,
+) {
+  const goalsByMonthKey = new Map<string, AttorneyGoal>();
+  for (const goal of goals) {
+    for (const monthKey of getCommissionPeriodMonthKeys(
+      goal.year,
+      goal.commissionYearStartMonth,
+      goal.commissionMonthCount ?? 12,
+    )) {
+      goalsByMonthKey.set(monthKey, goal);
+    }
+  }
+
+  let total = 0;
+  for (const monthKey of getCalendarYearMonthKeys(calendarYear)) {
+    const goal = goalsByMonthKey.get(monthKey);
+    if (!goal) continue;
+    total += monthlyResolver(goal)[monthKey] ?? 0;
+  }
+  return total;
+}
+
+export function sumAttorneyGrossGoalsInCalendarYear(goals: AttorneyGoal[], calendarYear: number) {
+  return sumGoalMonthlyAmountsInCalendarYear(goals, calendarYear, resolveMonthlyGoals);
+}
+
+export function sumAttorneyFeeGoalsInCalendarYear(goals: AttorneyGoal[], calendarYear: number) {
+  return sumGoalMonthlyAmountsInCalendarYear(goals, calendarYear, resolveMonthlyFeeGoals);
+}

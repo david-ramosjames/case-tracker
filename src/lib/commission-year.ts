@@ -65,6 +65,23 @@ export function isDateInCommissionYear(dateValue: string | null | undefined, com
   return getCommissionYearLabel(date, startMonth) === commissionYear;
 }
 
+export function isDateInCalendarYear(dateValue: string | null | undefined, calendarYear: number) {
+  if (!dateValue) return false;
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getFullYear() === calendarYear;
+}
+
+export function getCalendarYearElapsedPercentage(calendarYear: number, refDate = new Date()) {
+  const start = new Date(calendarYear, 0, 1);
+  const end = new Date(calendarYear, 11, 31, 23, 59, 59, 999);
+  if (refDate <= start) return 0;
+  if (refDate >= end) return 100;
+  const total = end.getTime() - start.getTime();
+  const elapsed = refDate.getTime() - start.getTime();
+  return total > 0 ? (elapsed / total) * 100 : 0;
+}
+
 /** Hide from attorney UI when disburse date is set and falls outside the current commission year. */
 export function isDisbursementOutsideCurrentCommissionYear(
   disburseDate: string | null | undefined,

@@ -2,6 +2,7 @@ import {
   getCommissionYearLabel,
   getCurrentCommissionYear,
   getRecordDisburseDate,
+  isDateInCalendarYear,
   isDateInCommissionYear,
 } from "@/lib/commission-year";
 import { type CaseDisbursement, type CaseRecord, type DisbursedStatus, type TrackerEntry } from "@/lib/types";
@@ -216,6 +217,127 @@ export function getWeightedGrossDisbursedInCommissionYear(
   }
 
   return 0;
+}
+
+export function getWeightedGrossSettledInCommissionYear(
+  record: Pick<CaseRecord, "tracker">,
+  commissionYear: number,
+  startMonth: number,
+) {
+  const completed = getCompletedDisbursements(record.tracker);
+
+  if (completed.length > 0) {
+    return completed
+      .filter((item) => item.settlementDate && isDateInCommissionYear(item.settlementDate, commissionYear, startMonth))
+      .reduce((total, item) => total + getDisbursementSettlementAmount(item, record), 0);
+  }
+
+  const settlementDate = record.tracker.result.settlementDate;
+  if (settlementDate && isDateInCommissionYear(settlementDate, commissionYear, startMonth)) {
+    return record.tracker.result.settlementAmount ?? 0;
+  }
+
+  return 0;
+}
+
+export function getWeightedFeesSettledInCommissionYear(
+  record: Pick<CaseRecord, "tracker">,
+  commissionYear: number,
+  startMonth: number,
+) {
+  const completed = getCompletedDisbursements(record.tracker);
+
+  if (completed.length > 0) {
+    return completed
+      .filter((item) => item.settlementDate && isDateInCommissionYear(item.settlementDate, commissionYear, startMonth))
+      .reduce((total, item) => total + getDisbursementAttorneyFees(item, record), 0);
+  }
+
+  const settlementDate = record.tracker.result.settlementDate;
+  if (settlementDate && isDateInCommissionYear(settlementDate, commissionYear, startMonth)) {
+    return getCaseAttorneyFees(record);
+  }
+
+  return 0;
+}
+
+export function getWeightedGrossDisbursedInCalendarYear(record: Pick<CaseRecord, "tracker">, calendarYear: number) {
+  const completed = getCompletedDisbursements(record.tracker);
+
+  if (completed.length > 0) {
+    return completed
+      .filter((item) => item.disburseDate && isDateInCalendarYear(item.disburseDate, calendarYear))
+      .reduce((total, item) => total + getDisbursementSettlementAmount(item, record), 0);
+  }
+
+  const baseSettlement = record.tracker.result.settlementAmount ?? 0;
+  const legacyDate = getRecordDisburseDate(record.tracker.result);
+  if (legacyDate && isDateInCalendarYear(legacyDate, calendarYear)) {
+    return baseSettlement;
+  }
+
+  return 0;
+}
+
+export function getWeightedGrossSettledInCalendarYear(record: Pick<CaseRecord, "tracker">, calendarYear: number) {
+  const completed = getCompletedDisbursements(record.tracker);
+
+  if (completed.length > 0) {
+    return completed
+      .filter((item) => item.settlementDate && isDateInCalendarYear(item.settlementDate, calendarYear))
+      .reduce((total, item) => total + getDisbursementSettlementAmount(item, record), 0);
+  }
+
+  const settlementDate = record.tracker.result.settlementDate;
+  if (settlementDate && isDateInCalendarYear(settlementDate, calendarYear)) {
+    return record.tracker.result.settlementAmount ?? 0;
+  }
+
+  return 0;
+}
+
+export function getWeightedFeesSettledInCalendarYear(record: Pick<CaseRecord, "tracker">, calendarYear: number) {
+  const completed = getCompletedDisbursements(record.tracker);
+
+  if (completed.length > 0) {
+    return completed
+      .filter((item) => item.settlementDate && isDateInCalendarYear(item.settlementDate, calendarYear))
+      .reduce((total, item) => total + getDisbursementAttorneyFees(item, record), 0);
+  }
+
+  const settlementDate = record.tracker.result.settlementDate;
+  if (settlementDate && isDateInCalendarYear(settlementDate, calendarYear)) {
+    return getCaseAttorneyFees(record);
+  }
+
+  return 0;
+}
+
+export function getWeightedDisbursedFeesInCalendarYear(record: Pick<CaseRecord, "tracker">, calendarYear: number) {
+  const baseFees = getCaseAttorneyFees(record);
+  const completed = getCompletedDisbursements(record.tracker);
+
+  if (completed.length > 0) {
+    return completed
+      .filter((item) => item.disburseDate && isDateInCalendarYear(item.disburseDate, calendarYear))
+      .reduce((total, item) => total + getDisbursementAttorneyFees(item, record), 0);
+  }
+
+  const legacyDate = getRecordDisburseDate(record.tracker.result);
+  if (legacyDate && isDateInCalendarYear(legacyDate, calendarYear)) {
+    return baseFees;
+  }
+
+  return 0;
+}
+
+export function recordHasDisbursementInCalendarYear(record: Pick<CaseRecord, "tracker">, calendarYear: number) {
+  const completed = getCompletedDisbursements(record.tracker);
+  if (completed.length > 0) {
+    return completed.some((item) => item.disburseDate && isDateInCalendarYear(item.disburseDate, calendarYear));
+  }
+  const legacyDate = getRecordDisburseDate(record.tracker.result);
+  return legacyDate ? isDateInCalendarYear(legacyDate, calendarYear) : false;
 }
 
 export function getWeightedDisbursedFeesInCommissionYear(

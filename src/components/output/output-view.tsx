@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getCurrentCommissionYearGoals, getFirmOutputMetrics } from "@/lib/calculations";
+import {
+  getCurrentCommissionYearGoals,
+  getFirmOutputMetrics,
+  type OutputPeriodMode,
+} from "@/lib/calculations";
+import { formatCommissionYearPeriod } from "@/lib/commission-year";
+import { getAttorneyOnlyGoals } from "@/lib/firm-goals";
+import { getGoalYearOptions } from "@/lib/case-options";
 import { type AppUser, type AttorneyGoal, type CaseRecord } from "@/lib/types";
 import { formatCurrency, percent } from "@/lib/utils";
 
@@ -23,9 +30,13 @@ export function OutputView({
 }) {
   const [attorney, setAttorney] = useState("all");
   const [paralegal, setParalegal] = useState("all");
+  const [periodMode, setPeriodMode] = useState<OutputPeriodMode>("calendar");
+  const [periodYear, setPeriodYear] = useState(() => new Date().getFullYear());
 
   const attorneys = users.filter((user) => user.role === "attorney");
   const paralegals = users.filter((user) => user.role === "paralegal");
+  const attorneyOnlyGoals = useMemo(() => getAttorneyOnlyGoals(goals), [goals]);
+  const yearOptions = useMemo(() => getGoalYearOptions(), []);
 
   const filteredRecords = useMemo(() => {
     return records.filter((record) => {
@@ -35,26 +46,87 @@ export function OutputView({
     });
   }, [attorney, paralegal, records]);
 
-  const scopedGoals = useMemo(() => {
-    const attorneyIds =
+  const attorneyIds = useMemo(
+    () =>
       attorney !== "all"
         ? [attorney]
-        : [...new Set(filteredRecords.map((record) => record.shared.attorneyId))];
-    return getCurrentCommissionYearGoals(goals, attorneyIds);
-  }, [attorney, filteredRecords, goals]);
+        : [...new Set(filteredRecords.map((record) => record.shared.attorneyId))],
+    [attorney, filteredRecords],
+  );
 
-  const commissionYearLabel = useMemo(() => {
-    const years = [...new Set(scopedGoals.map((goal) => goal.year))].sort((a, b) => a - b);
-    if (years.length === 0) return String(new Date().getFullYear());
-    if (years.length === 1) return String(years[0]);
-    return `${years[0]}–${years[years.length - 1]}`;
-  }, [scopedGoals]);
+  const scopedCommissionGoals = useMemo(() => {
+    if (periodMode === "commission") {
+      return attorneyIds
+        .map((attorneyId) => attorneyOnlyGoals.find((goal) => goal.attorneyId === attorneyId && goal.year === periodYear))
+        .filter((goal): goal is AttorneyGoal => goal != null);
+    }
+    return getCurrentCommissionYearGoals(attorneyOnlyGoals, attorneyIds);
+  }, [attorneyIds, attorneyOnlyGoals, periodMode, periodYear]);
+
+  const commissionYearOptions = useMemo(() => {
+    const years = new Set<number>([...yearOptions, periodYear, new Date().getFullYear()]);
+    for (const goal of attorneyOnlyGoals) {
+      if (attorney === "all" || goal.attorneyId === attorney) years.add(goal.year);
+    }
+    return [...years].sort((left, right) => right - left);
+  }, [attorney, attorneyOnlyGoals, periodYear, yearOptions]);
+
+  useEffect(() => {
+    if (attorney === "all") {
+      setPeriodMode("calendar");
+      setPeriodYear(new Date().getFullYear());
+      return;
+    }
+
+    setPeriodMode("commission");
+    const attorneyGoal = attorneyOnlyGoals
+      .filter((goal) => goal.attorneyId === attorney)
+      .sort((left, right) => right.year - left.year)[0];
+    if (attorneyGoal) {
+      setPeriodYear(attorneyGoal.year);
+    }
+  }, [attorney, attorneyOnlyGoals]);
 
   const output = useMemo(
-    () => getFirmOutputMetrics(filteredRecords, scopedGoals, undefined, goals),
-    [filteredRecords, scopedGoals, goals],
+    () =>
+      getFirmOutputMetrics(
+        filteredRecords,
+        periodMode === "calendar" ? attorneyOnlyGoals : scopedCommissionGoals,
+        {
+          periodMode,
+          periodYear,
+          pipelineGoals: attorneyOnlyGoals,
+        },
+      ),
+    [attorneyOnlyGoals, filteredRecords, periodMode, periodYear, scopedCommissionGoals],
   );
   const { results } = output;
+
+  const periodLabel = useMemo(() => {
+    if (periodMode === "calendar") return String(periodYear);
+    const anchorGoal =
+      (attorney !== "all"
+        ? attorneyOnlyGoals.find((goal) => goal.attorneyId === attorney && goal.year === periodYear)
+        : undefined) ??
+      scopedCommissionGoals.find((goal) => goal.year === periodYear) ??
+      scopedCommissionGoals[0];
+    if (anchorGoal) {
+      return formatCommissionYearPeriod(anchorGoal.year, anchorGoal.commissionYearStartMonth, anchorGoal.commissionMonthCount);
+    }
+    return String(periodYear);
+  }, [attorney, attorneyOnlyGoals, periodMode, periodYear, scopedCommissionGoals]);
+
+  const periodDescription =
+    periodMode === "calendar"
+      ? `${periodYear} calendar year — settled and disbursed amounts use settlement/disburse dates in that year.`
+      : `${periodLabel} commission year — amounts use each attorney's commission period.`;
+
+  const goalDetailSuffix =
+    periodMode === "calendar"
+      ? "goal (sum of monthly targets in this calendar year)"
+      : results.firmOutperformGoal
+        ? "Outperform goal"
+        : "gross disbursements goal";
 
   const activeFilterCount = [attorney !== "all", paralegal !== "all"].filter(Boolean).length;
   const selectedAttorneyName = attorneys.find((user) => user.id === attorney)?.name;
@@ -86,7 +158,7 @@ export function OutputView({
               {selectedParalegalName ? ` · ${selectedParalegalName}` : ""}
             </p>
           </div>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:max-w-2xl">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:max-w-4xl">
             <Select value={attorney} onChange={(event) => setAttorney(event.target.value)} aria-label="Attorney">
               <option value="all">All attorneys</option>
               {attorneys.map((item) => (
@@ -103,24 +175,58 @@ export function OutputView({
                 </option>
               ))}
             </Select>
+            {attorney !== "all" ? (
+              <Select
+                value={periodMode}
+                onChange={(event) => setPeriodMode(event.target.value as OutputPeriodMode)}
+                aria-label="Period type"
+              >
+                <option value="calendar">Calendar year</option>
+                <option value="commission">Commission year</option>
+              </Select>
+            ) : (
+              <div className="flex items-center rounded-md border bg-muted/30 px-3 text-sm text-muted-foreground">
+                Calendar year (firm total)
+              </div>
+            )}
+            <Select
+              value={String(periodYear)}
+              onChange={(event) => setPeriodYear(Number(event.target.value))}
+              aria-label={periodMode === "calendar" ? "Calendar year" : "Commission year"}
+            >
+              {(periodMode === "calendar" ? yearOptions : commissionYearOptions).map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </Select>
           </div>
+          <p className="mt-3 text-xs text-muted-foreground">{periodDescription}</p>
         </CardContent>
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-6">
-        <SummaryCard label="Target (top-down)" value={formatCurrency(results.annualGrossGoal)} detail={`${commissionYearLabel} ${output.results.firmOutperformGoal ? "Outperform" : "gross disbursements"} goal`} />
-        <SummaryCard label="Plan (bottom-up)" value={formatCurrency(results.planGross)} detail="Forecast gross disbursements from active cases in this commission year" />
-        <SummaryCard label="Gross Settled" value={formatCurrency(results.grossSettled)} detail="Settlement amounts signed" />
-        <SummaryCard label="Gross Disbursed" value={formatCurrency(results.grossDisbursed)} detail="Settlement dollars disbursed" />
-        <SummaryCard label="RJL Fees Settled" value={formatCurrency(results.feesSettled)} detail="Attorney fees on settled cases" />
-        <SummaryCard label="RJL Fees Disbursed" value={formatCurrency(results.feesDisbursed)} detail="Attorney fees on disbursed cases" />
+        <SummaryCard label="Target (top-down)" value={formatCurrency(results.annualGrossGoal)} detail={`${periodLabel} ${goalDetailSuffix}`} />
+        <SummaryCard
+          label="Plan (bottom-up)"
+          value={formatCurrency(results.planGross)}
+          detail={
+            periodMode === "calendar"
+              ? `Forecast gross disbursements from active cases targeting ${periodYear}`
+              : "Forecast gross disbursements from active cases in this commission year"
+          }
+        />
+        <SummaryCard label="Gross Settled" value={formatCurrency(results.grossSettled)} detail="Settlement amounts signed in period" />
+        <SummaryCard label="Gross Disbursed" value={formatCurrency(results.grossDisbursed)} detail="Settlement dollars disbursed in period" />
+        <SummaryCard label="RJL Fees Settled" value={formatCurrency(results.feesSettled)} detail="Attorney fees on cases settled in period" />
+        <SummaryCard label="RJL Fees Disbursed" value={formatCurrency(results.feesDisbursed)} detail="Attorney fees disbursed in period" />
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Results vs Goals</CardTitle>
           <CardDescription>
-            {commissionYearLabel} commission year — gross disbursements and RJL fees tracked vs top-down goals
+            {periodDescription} Gross disbursements and RJL fees tracked vs top-down goals
             {attorney !== "all" || paralegal !== "all" ? " (filtered)." : "."}
           </CardDescription>
         </CardHeader>
@@ -214,7 +320,6 @@ export function OutputView({
           </CardContent>
         </Card>
       </div>
-
     </div>
   );
 }
@@ -236,7 +341,6 @@ function ResultsRow({
   fullYearGoal,
   pacingGoal,
   yearElapsed,
-  goalLabel = "Full Year Goal",
 }: {
   label: string;
   settled: number;
@@ -244,14 +348,13 @@ function ResultsRow({
   fullYearGoal: number;
   pacingGoal: number;
   yearElapsed: number;
-  goalLabel?: string;
 }) {
   return (
     <TableRow>
       <TableCell className="font-semibold">{label}</TableCell>
       <TableCell>{formatCurrency(settled)}</TableCell>
       <TableCell>{formatCurrency(disbursed)}</TableCell>
-      <TableCell title={goalLabel}>{formatCurrency(fullYearGoal)}</TableCell>
+      <TableCell>{formatCurrency(fullYearGoal)}</TableCell>
       <TableCell>{percent(fullYearGoal > 0 ? (disbursed / fullYearGoal) * 100 : 0)}</TableCell>
       <TableCell>{percent(fullYearGoal > 0 ? (settled / fullYearGoal) * 100 : 0)}</TableCell>
       <TableCell>{percent(yearElapsed)}</TableCell>
@@ -271,4 +374,3 @@ function MiniStat({ label, value, variant = "outline" }: { label: string; value:
     </div>
   );
 }
-
