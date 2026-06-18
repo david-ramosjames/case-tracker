@@ -719,6 +719,17 @@ export function CaseTable({
                 </TableHead>
                 <TableHead className="w-36 align-top">
                   <HeaderFilter
+                    label="Stage"
+                    value={stage}
+                    onChange={setStage}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...CASE_STAGE_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="w-36 align-top">
+                  <HeaderFilter
                     label="Type"
                     value={caseType}
                     onChange={setCaseType}
@@ -767,17 +778,6 @@ export function CaseTable({
                 <SortableHead label="Minimum Value" sortKey="minimumValue" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
                 <TableHead className="w-32">Referral Fee</TableHead>
                 <SortableHead label="Policy Limits" sortKey="policyLimits" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
-                <TableHead className="w-36 align-top">
-                  <HeaderFilter
-                    label="Stage"
-                    value={stage}
-                    onChange={setStage}
-                    options={[
-                      { value: "all", label: "All" },
-                      ...CASE_STAGE_OPTIONS.map((item) => ({ value: item, label: item })),
-                    ]}
-                  />
-                </TableHead>
                 <TableHead className="w-36">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -801,6 +801,13 @@ export function CaseTable({
                     <TableCell>{formatOptionalDate(record.shared.dateOfIncident)}</TableCell>
                     <TableCell>
                       <DerivedCaseStatusBadge record={record} />
+                    </TableCell>
+                    <TableCell>
+                      <InlineSelect value={record.tracker.caseStage} onChange={(value) => updateTrackerField(record.shared.id, "caseStage", value as CaseStage)}>
+                        {stageSelectOptions(record.tracker.caseStage).map((option) => (
+                          <option key={option} value={option}>{option}</option>
+                        ))}
+                      </InlineSelect>
                     </TableCell>
                     <TableCell>
                       <InlineSelect value={record.shared.caseType} onChange={(value) => updateSharedField(record.shared.id, "caseType", value)}>
@@ -852,13 +859,6 @@ export function CaseTable({
                         value={record.tracker.policyLimits}
                         onCommit={(value) => updateTrackerField(record.shared.id, "policyLimits", value)}
                       />
-                    </TableCell>
-                    <TableCell>
-                      <InlineSelect value={record.tracker.caseStage} onChange={(value) => updateTrackerField(record.shared.id, "caseStage", value as CaseStage)}>
-                        {stageSelectOptions(record.tracker.caseStage).map((option) => (
-                          <option key={option} value={option}>{option}</option>
-                        ))}
-                      </InlineSelect>
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-1">
