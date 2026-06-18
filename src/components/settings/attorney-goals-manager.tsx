@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, Save, Trash2 } from "lucide-react";
 import {
@@ -49,6 +49,15 @@ type GoalDraft = {
   calendarPlugValues: Record<string, string>;
   calendarPlugFeeValues: Record<string, string>;
 };
+
+type GoalDraftChange = Partial<GoalDraft> | ((current: GoalDraft) => GoalDraft);
+
+async function flushPendingDraftInput() {
+  if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
+}
 
 function parseGoalAmount(value: string) {
   return parseNumberInput(value);
@@ -161,8 +170,14 @@ export function AttorneyGoalsManager({
   const [showAddFirmForm, setShowAddFirmForm] = useState(false);
   const [newAttorneyId, setNewAttorneyId] = useState(attorneys[0]?.id ?? "");
   const [newDraft, setNewDraft] = useState(() => createEmptyDraft(attorneys[0]?.id ?? "", defaultEndYear));
+  const newDraftRef = useRef(newDraft);
+  newDraftRef.current = newDraft;
   const [newFirmDraft, setNewFirmDraft] = useState(() => createEmptyDraft(FIRM_OUTPERFORM_GOAL_ATTORNEY_ID, defaultEndYear));
+  const newFirmDraftRef = useRef(newFirmDraft);
+  newFirmDraftRef.current = newFirmDraft;
   const [drafts, setDrafts] = useState<Record<string, GoalDraft>>({});
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
 
   const { attorneyGoals, firmGoals } = useMemo(() => partitionGoals(goals), [goals]);
 
@@ -182,16 +197,33 @@ export function AttorneyGoalsManager({
   }, [firmGoals, yearFilter]);
 
   function getDraft(goal: AttorneyGoal): GoalDraft {
-    return drafts[goal.id] ?? buildDraftFromGoal(goal);
+    return draftsRef.current[goal.id] ?? drafts[goal.id] ?? buildDraftFromGoal(goal);
   }
 
-  function updateDraft(goalId: string, patch: Partial<GoalDraft> | ((current: GoalDraft) => GoalDraft)) {
-    const goal = displayedGoals.find((item) => item.id === goalId);
+  function updateDraft(goalId: string, patch: GoalDraftChange) {
+    const goal = goals.find((item) => item.id === goalId);
     if (!goal) return;
     setDrafts((current) => {
       const existing = current[goalId] ?? buildDraftFromGoal(goal);
       const next = typeof patch === "function" ? patch(existing) : { ...existing, ...patch };
-      return { ...current, [goalId]: next };
+      draftsRef.current = { ...current, [goalId]: next };
+      return draftsRef.current;
+    });
+  }
+
+  function updateNewDraft(patch: GoalDraftChange) {
+    setNewDraft((current) => {
+      const next = typeof patch === "function" ? patch(current) : { ...current, ...patch };
+      newDraftRef.current = next;
+      return next;
+    });
+  }
+
+  function updateNewFirmDraft(patch: GoalDraftChange) {
+    setNewFirmDraft((current) => {
+      const next = typeof patch === "function" ? patch(current) : { ...current, ...patch };
+      newFirmDraftRef.current = next;
+      return next;
     });
   }
 
@@ -265,10 +297,17 @@ export function AttorneyGoalsManager({
     setIsSaving(true);
     setErrorMessage(null);
     try {
+      await flushPendingDraftInput();
       await saveGoal(getDraft(goal), {
         goalScope: "attorney",
         attorneyId: goal.attorneyId,
         attorneyName: attorney.name,
+      });
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[goal.id];
+        draftsRef.current = next;
+        return next;
       });
       router.refresh();
     } catch (error) {
@@ -314,7 +353,8 @@ export function AttorneyGoalsManager({
     setIsSaving(true);
     setErrorMessage(null);
     try {
-      await saveGoal({ ...newDraft, attorneyId: attorney.id }, {
+      await flushPendingDraftInput();
+      await saveGoal({ ...newDraftRef.current, attorneyId: attorney.id }, {
         goalScope: "attorney",
         attorneyId: attorney.id,
         attorneyName: attorney.name,
@@ -333,10 +373,17 @@ export function AttorneyGoalsManager({
     setIsSaving(true);
     setErrorMessage(null);
     try {
+      await flushPendingDraftInput();
       await saveGoal(getDraft(goal), {
         goalScope: "firm",
         attorneyId: FIRM_OUTPERFORM_GOAL_ATTORNEY_ID,
         attorneyName: "Firm Outperform",
+      });
+      setDrafts((current) => {
+        const next = { ...current };
+        delete next[goal.id];
+        draftsRef.current = next;
+        return next;
       });
       router.refresh();
     } catch (error) {
@@ -350,7 +397,8 @@ export function AttorneyGoalsManager({
     setIsSaving(true);
     setErrorMessage(null);
     try {
-      await saveGoal(newFirmDraft, {
+      await flushPendingDraftInput();
+      await saveGoal(newFirmDraftRef.current, {
         goalScope: "firm",
         attorneyId: FIRM_OUTPERFORM_GOAL_ATTORNEY_ID,
         attorneyName: "Firm Outperform",
@@ -431,7 +479,7 @@ export function AttorneyGoalsManager({
               draft={newFirmDraft}
               endYearOptions={endYearOptions}
               showCommissionThreshold={false}
-              onDraftChange={setNewFirmDraft}
+              onDraftChange={updateNewFirmDraft}
               actions={
                 <Button variant="pink" size="sm" onClick={handleAddFirmGoal} disabled={isSaving}>
                   Save firm goal
@@ -498,7 +546,7 @@ export function AttorneyGoalsManager({
                 onChange={(event) => {
                   const attorneyId = event.target.value;
                   setNewAttorneyId(attorneyId);
-                  setNewDraft((current) => ({ ...current, attorneyId }));
+                  updateNewDraft({ attorneyId });
                 }}
               >
                 {attorneys.map((attorney) => (
@@ -514,7 +562,7 @@ export function AttorneyGoalsManager({
               endYearOptions={endYearOptions}
               attorneyId={newAttorneyId}
               allAttorneyGoals={attorneyGoals}
-              onDraftChange={setNewDraft}
+              onDraftChange={updateNewDraft}
               actions={
                 <Button variant="pink" size="sm" onClick={handleAddGoal} disabled={isSaving}>
                   Save new goal
@@ -609,7 +657,7 @@ function GoalEditorCard({
   title: string;
   draft: GoalDraft;
   endYearOptions: number[];
-  onDraftChange: (draft: GoalDraft) => void;
+  onDraftChange: (patch: GoalDraftChange) => void;
   actions: ReactNode;
   showCommissionThreshold?: boolean;
   attorneyId?: string;
@@ -654,17 +702,17 @@ function GoalEditorCard({
   const annualFeeTotal = sumDraftMonthlyFeeGoals(draft);
 
   function spreadGrossTotal() {
-    onDraftChange({
-      ...draft,
-      monthlyValues: spreadEvenMonthlyGoals(parseGoalAmount(draft.annualGrossGoalTotal), draft.monthKeys),
-    });
+    onDraftChange((current) => ({
+      ...current,
+      monthlyValues: spreadEvenMonthlyGoals(parseGoalAmount(current.annualGrossGoalTotal), current.monthKeys),
+    }));
   }
 
   function spreadFeeTotal() {
-    onDraftChange({
-      ...draft,
-      monthlyFeeValues: spreadEvenMonthlyGoals(parseGoalAmount(draft.annualRjlFeesGoalTotal), draft.monthKeys),
-    });
+    onDraftChange((current) => ({
+      ...current,
+      monthlyFeeValues: spreadEvenMonthlyGoals(parseGoalAmount(current.annualRjlFeesGoalTotal), current.monthKeys),
+    }));
   }
 
   return (
@@ -688,7 +736,7 @@ function GoalEditorCard({
           <Field label="Ends in month">
             <Select
               value={draft.endMonth}
-              onChange={(event) => onDraftChange(applyPeriodChange(draft, { endMonth: event.target.value }))}
+              onChange={(event) => onDraftChange((current) => applyPeriodChange(current, { endMonth: event.target.value }))}
             >
               {COMMISSION_YEAR_MONTH_OPTIONS.map((month) => (
                 <option key={month.value} value={month.value}>
@@ -700,7 +748,7 @@ function GoalEditorCard({
           <Field label="Ends in year">
             <Select
               value={draft.endYear}
-              onChange={(event) => onDraftChange(applyPeriodChange(draft, { endYear: event.target.value }))}
+              onChange={(event) => onDraftChange((current) => applyPeriodChange(current, { endYear: event.target.value }))}
             >
               {endYearOptions.map((year) => (
                 <option key={year} value={year}>
@@ -712,7 +760,7 @@ function GoalEditorCard({
           <Field label="Months in period">
             <Select
               value={draft.monthCount}
-              onChange={(event) => onDraftChange(applyPeriodChange(draft, { monthCount: event.target.value }))}
+              onChange={(event) => onDraftChange((current) => applyPeriodChange(current, { monthCount: event.target.value }))}
             >
               {COMMISSION_PERIOD_MONTH_OPTIONS.map((count) => (
                 <option key={count} value={count}>
@@ -725,7 +773,7 @@ function GoalEditorCard({
             <Field label="Commission threshold">
               <GoalAmountInput
                 value={draft.commissionThreshold}
-                onChange={(value) => onDraftChange({ ...draft, commissionThreshold: value })}
+                onChange={(value) => onDraftChange((current) => ({ ...current, commissionThreshold: value }))}
               />
               <span className="mt-1 block text-[11px] leading-tight text-muted-foreground">
                 RJL fees disbursed before commissions start
@@ -739,17 +787,17 @@ function GoalEditorCard({
             title="Gross disbursements"
             annualLabel="Annual goal"
             annualValue={draft.annualGrossGoalTotal}
-            onAnnualChange={(value) => onDraftChange({ ...draft, annualGrossGoalTotal: value })}
+            onAnnualChange={(value) => onDraftChange((current) => ({ ...current, annualGrossGoalTotal: value }))}
             onSpread={spreadGrossTotal}
             spreadDisabled={!draft.annualGrossGoalTotal.trim()}
             monthCount={draft.monthKeys.length}
             monthKeys={draft.monthKeys}
             monthlyValues={draft.monthlyValues}
             onMonthlyChange={(monthKey, value) =>
-              onDraftChange({
-                ...draft,
-                monthlyValues: { ...draft.monthlyValues, [monthKey]: value },
-              })
+              onDraftChange((current) => ({
+                ...current,
+                monthlyValues: { ...current.monthlyValues, [monthKey]: value },
+              }))
             }
             quarterSummaries={quarterSummaries}
           />
@@ -757,17 +805,17 @@ function GoalEditorCard({
             title="RJL attorney fees"
             annualLabel="Annual goal"
             annualValue={draft.annualRjlFeesGoalTotal}
-            onAnnualChange={(value) => onDraftChange({ ...draft, annualRjlFeesGoalTotal: value })}
+            onAnnualChange={(value) => onDraftChange((current) => ({ ...current, annualRjlFeesGoalTotal: value }))}
             onSpread={spreadFeeTotal}
             spreadDisabled={!draft.annualRjlFeesGoalTotal.trim()}
             monthCount={draft.monthKeys.length}
             monthKeys={draft.monthKeys}
             monthlyValues={draft.monthlyFeeValues}
             onMonthlyChange={(monthKey, value) =>
-              onDraftChange({
-                ...draft,
-                monthlyFeeValues: { ...draft.monthlyFeeValues, [monthKey]: value },
-              })
+              onDraftChange((current) => ({
+                ...current,
+                monthlyFeeValues: { ...current.monthlyFeeValues, [monthKey]: value },
+              }))
             }
             quarterSummaries={feeQuarterSummaries}
           />
@@ -787,7 +835,7 @@ function GoalEditorCard({
                 <Select
                   className="sm:min-w-[8rem]"
                   value={plugCalendarYear}
-                  onChange={(event) => onDraftChange({ ...draft, plugCalendarYear: event.target.value })}
+                  onChange={(event) => onDraftChange((current) => ({ ...current, plugCalendarYear: event.target.value }))}
                 >
                   {plugYearOptions.map((year) => (
                     <option key={year} value={year}>
@@ -816,11 +864,11 @@ function GoalEditorCard({
                           className="h-9"
                           value={draft.calendarPlugValues[monthKey] ?? ""}
                           onChange={(value) =>
-                            onDraftChange({
-                              ...draft,
+                            onDraftChange((current) => ({
+                              ...current,
                               plugCalendarYear,
-                              calendarPlugValues: { ...draft.calendarPlugValues, [monthKey]: value },
-                            })
+                              calendarPlugValues: { ...current.calendarPlugValues, [monthKey]: value },
+                            }))
                           }
                         />
                       </label>
@@ -839,11 +887,11 @@ function GoalEditorCard({
                           className="h-9"
                           value={draft.calendarPlugFeeValues[monthKey] ?? ""}
                           onChange={(value) =>
-                            onDraftChange({
-                              ...draft,
+                            onDraftChange((current) => ({
+                              ...current,
                               plugCalendarYear,
-                              calendarPlugFeeValues: { ...draft.calendarPlugFeeValues, [monthKey]: value },
-                            })
+                              calendarPlugFeeValues: { ...current.calendarPlugFeeValues, [monthKey]: value },
+                            }))
                           }
                         />
                       </label>
@@ -972,8 +1020,9 @@ function GoalAmountInput({
       className={className}
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      onBlur={() => {
-        if (value.trim()) onChange(formatNumberInput(value));
+      onBlur={(event) => {
+        const raw = event.target.value;
+        if (raw.trim()) onChange(formatNumberInput(raw));
       }}
     />
   );

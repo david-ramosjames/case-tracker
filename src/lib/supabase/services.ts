@@ -2248,7 +2248,14 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     .select("*")
     .single();
 
-  if (error) throw error;
+  if (error) {
+    if (error.message?.includes("calendar_plug")) {
+      throw new Error(
+        "Calendar plug columns are missing in the database. Run supabase/sql/033_calendar_plug_goals.sql in Supabase.",
+      );
+    }
+    throw error;
+  }
 
   return {
     id: toString(data.id, "goal"),
