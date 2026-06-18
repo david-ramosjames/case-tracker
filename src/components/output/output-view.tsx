@@ -96,9 +96,11 @@ export function OutputView({
           periodMode,
           periodYear,
           pipelineGoals: attorneyOnlyGoals,
+          scopedAttorneyIds: attorneyIds,
+          preferFirmOutperformGoal: attorney === "all",
         },
       ),
-    [attorneyOnlyGoals, filteredRecords, periodMode, periodYear, scopedCommissionGoals],
+    [attorney, attorneyIds, attorneyOnlyGoals, filteredRecords, periodMode, periodYear, scopedCommissionGoals],
   );
   const { results } = output;
 

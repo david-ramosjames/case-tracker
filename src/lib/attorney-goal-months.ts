@@ -262,23 +262,28 @@ function sumGoalMonthlyAmountsInCalendarYear(
   calendarYear: number,
   monthlyResolver: (goal: AttorneyGoal) => MonthlyGoals,
 ) {
-  const goalsByMonthKey = new Map<string, AttorneyGoal>();
+  const counted = new Set<string>();
+  let total = 0;
+
   for (const goal of goals) {
-    for (const monthKey of getCommissionPeriodMonthKeys(
-      goal.year,
-      goal.commissionYearStartMonth,
-      goal.commissionMonthCount ?? 12,
-    )) {
-      goalsByMonthKey.set(monthKey, goal);
+    const periodKeys = new Set(
+      getCommissionPeriodMonthKeys(
+        goal.year,
+        goal.commissionYearStartMonth,
+        goal.commissionMonthCount ?? 12,
+      ),
+    );
+    const monthly = monthlyResolver(goal);
+
+    for (const monthKey of getCalendarYearMonthKeys(calendarYear)) {
+      if (!periodKeys.has(monthKey)) continue;
+      const dedupeKey = `${goal.attorneyId}:${monthKey}`;
+      if (counted.has(dedupeKey)) continue;
+      counted.add(dedupeKey);
+      total += monthly[monthKey] ?? 0;
     }
   }
 
-  let total = 0;
-  for (const monthKey of getCalendarYearMonthKeys(calendarYear)) {
-    const goal = goalsByMonthKey.get(monthKey);
-    if (!goal) continue;
-    total += monthlyResolver(goal)[monthKey] ?? 0;
-  }
   return total;
 }
 
