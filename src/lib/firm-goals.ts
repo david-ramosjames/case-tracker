@@ -1,4 +1,5 @@
 import { getCurrentCommissionYear } from "@/lib/commission-year";
+import { goalOverlapsCalendarYear } from "@/lib/attorney-goal-months";
 import { type AttorneyGoal, type GoalScope } from "@/lib/types";
 
 export const FIRM_OUTPERFORM_GOAL_ATTORNEY_ID = "__firm_outperform__";
@@ -24,6 +25,10 @@ export function getAttorneyOnlyGoals(goals: AttorneyGoal[]) {
 
 export function getFirmOutperformGoalForYear(goals: AttorneyGoal[], year: number) {
   return partitionGoals(goals).firmGoals.find((goal) => goal.year === year) ?? null;
+}
+
+export function getFirmOutperformGoalForCalendarYear(goals: AttorneyGoal[], calendarYear: number) {
+  return partitionGoals(goals).firmGoals.find((goal) => goalOverlapsCalendarYear(goal, calendarYear)) ?? null;
 }
 
 export function resolveFirmOutperformCommissionYear(goals: AttorneyGoal[], refDate = new Date()) {

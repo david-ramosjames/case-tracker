@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import {
   getCurrentCommissionYearGoals,
   getFirmOutputMetrics,
+  type FirmCalendarGoalMode,
   type OutputPeriodMode,
 } from "@/lib/calculations";
 import { formatCommissionYearPeriod } from "@/lib/commission-year";
@@ -32,6 +33,7 @@ export function OutputView({
   const [paralegal, setParalegal] = useState("all");
   const [periodMode, setPeriodMode] = useState<OutputPeriodMode>("calendar");
   const [periodYear, setPeriodYear] = useState(() => new Date().getFullYear());
+  const [firmCalendarGoalMode, setFirmCalendarGoalMode] = useState<FirmCalendarGoalMode>("outperform");
 
   const attorneys = users.filter((user) => user.role === "attorney");
   const paralegals = users.filter((user) => user.role === "paralegal");
@@ -97,10 +99,10 @@ export function OutputView({
           periodYear,
           pipelineGoals: attorneyOnlyGoals,
           scopedAttorneyIds: attorneyIds,
-          preferFirmOutperformGoal: attorney === "all",
+          firmCalendarGoalMode: attorney === "all" ? firmCalendarGoalMode : undefined,
         },
       ),
-    [attorney, attorneyIds, attorneyOnlyGoals, filteredRecords, periodMode, periodYear, scopedCommissionGoals],
+    [attorney, attorneyIds, attorneyOnlyGoals, filteredRecords, firmCalendarGoalMode, periodMode, periodYear, scopedCommissionGoals],
   );
   const { results } = output;
 
@@ -123,12 +125,21 @@ export function OutputView({
       ? `${periodYear} calendar year — settled and disbursed amounts use settlement/disburse dates in that year.`
       : `${periodLabel} commission year — amounts use each attorney's commission period.`;
 
-  const goalDetailSuffix =
-    periodMode === "calendar"
-      ? "goal (sum of monthly targets in this calendar year)"
-      : results.firmOutperformGoal
-        ? "Outperform goal"
-        : "gross disbursements goal";
+  const goalDetailSuffix = useMemo(() => {
+    if (periodMode === "calendar") {
+      if (attorney === "all") {
+        if (firmCalendarGoalMode === "combined") {
+          return "goal (attorneys + Outperform for this calendar year)";
+        }
+        if (firmCalendarGoalMode === "outperform") {
+          return "Outperform goal (calendar year portion)";
+        }
+        return "goal (sum of attorney targets in this calendar year)";
+      }
+      return "goal (sum of monthly targets in this calendar year)";
+    }
+    return results.firmOutperformGoal ? "Outperform goal" : "gross disbursements goal";
+  }, [attorney, firmCalendarGoalMode, periodMode, results.firmOutperformGoal]);
 
   const activeFilterCount = [attorney !== "all", paralegal !== "all"].filter(Boolean).length;
   const selectedAttorneyName = attorneys.find((user) => user.id === attorney)?.name;
@@ -187,9 +198,15 @@ export function OutputView({
                 <option value="commission">Commission year</option>
               </Select>
             ) : (
-              <div className="flex items-center rounded-md border bg-muted/30 px-3 text-sm text-muted-foreground">
-                Calendar year (firm total)
-              </div>
+              <Select
+                value={firmCalendarGoalMode}
+                onChange={(event) => setFirmCalendarGoalMode(event.target.value as FirmCalendarGoalMode)}
+                aria-label="Firm calendar year goal"
+              >
+                <option value="outperform">Firm Outperform (calendar year)</option>
+                <option value="combined">Total firm (attorneys + Outperform)</option>
+                <option value="attorneys">Attorneys only (calendar year)</option>
+              </Select>
             )}
             <Select
               value={String(periodYear)}
