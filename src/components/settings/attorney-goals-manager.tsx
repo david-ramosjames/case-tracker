@@ -56,7 +56,51 @@ async function flushPendingDraftInput() {
   if (typeof document !== "undefined" && document.activeElement instanceof HTMLElement) {
     document.activeElement.blur();
   }
-  await new Promise<void>((resolve) => queueMicrotask(resolve));
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
+function collectPlugValuesFromDom(goalCardId: string) {
+  if (typeof document === "undefined") return null;
+  const card = document.querySelector(`[data-goal-card="${goalCardId}"]`);
+  if (!card) return null;
+
+  const gross: Record<string, string> = {};
+  const fees: Record<string, string> = {};
+  card.querySelectorAll<HTMLInputElement>("input[data-plug-type]").forEach((input) => {
+    const monthKey = input.dataset.monthKey;
+    const plugType = input.dataset.plugType;
+    if (!monthKey || !plugType) return;
+    if (plugType === "gross") gross[monthKey] = input.value;
+    if (plugType === "fee") fees[monthKey] = input.value;
+  });
+
+  return { gross, fees };
+}
+
+function resolveCalendarPlugsForSave(
+  draft: GoalDraft,
+  existingGoal?: AttorneyGoal,
+  domPlugs?: { gross: Record<string, string>; fees: Record<string, string> } | null,
+) {
+  const grossInputs = {
+    ...monthlyGoalInputFromResolved(existingGoal?.calendarPlugGoals ?? {}),
+    ...draft.calendarPlugValues,
+    ...(domPlugs?.gross ?? {}),
+  };
+  const feeInputs = {
+    ...monthlyGoalInputFromResolved(existingGoal?.calendarPlugFeeGoals ?? {}),
+    ...draft.calendarPlugFeeValues,
+    ...(domPlugs?.fees ?? {}),
+  };
+
+  return {
+    calendarPlugGoals: parseMonthlyGoalsInput(grossInputs),
+    calendarPlugFeeGoals: parseMonthlyGoalsInput(feeInputs),
+  };
 }
 
 function parseGoalAmount(value: string) {
@@ -166,6 +210,7 @@ export function AttorneyGoalsManager({
   const [isSaving, setIsSaving] = useState(false);
   const [deletingGoalId, setDeletingGoalId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [showAddFirmForm, setShowAddFirmForm] = useState(false);
   const [newAttorneyId, setNewAttorneyId] = useState(attorneys[0]?.id ?? "");
@@ -229,7 +274,14 @@ export function AttorneyGoalsManager({
 
   async function saveGoal(
     draft: GoalDraft,
-    options: { goalScope: GoalScope; attorneyId: string; attorneyName: string },
+    options: {
+      goalScope: GoalScope;
+      attorneyId: string;
+      attorneyName: string;
+      goalId?: string;
+      existingGoal?: AttorneyGoal;
+      domPlugs?: { gross: Record<string, string>; fees: Record<string, string> } | null;
+    },
   ) {
     const period = getPeriodFromDraft(draft);
     const monthlyGoals = parseMonthlyGoalsInput(
@@ -238,8 +290,11 @@ export function AttorneyGoalsManager({
     const monthlyFeeGoals = parseMonthlyGoalsInput(
       Object.fromEntries(period.monthKeys.map((monthKey) => [monthKey, draft.monthlyFeeValues[monthKey] ?? ""])),
     );
-    const calendarPlugGoals = parseMonthlyGoalsInput(draft.calendarPlugValues);
-    const calendarPlugFeeGoals = parseMonthlyGoalsInput(draft.calendarPlugFeeValues);
+    const { calendarPlugGoals, calendarPlugFeeGoals } = resolveCalendarPlugsForSave(
+      draft,
+      options.existingGoal,
+      options.domPlugs,
+    );
     const derived = deriveQuarterGoalsFromMonthly(
       monthlyGoals,
       period.commissionYear,
@@ -257,6 +312,7 @@ export function AttorneyGoalsManager({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
+        goalId: options.goalId,
         goalScope: options.goalScope,
         attorneyId: options.attorneyId,
         attorneyName: options.attorneyName,
@@ -296,12 +352,17 @@ export function AttorneyGoalsManager({
     }
     setIsSaving(true);
     setErrorMessage(null);
+    setSuccessMessage(null);
     try {
       await flushPendingDraftInput();
+      const domPlugs = collectPlugValuesFromDom(goal.id);
       await saveGoal(getDraft(goal), {
         goalScope: "attorney",
         attorneyId: goal.attorneyId,
         attorneyName: attorney.name,
+        goalId: goal.id,
+        existingGoal: goal,
+        domPlugs,
       });
       setDrafts((current) => {
         const next = { ...current };
@@ -309,6 +370,7 @@ export function AttorneyGoalsManager({
         draftsRef.current = next;
         return next;
       });
+      setSuccessMessage(`Saved goals for ${attorney.name} (${goal.year}).`);
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to save goal.");
@@ -372,12 +434,17 @@ export function AttorneyGoalsManager({
   async function handleSaveFirmGoal(goal: AttorneyGoal) {
     setIsSaving(true);
     setErrorMessage(null);
+    setSuccessMessage(null);
     try {
       await flushPendingDraftInput();
+      const domPlugs = collectPlugValuesFromDom(goal.id);
       await saveGoal(getDraft(goal), {
         goalScope: "firm",
         attorneyId: FIRM_OUTPERFORM_GOAL_ATTORNEY_ID,
         attorneyName: "Firm Outperform",
+        goalId: goal.id,
+        existingGoal: goal,
+        domPlugs,
       });
       setDrafts((current) => {
         const next = { ...current };
@@ -385,6 +452,7 @@ export function AttorneyGoalsManager({
         draftsRef.current = next;
         return next;
       });
+      setSuccessMessage(`Saved firm Outperform goal (${goal.year}).`);
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to save firm goal.");
@@ -457,6 +525,7 @@ export function AttorneyGoalsManager({
       </CardHeader>
       <CardContent className="space-y-6">
         {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
+        {successMessage ? <p className="text-sm text-emerald-700">{successMessage}</p> : null}
 
         <section className="space-y-4">
           <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
@@ -503,6 +572,7 @@ export function AttorneyGoalsManager({
                   draft={draft}
                   endYearOptions={endYearOptions}
                   showCommissionThreshold={false}
+                  goalCardId={goal.id}
                   onDraftChange={(next) => updateDraft(goal.id, next)}
                   actions={
                     <div className="flex items-center gap-2">
@@ -602,6 +672,7 @@ export function AttorneyGoalsManager({
                   endYearOptions={endYearOptions}
                   attorneyId={goal.attorneyId}
                   allAttorneyGoals={attorneyGoals}
+                  goalCardId={goal.id}
                   onDraftChange={(next) => updateDraft(goal.id, next)}
                   actions={
                     <div className="flex items-center gap-2">
@@ -653,6 +724,7 @@ function GoalEditorCard({
   showCommissionThreshold = true,
   attorneyId,
   allAttorneyGoals = [],
+  goalCardId,
 }: {
   title: string;
   draft: GoalDraft;
@@ -662,6 +734,7 @@ function GoalEditorCard({
   showCommissionThreshold?: boolean;
   attorneyId?: string;
   allAttorneyGoals?: AttorneyGoal[];
+  goalCardId?: string;
 }) {
   const period = getPeriodFromDraft(draft);
   const periodLabel = formatGoalPeriodLabel(period.commissionYear, period.startMonth, period.monthCount);
@@ -716,7 +789,7 @@ function GoalEditorCard({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
+    <div className="overflow-hidden rounded-xl border bg-card shadow-sm" data-goal-card={goalCardId}>
       <div className="flex flex-col gap-3 border-b bg-muted/30 px-5 py-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <p className="text-base font-semibold text-navy-950">{title}</p>
@@ -863,6 +936,8 @@ function GoalEditorCard({
                         <GoalAmountInput
                           className="h-9"
                           value={draft.calendarPlugValues[monthKey] ?? ""}
+                          data-plug-type="gross"
+                          data-month-key={monthKey}
                           onChange={(value) =>
                             onDraftChange((current) => ({
                               ...current,
@@ -886,6 +961,8 @@ function GoalEditorCard({
                         <GoalAmountInput
                           className="h-9"
                           value={draft.calendarPlugFeeValues[monthKey] ?? ""}
+                          data-plug-type="fee"
+                          data-month-key={monthKey}
                           onChange={(value) =>
                             onDraftChange((current) => ({
                               ...current,
@@ -1007,11 +1084,15 @@ function GoalAmountInput({
   onChange,
   className,
   placeholder = "0",
+  "data-plug-type": dataPlugType,
+  "data-month-key": dataMonthKey,
 }: {
   value: string;
   onChange: (value: string) => void;
   className?: string;
   placeholder?: string;
+  "data-plug-type"?: string;
+  "data-month-key"?: string;
 }) {
   return (
     <Input
@@ -1019,6 +1100,8 @@ function GoalAmountInput({
       placeholder={placeholder}
       className={className}
       value={value}
+      data-plug-type={dataPlugType}
+      data-month-key={dataMonthKey}
       onChange={(event) => onChange(event.target.value)}
       onBlur={(event) => {
         const raw = event.target.value;

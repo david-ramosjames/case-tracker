@@ -21,6 +21,7 @@ export async function POST(request: Request) {
     }
 
     const goal = await upsertAttorneyGoal({
+      goalId: input.goalId,
       goalScope,
       attorneyId: goalScope === "firm" ? FIRM_OUTPERFORM_GOAL_ATTORNEY_ID : input.attorneyId,
       attorneyName: goalScope === "firm" ? FIRM_OUTPERFORM_GOAL_ATTORNEY_NAME : input.attorneyName.trim(),

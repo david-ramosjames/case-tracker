@@ -2172,6 +2172,7 @@ export async function createSnapshot(quarter: string, capturedBy: string): Promi
 }
 
 export type AttorneyGoalInput = {
+  goalId?: string;
   attorneyId: string;
   attorneyName: string;
   goalScope?: GoalScope;
@@ -2242,17 +2243,22 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     fee_q4_goal: input.feeQ4Goal,
   };
 
-  const { data, error } = await client
-    .from("attorney_goals")
-    .upsert(payload, { onConflict: "attorney_name,year" })
-    .select("*")
-    .single();
+  const { data, error } = input.goalId
+    ? await client.from("attorney_goals").update(payload).eq("id", input.goalId).select("*").single()
+    : await client
+        .from("attorney_goals")
+        .upsert(payload, { onConflict: "attorney_name,year" })
+        .select("*")
+        .single();
 
   if (error) {
     if (error.message?.includes("calendar_plug")) {
       throw new Error(
         "Calendar plug columns are missing in the database. Run supabase/sql/033_calendar_plug_goals.sql in Supabase.",
       );
+    }
+    if (input.goalId && error.code === "PGRST116") {
+      throw new Error("Goal not found. Refresh the page and try again.");
     }
     throw error;
   }
