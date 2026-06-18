@@ -41,12 +41,20 @@ export const SETTLEMENT_FINANCIAL_SETTLEMENT_AMOUNT_HEADERS = [
   ...CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS,
 ] as const;
 
+export const SETTLEMENT_FINANCIAL_FULL_SETTLEMENT_HEADERS = [
+  "Status",
+  "Case Status",
+  "Full Settlement",
+  "Full settlement",
+] as const;
+
 export type SettlementFinancialClaimLine = {
   partyLabel: string | null;
   referralFee: number | null;
   closedDate: string | null;
   settlementAmount: number | null;
   attorneyFees: number | null;
+  fullSettlement: boolean;
 };
 
 export type ParsedSettlementFinancialBackfillRow = {
@@ -117,12 +125,16 @@ function parseClaimLine(
     attorneyFees = parseMoney(attorneyFeesRaw);
   }
 
+  const statusRaw = getCsvCellAny(row, headers, [...SETTLEMENT_FINANCIAL_FULL_SETTLEMENT_HEADERS]);
+  const fullSettlement = parseFullSettlementCell(statusRaw);
+
   const hasData =
     partyLabel ||
     referralFee != null ||
     closedDate ||
     settlementAmount != null ||
-    attorneyFees != null;
+    attorneyFees != null ||
+    statusRaw;
   if (!hasData) return null;
 
   return {
@@ -133,6 +145,7 @@ function parseClaimLine(
       closedDate,
       settlementAmount,
       attorneyFees,
+      fullSettlement,
     },
   };
 }
@@ -153,57 +166,68 @@ function buildGroupedBackfillRow(
     lockReferralFee = true;
   }
 
-  const manualDisbursements: ManualDisbursementInput[] = claims.map((claim) => ({
-    partyLabel: claim.partyLabel,
-    settlementDate: claim.closedDate,
-    disburseDate: claim.closedDate,
-    settlementAmount: claim.settlementAmount,
-    attorneyFees: claim.attorneyFees,
-    pendingRemaining: !claim.closedDate,
-  }));
-
-  const totalSettlementAmount = sumNullable(claims.map((claim) => claim.settlementAmount));
-  const totalAttorneyFees = sumNullable(claims.map((claim) => claim.attorneyFees));
-
-  if (totalSettlementAmount != null) {
-    result.settlementAmount = totalSettlementAmount;
-    lockFinancialBackfill = true;
-  }
-  if (totalAttorneyFees != null) {
-    result.attorneyFees = totalAttorneyFees;
-    lockFinancialBackfill = true;
-  }
-
   const closedDates = claims.map((claim) => claim.closedDate).filter(Boolean) as string[];
   const allPartiesClosed = claims.length > 0 && claims.every((claim) => Boolean(claim.closedDate));
   const latestClosedDate =
     closedDates.length > 0
       ? closedDates.sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0]
       : null;
+  const hasClosedDate = Boolean(latestClosedDate);
+  const fullSettlement = claims.some((claim) => claim.fullSettlement);
 
-  if (latestClosedDate) {
-    result.disburseDate = latestClosedDate;
-    result.settlementDate = latestClosedDate;
-    result.checkDisbursedAt = `${latestClosedDate}T12:00:00.000Z`;
-    result.disbursedStatus = allPartiesClosed ? "Yes" : "No";
-    result.checkStatus = allPartiesClosed ? "Deposited" : "No";
-    result.resultQuarter = deriveResultQuarterFromDisburseDate(latestClosedDate) ?? undefined;
+  let manualDisbursements: ManualDisbursementInput[] = [];
+
+  if (hasClosedDate) {
+    manualDisbursements = claims.map((claim) => ({
+      partyLabel: claim.partyLabel,
+      settlementDate: claim.closedDate,
+      disburseDate: claim.closedDate,
+      settlementAmount: claim.settlementAmount,
+      attorneyFees: claim.attorneyFees,
+      pendingRemaining: !claim.closedDate,
+    }));
+
+    const totalSettlementAmount = sumNullable(claims.map((claim) => claim.settlementAmount));
+    const totalAttorneyFees = sumNullable(claims.map((claim) => claim.attorneyFees));
+
+    if (totalSettlementAmount != null) {
+      result.settlementAmount = totalSettlementAmount;
+      lockFinancialBackfill = true;
+    }
+    if (totalAttorneyFees != null) {
+      result.attorneyFees = totalAttorneyFees;
+      lockFinancialBackfill = true;
+    }
+
+    if (result.settlementAmount != null && result.attorneyFees != null) {
+      const feePercent = deriveFeePercentFromSettlement({
+        settlementAmount: result.settlementAmount,
+        attorneyFees: result.attorneyFees,
+        referralFee,
+      });
+      if (feePercent != null) result.feePercent = feePercent;
+    }
+
+    const caseFullyClosed = fullSettlement && allPartiesClosed;
+
+    if (caseFullyClosed) {
+      result.disburseDate = latestClosedDate!;
+      result.settlementDate = latestClosedDate!;
+      result.checkDisbursedAt = `${latestClosedDate}T12:00:00.000Z`;
+      result.disbursedStatus = "Yes";
+      result.checkStatus = "Deposited";
+      result.resultQuarter = deriveResultQuarterFromDisburseDate(latestClosedDate!) ?? undefined;
+      tracker.caseStage = "Settled" as CaseStage;
+      tracker.expectedDisbursementCount = claims.length;
+      tracker.multipleDisbursementsEnabled = claims.length > 1;
+    } else {
+      result.disbursedStatus = "No";
+      result.checkStatus = "No";
+      tracker.multipleDisbursementsEnabled = true;
+      tracker.expectedDisbursementCount = Math.max(claims.length + 1, claims.length);
+    }
+
     lockFinancialBackfill = true;
-  }
-
-  if (result.settlementAmount != null && result.attorneyFees != null) {
-    const feePercent = deriveFeePercentFromSettlement({
-      settlementAmount: result.settlementAmount,
-      attorneyFees: result.attorneyFees,
-      referralFee,
-    });
-    if (feePercent != null) result.feePercent = feePercent;
-  }
-
-  if (lockFinancialBackfill) {
-    tracker.caseStage = "Settled" as CaseStage;
-    tracker.expectedDisbursementCount = claims.length;
-    tracker.multipleDisbursementsEnabled = claims.length > 1;
   }
 
   if (!lockFinancialBackfill && !lockReferralFee) return null;
@@ -238,4 +262,21 @@ function parseMoney(value: string) {
 function parsePercent(value: string) {
   const numeric = Number(value.trim().replace(/%$/, "").replace(/[,\s]/g, ""));
   return Number.isFinite(numeric) ? numeric : null;
+}
+
+/** Active/open = partial case; Closed/Yes/Y = all claims in and case can move to Settled. */
+function parseFullSettlementCell(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized === "active" || normalized === "open" || normalized === "n" || normalized === "no") return false;
+  if (
+    normalized === "y" ||
+    normalized === "yes" ||
+    normalized === "true" ||
+    normalized === "closed" ||
+    normalized === "settled"
+  ) {
+    return true;
+  }
+  return false;
 }

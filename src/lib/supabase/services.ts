@@ -699,14 +699,14 @@ export async function importSettlementFinancialBackfillRows(
           caseId,
           {
             ...mergedTracker,
-            manualDisbursements: row.manualDisbursements,
+            ...(row.lockFinancialBackfill ? { manualDisbursements: row.manualDisbursements } : {}),
           },
           {
             actor: options.actor,
             markReviewed: false,
             changeInput: {
               ...row.tracker,
-              manualDisbursements: row.manualDisbursements,
+              ...(row.lockFinancialBackfill ? { manualDisbursements: row.manualDisbursements } : {}),
             },
           },
         );

@@ -13,6 +13,7 @@ import {
   SETTLEMENT_FINANCIAL_ATTORNEY_FEES_HEADERS,
   SETTLEMENT_FINANCIAL_CLAIMANT_HEADERS,
   SETTLEMENT_FINANCIAL_CLOSED_DATE_HEADERS,
+  SETTLEMENT_FINANCIAL_FULL_SETTLEMENT_HEADERS,
   SETTLEMENT_FINANCIAL_REFERRAL_FEE_HEADERS,
   SETTLEMENT_FINANCIAL_SETTLEMENT_AMOUNT_HEADERS,
 } from "@/lib/csv/settlement-financial-backfill";
@@ -49,6 +50,7 @@ export function SettlementFinancialBackfillCard() {
     const expected = [
       ...CASE_BACKFILL_CASE_NUMBER_HEADERS,
       ...SETTLEMENT_FINANCIAL_CLAIMANT_HEADERS,
+      ...SETTLEMENT_FINANCIAL_FULL_SETTLEMENT_HEADERS,
       ...SETTLEMENT_FINANCIAL_REFERRAL_FEE_HEADERS,
       ...SETTLEMENT_FINANCIAL_CLOSED_DATE_HEADERS,
       ...SETTLEMENT_FINANCIAL_SETTLEMENT_AMOUNT_HEADERS,
@@ -187,8 +189,8 @@ export function SettlementFinancialBackfillCard() {
             <div>
               <p className="text-sm font-semibold text-navy-950">Upload CSV</p>
               <p className="text-sm text-muted-foreground">
-                Columns: Case Num, Claimant name, Referral Fee %, Closed Date, Settlement Amount, Net Attorney Fees.
-                Multiple rows with the same case number are combined — each row becomes a party and totals are summed.
+                Columns: Case Num, Claimant name, Referral Fee %, Closed Date, Settlement Amount, Net Attorney Fees,
+                Status (Active or Closed). Multiple rows with the same case number are combined.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -272,17 +274,24 @@ export function SettlementFinancialBackfillCard() {
             </li>
             <li>
               <span className="font-medium text-navy-950">Referral Fee %</span> updates the tracker referral fee (one
-              value per case; taken from the first row that has it).
+              value per case; taken from the first row that has it). Rows with only referral fee and no closed date do
+              not change stage or settlement amounts — the case stays active.
             </li>
             <li>
-              <span className="font-medium text-navy-950">Closed Date</span> sets disburse / closed date and marks disbursed.
+              <span className="font-medium text-navy-950">Closed Date</span> is required before settlement amounts,
+              disbursements, or stage Settled are applied.
             </li>
             <li>
               <span className="font-medium text-navy-950">Settlement Amount</span> and{" "}
               <span className="font-medium text-navy-950">Net Attorney Fees</span> (RJL Attorney Fees) update Results.
               Fee % = (RJL fees ÷ (1 − referral fee)) ÷ settlement amount when all three are present.
             </li>
-            <li>Cases with closed date or settlement data move to stage Settled.</li>
+            <li>
+              <span className="font-medium text-navy-950">Status</span> — use <span className="font-medium text-navy-950">Active</span>{" "}
+              while more claims may still come (amounts save, case stays in current stage). Use{" "}
+              <span className="font-medium text-navy-950">Closed</span> when all claims are in and the case should move
+              to Settled.
+            </li>
             <li>Blank cells are skipped. Rows must match an existing case number (grouped by case before import).</li>
           </ul>
         </div>
