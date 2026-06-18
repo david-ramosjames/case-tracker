@@ -3,6 +3,8 @@
 --
 -- Run this entire script in one go (select all → Run). Supabase runs one statement at a time;
 -- a single DO block keeps temp tables in scope.
+--
+-- Matches imports even when lock flags were never set (e.g. migration 029 missing during import).
 
 do $$
 begin
@@ -11,15 +13,38 @@ begin
     e.id as tracker_entry_id,
     e.case_id,
     e.case_number,
-    e.case_stage
+    e.case_stage,
+    (
+      coalesce(r.financial_backfill_locked, false)
+      or exists (
+        select 1
+        from public.case_tracker_disbursements d
+        where d.tracker_entry_id = e.id
+          and d.sheet_row_key is null
+          and d.synced_at is null
+      )
+    ) as clear_financial,
+    (
+      e.referral_fee_backfill_locked
+      or coalesce(e.referral_fee_arrangement, '') ilike '%Financial backfill%'
+    ) as clear_referral
   from public.case_tracker_entries e
   left join public.case_tracker_results r on r.tracker_entry_id = e.id
   where e.referral_fee_backfill_locked = true
-     or coalesce(r.financial_backfill_locked, false) = true;
+     or coalesce(r.financial_backfill_locked, false) = true
+     or coalesce(e.referral_fee_arrangement, '') ilike '%Financial backfill%'
+     or exists (
+       select 1
+       from public.case_tracker_disbursements d
+       where d.tracker_entry_id = e.id
+         and d.sheet_row_key is null
+         and d.synced_at is null
+     );
 
   delete from public.case_tracker_disbursements d
   using _reset_financial_backfill_targets t
-  where d.case_number = t.case_number
+  where t.clear_financial
+    and d.case_number = t.case_number
     and d.sheet_row_key is null;
 
   update public.case_tracker_results r
@@ -39,18 +64,17 @@ begin
     reductions_status = 'Not Complete'
   from _reset_financial_backfill_targets t
   where r.tracker_entry_id = t.tracker_entry_id
-    and r.financial_backfill_locked = true;
+    and t.clear_financial;
 
   update public.case_tracker_entries e
   set
     referral_fee_backfill_locked = false,
-    referral_fee = case when e.referral_fee_backfill_locked then null else e.referral_fee end,
-    referral_fee_arrangement = case
-      when e.referral_fee_arrangement like '%Financial backfill%' then null
-      else e.referral_fee_arrangement
-    end,
+    referral_fee = case when t.clear_referral then null else e.referral_fee end,
+    referral_fee_arrangement = case when t.clear_referral then null else e.referral_fee_arrangement end,
     case_stage = case
-      when e.case_stage::text in ('Settlement', 'SETTLED') and ps.prior_stage is not null
+      when t.clear_financial
+        and e.case_stage::text in ('Settlement', 'SETTLED')
+        and ps.prior_stage is not null
         then ps.prior_stage::public.case_tracker_stage
       else e.case_stage
     end

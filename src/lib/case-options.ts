@@ -307,9 +307,11 @@ export function applyDerivedResultQuarter<T extends { disburseDate: string | nul
   return { ...result, resultQuarter: deriveResultQuarterFromDisburseDate(result.disburseDate) };
 }
 
-/** When a final disburse date is set, downstream workflow steps are implied. */
+/** When the case is fully disbursed, downstream workflow steps are implied from the disburse date. */
 export function applyDerivedWorkflowFromDisburseDate<T extends SettlementResult>(result: T): T {
-  if (!result.disburseDate?.trim()) return result;
+  if (result.disbursedStatus !== "Yes" || !result.disburseDate?.trim()) {
+    return result.disbursedStatus === "No" ? { ...result, checkDisbursedAt: null } : result;
+  }
 
   const dateOnly = result.disburseDate.trim().slice(0, 10);
   const checkDisbursedAt = /^\d{4}-\d{2}-\d{2}$/.test(dateOnly)
@@ -334,6 +336,8 @@ export function applyDerivedResultFields<T extends SettlementResult>(result: T):
 export type ApplyDerivedSettlementResultOptions = {
   /** When true, do not roll disbursement party rows up into case-level result fields (manual edits). */
   skipDisbursementAggregation?: boolean;
+  /** When true, keep fee percent and attorney fees from the result instead of recalculating. */
+  skipFeeRecalculation?: boolean;
 };
 
 export function applyDerivedSettlementResult<
@@ -370,6 +374,10 @@ export function applyDerivedSettlementResult<
       checkDisbursedAt: aggregated.checkDisbursedAt,
       resultQuarter: aggregated.resultQuarter,
     });
+  }
+
+  if (options?.skipFeeRecalculation) {
+    return withWorkflow;
   }
 
   const feePercent =

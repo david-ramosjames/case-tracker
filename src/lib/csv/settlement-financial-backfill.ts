@@ -232,8 +232,8 @@ function buildGroupedBackfillRow(
       result.checkStatus = "No";
       result.checkDisbursedAt = null;
       result.disburseDate = null;
-      result.settlementDate = null;
       result.resultQuarter = null;
+      tracker.caseStage = "Settled" as CaseStage;
       tracker.multipleDisbursementsEnabled = true;
       tracker.expectedDisbursementCount = Math.max(claims.length + 1, claims.length);
     }

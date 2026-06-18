@@ -481,7 +481,7 @@ export function CaseTable({
                 shared: {
                   ...record.shared,
                   ...(patch.shared?.caseType !== undefined ? { caseType: patch.shared.caseType } : {}),
-                  status: deriveCaseStatusFromTracker(nextTracker.caseStage, nextTracker.result.disbursedStatus),
+                  status: deriveCaseStatusFromTracker(nextTracker.caseStage, nextTracker.result),
                 },
               };
             }),
@@ -577,7 +577,7 @@ export function CaseTable({
           tracker,
           shared: {
             ...record.shared,
-            status: deriveCaseStatusFromTracker(tracker.caseStage, tracker.result.disbursedStatus),
+            status: deriveCaseStatusFromTracker(tracker.caseStage, tracker.result),
           },
         };
       }),

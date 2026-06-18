@@ -14,7 +14,7 @@ import { AttorneyFieldsChecklist } from "@/components/cases/attorney-fields-chec
 import { ConfidenceBadge, DerivedCaseStatusBadge, StageBadge } from "@/components/cases/case-status-badge";
 import { NextScheduledEventsCard } from "@/components/cases/next-scheduled-events-card";
 import type { AttorneySourcedFieldId } from "@/lib/attorney-sourced-fields";
-import { deriveCaseStatusFromTracker } from "@/lib/case-status";
+import { applyOpenSettledTrackerFallback, deriveCaseStatusFromTracker } from "@/lib/case-status";
 import {
   applyDerivedSettlementResult,
   coerceReductionsStatus,
@@ -100,7 +100,8 @@ export function CaseDetailView({
   const [isSourcesEditing, setIsSourcesEditing] = useState(false);
   const [isResultsEditing, setIsResultsEditing] = useState(false);
   const isSettledStage = tracker.caseStage === "Settled";
-  const [isResultsExpanded, setIsResultsExpanded] = useState(isSettledStage);
+  const isAdmin = sessionUser.role === "admin" || sessionUser.role === "super_admin";
+  const [isResultsExpanded, setIsResultsExpanded] = useState(isSettledStage || isAdmin);
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingComment, setIsAddingComment] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -119,13 +120,12 @@ export function CaseDetailView({
   useEffect(() => {
     if (tracker.caseStage === "Settled") {
       setIsResultsExpanded(true);
-    } else {
+    } else if (!isAdmin) {
       setIsResultsExpanded(false);
       setIsResultsEditing(false);
     }
-  }, [tracker.caseStage]);
+  }, [tracker.caseStage, isAdmin]);
 
-  const isAdmin = sessionUser.role === "admin" || sessionUser.role === "super_admin";
   const isOrphanTracker = initialRecord.shared.id === initialRecord.tracker.id;
 
   const quarterOptions = useMemo(() => getTargetPeriodSelectOptions(tracker.targetResolutionQuarter), [tracker.targetResolutionQuarter]);
@@ -142,6 +142,13 @@ export function CaseDetailView({
     return Math.round(next.minimumValue * deriveResultFeePercent(next));
   }
 
+  function deriveTrackerSettlement(current: TrackerEntry): TrackerEntry {
+    return applyOpenSettledTrackerFallback({
+      ...current,
+      result: applyDerivedSettlementResult(current.result, current),
+    });
+  }
+
   function updateField<K extends keyof TrackerEntry>(key: K, value: TrackerEntry[K]) {
     setTracker((current) => {
       const next = { ...current, [key]: value };
@@ -149,7 +156,7 @@ export function CaseDetailView({
         next.expectedLitigation = coerceExpectedLitigationForStage(next.caseStage, next.expectedLitigation);
         setShared((s) => ({
           ...s,
-          status: deriveCaseStatusFromTracker(next.caseStage, next.result.disbursedStatus),
+          status: deriveCaseStatusFromTracker(next.caseStage, next.result),
         }));
       }
       if (key === "caseStage" || key === "referralFee" || key === "minimumValue") {
@@ -204,10 +211,23 @@ export function CaseDetailView({
     }));
   }
 
-  function updateDisbursementParty(id: string, patch: Partial<CaseDisbursement>) {
+  function updateResultAdminField<K extends "feePercent" | "attorneyFees">(key: K, value: SettlementResult[K]) {
     setTracker((current) => ({
       ...current,
-      disbursements: current.disbursements.map((row) => {
+      result: applyDerivedSettlementResult(
+        {
+          ...current.result,
+          [key]: value,
+        },
+        current,
+        { skipDisbursementAggregation: true, skipFeeRecalculation: true },
+      ),
+    }));
+  }
+
+  function updateDisbursementParty(id: string, patch: Partial<CaseDisbursement>) {
+    setTracker((current) => {
+      const disbursements = current.disbursements.map((row) => {
         if (row.id !== id) return row;
         const next = { ...row, ...patch };
         if (row.sheetRowKey) {
@@ -220,8 +240,10 @@ export function CaseDetailView({
           }
         }
         return next;
-      }),
-    }));
+      });
+      const next = { ...current, disbursements };
+      return deriveTrackerSettlement(next);
+    });
   }
 
   function addManualDisbursement() {
@@ -291,14 +313,20 @@ export function CaseDetailView({
   ) {
     setTracker((current) => {
       const result = { ...current.result, [key]: value };
+      if (key === "disbursedStatus" && value === "No") {
+        result.checkDisbursedAt = null;
+      }
       const next = { ...current, result };
       if (key === "disbursedStatus") {
         setShared((s) => ({
           ...s,
-          status: deriveCaseStatusFromTracker(next.caseStage, next.result.disbursedStatus),
+          status: deriveCaseStatusFromTracker(next.caseStage, next.result),
         }));
       }
-      return next;
+      return deriveTrackerSettlement({
+        ...next,
+        result: applyDerivedSettlementResult(next.result, next, { skipDisbursementAggregation: true }),
+      });
     });
   }
 
@@ -356,12 +384,11 @@ export function CaseDetailView({
   async function saveTracker(options?: { markReviewed?: boolean; exitOverviewEdit?: boolean }) {
     const markReviewed = options?.markReviewed ?? true;
     const now = new Date().toISOString();
-    const nextTracker = {
+    const nextTracker = deriveTrackerSettlement({
       ...tracker,
-      result: applyDerivedSettlementResult(tracker.result, tracker, { skipDisbursementAggregation: true }),
       lastReviewedAt: markReviewed ? now : tracker.lastReviewedAt,
       updatedAt: now,
-    };
+    });
 
     setIsSaving(true);
     setErrorMessage(null);
@@ -375,7 +402,7 @@ export function CaseDetailView({
       }));
       setShared((current) => ({
         ...current,
-        status: deriveCaseStatusFromTracker(savedTracker.caseStage, savedTracker.result.disbursedStatus),
+        status: deriveCaseStatusFromTracker(savedTracker.caseStage, savedTracker.result),
       }));
       if (savedActivity) {
         setActivity((current) => [savedActivity, ...current]);
@@ -461,7 +488,7 @@ export function CaseDetailView({
       if (savedTracker) {
         setShared((current) => ({
           ...current,
-          status: deriveCaseStatusFromTracker(savedTracker.caseStage, savedTracker.result.disbursedStatus),
+          status: deriveCaseStatusFromTracker(savedTracker.caseStage, savedTracker.result),
         }));
       }
       setActivity((current) => [
@@ -998,7 +1025,7 @@ export function CaseDetailView({
                 <div className="min-w-0">
                   <CardTitle>Results Tracking</CardTitle>
                   <CardDescription>
-                    {isResultsExpanded || isSettledStage
+                    {isResultsExpanded || isSettledStage || isAdmin
                       ? "Settlement and disbursement tracking. Import from the RJL Cases Disbursing sheet to pull all rows for this case # (one row per party). Disburse date sets the result quarter automatically."
                       : "Collapsed by default until Settled — expand when you need to review or enter settlement and disbursement details."}
                   </CardDescription>
@@ -1051,11 +1078,21 @@ export function CaseDetailView({
                   <FormattedNumberInput
                     suffix="%"
                     value={Math.round((tracker.result.feePercent ?? 0) * 100)}
-                    readOnly
+                    readOnly={!isAdmin}
+                    onValueChange={
+                      isAdmin
+                        ? (value) => updateResultAdminField("feePercent", value != null ? value / 100 : null)
+                        : undefined
+                    }
                   />
                 </Field>
                 <Field label="RJL Attorney Fees">
-                  <FormattedNumberInput prefix="$" value={tracker.result.attorneyFees} readOnly />
+                  <FormattedNumberInput
+                    prefix="$"
+                    value={tracker.result.attorneyFees}
+                    readOnly={!isAdmin}
+                    onValueChange={isAdmin ? (value) => updateResultAdminField("attorneyFees", value) : undefined}
+                  />
                 </Field>
                 <Field label="Release">
                   <Select value={tracker.result.releaseStatus} onChange={(event) => updateResultWorkflow("releaseStatus", event.target.value as ReleaseStatus)}>

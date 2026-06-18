@@ -7,7 +7,7 @@ export function CaseStatusBadge({ status }: { status: CaseStatus }) {
 }
 
 export function DerivedCaseStatusBadge({ record }: { record: Pick<CaseRecord, "tracker"> }) {
-  const status = deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result.disbursedStatus);
+  const status = deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result);
   return <CaseStatusBadge status={status} />;
 }
 

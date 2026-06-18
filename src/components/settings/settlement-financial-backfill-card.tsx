@@ -95,9 +95,15 @@ export function SettlementFinancialBackfillCard() {
         error?: string;
       };
       if (!response.ok) throw new Error(payload.error ?? "Reset failed.");
-      setResetMessage(
-        `Reset ${payload.casesReset ?? 0} case(s): cleared financial/referral import locks, removed ${payload.disbursementsRemoved ?? 0} manual disbursement row(s), restored stage on ${payload.stagesRestored ?? 0} case(s). Re-run the Google settlements sheet sync or import a fresh CSV.`,
-      );
+      if ((payload.casesReset ?? 0) === 0) {
+        setResetMessage(
+          "No financial backfill imports were detected. The reset looks for lock flags, “Financial backfill” referral text, and CSV-created manual disbursement rows. If cases still look wrong, they may have been changed another way — use the case table or sheet sync to fix them.",
+        );
+      } else {
+        setResetMessage(
+          `Reset ${payload.casesReset ?? 0} case(s): cleared financial/referral import locks, removed ${payload.disbursementsRemoved ?? 0} manual disbursement row(s), restored stage on ${payload.stagesRestored ?? 0} case(s). Re-run the Google settlements sheet sync or import a fresh CSV.`,
+        );
+      }
       setResetDetails(payload.details ?? []);
       setConfirmReset(false);
       setPreview(null);
@@ -369,9 +375,9 @@ export function SettlementFinancialBackfillCard() {
               <div>
                 <p className="font-semibold text-rose-950">Reset all financial backfill imports</p>
                 <p className="mt-1 text-sm text-rose-900">
-                  Removes every case touched by this CSV import: settlement amounts, disburse dates, manual disbursement
-                  parties, referral fees from backfill, and import locks. Cases return to Google sheet sync. Stage is
-                  restored from version history when possible. Sheet-linked disbursement rows are kept.
+                  Removes cases touched by the CSV import — including when lock flags were never saved. Detects lock
+                  flags, referral text containing “Financial backfill”, and manual disbursement rows created by the CSV.
+                  Sheet-linked disbursements are kept.
                 </p>
               </div>
               {confirmReset ? (

@@ -127,9 +127,10 @@ export function getAggregatedResultFromDisbursements(
   const disburseDates = getCompletedDisbursements(tracker)
     .map((item) => item.disburseDate)
     .filter(Boolean) as string[];
-  const disburseDate = disburseDates.length
-    ? disburseDates.sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0]
-    : null;
+  const disburseDate =
+    allDisbursed && disburseDates.length
+      ? disburseDates.sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0]
+      : null;
 
   const disbursedStatus: DisbursedStatus = allDisbursed ? "Yes" : "No";
   const checkDisbursedAt = allDisbursed && disburseDate ? new Date(disburseDate).toISOString() : null;

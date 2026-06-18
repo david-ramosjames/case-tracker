@@ -34,7 +34,7 @@ import {
   normalizeCaseType,
 } from "@/lib/case-options";
 import { deriveFeePercentFromSettlement } from "@/lib/fee-percent";
-import { deriveCaseStatusFromTracker } from "@/lib/case-status";
+import { CLOSED_CASE_STAGES, deriveCaseStatusFromTracker, applyOpenSettledTrackerFallback } from "@/lib/case-status";
 import { pickNextScheduledEvents } from "@/lib/docketflow/case-events";
 import {
   type ActivityLogEntry,
@@ -391,7 +391,9 @@ export async function updateTrackerEntry(
       }
     }
 
-    const tracker = rowToTrackerEntry(data as TrackerEntryRow, resultRow, []);
+    const refreshedRecord = await getCaseById(caseId);
+    const tracker = refreshedRecord?.tracker ?? rowToTrackerEntry(data as TrackerEntryRow, resultRow, []);
+
     const activity = await createActivityEntry(
       caseId,
       "Tracker updated",
@@ -408,8 +410,7 @@ export async function updateTrackerEntry(
         console.error("Slack tracker notification failed", error);
       }
     }
-    const refreshed = await getCaseById(caseId);
-    return { tracker: refreshed?.tracker ?? tracker, activity: activity ?? undefined };
+    return { tracker, activity: activity ?? undefined };
   }
 
   if (hasPersistedTrackerEntry(existingTracker)) {
@@ -704,11 +705,8 @@ export async function importSettlementFinancialBackfillRows(
         const caseNumber = cleanCaseNumber(existing.shared.caseNumber);
         let mergedTracker = mergeTrackerImport(existing.tracker, row.tracker);
 
-        if (row.keepCaseActive && existing.tracker.caseStage === "Settled" && admin) {
-          const priorStage = await lookupPriorCaseStageBeforeSettlement(admin, existing.tracker.id);
-          if (priorStage) {
-            mergedTracker = { ...mergedTracker, caseStage: priorStage };
-          }
+        if (row.keepCaseActive) {
+          mergedTracker = { ...mergedTracker, caseStage: "Settled" };
         }
 
         if (admin && row.lockFinancialBackfill && caseNumber) {
@@ -841,6 +839,7 @@ export type SettlementFinancialBackfillResetDetail = {
   stageRestored: boolean;
   restoredStage: string | null;
   disbursementsRemoved: number;
+  detectedBy: string[];
   summary: string;
 };
 
@@ -856,30 +855,50 @@ export async function resetSettlementFinancialBackfill(): Promise<SettlementFina
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required to reset settlement financial backfill.");
 
-  const [{ data: referralLockedRows, error: referralError }, { data: financialLockedRows, error: financialError }] =
-    await Promise.all([
-      admin
-        .from("case_tracker_entries")
-        .select("id")
-        .eq("referral_fee_backfill_locked", true),
-      admin.from("case_tracker_results").select("tracker_entry_id").eq("financial_backfill_locked", true),
-    ]);
+  type ResetFlags = { financial: boolean; referral: boolean; reasons: string[] };
+  const flagsByTrackerId = new Map<string, ResetFlags>();
+
+  function markTracker(trackerEntryId: string, patch: Partial<Pick<ResetFlags, "financial" | "referral">>, reason: string) {
+    const existing = flagsByTrackerId.get(trackerEntryId) ?? { financial: false, referral: false, reasons: [] };
+    flagsByTrackerId.set(trackerEntryId, {
+      financial: existing.financial || Boolean(patch.financial),
+      referral: existing.referral || Boolean(patch.referral),
+      reasons: existing.reasons.includes(reason) ? existing.reasons : [...existing.reasons, reason],
+    });
+  }
+
+  const [
+    { data: referralLockedRows, error: referralError },
+    { data: financialLockedRows, error: financialError },
+    { data: arrangementRows, error: arrangementError },
+    { data: manualBackfillRows, error: manualError },
+  ] = await Promise.all([
+    admin.from("case_tracker_entries").select("id").eq("referral_fee_backfill_locked", true),
+    admin.from("case_tracker_results").select("tracker_entry_id").eq("financial_backfill_locked", true),
+    admin.from("case_tracker_entries").select("id").ilike("referral_fee_arrangement", "%Financial backfill%"),
+    admin
+      .from("case_tracker_disbursements")
+      .select("tracker_entry_id")
+      .is("sheet_row_key", null)
+      .is("synced_at", null),
+  ]);
 
   if (referralError) throw new Error(referralError.message);
   if (financialError) throw new Error(financialError.message);
+  if (arrangementError) throw new Error(arrangementError.message);
+  if (manualError) throw new Error(manualError.message);
 
-  const flagsByTrackerId = new Map<string, { financial: boolean; referral: boolean }>();
   for (const row of referralLockedRows ?? []) {
-    const id = toString(row.id, "");
-    if (!id) continue;
-    const existing = flagsByTrackerId.get(id) ?? { financial: false, referral: false };
-    flagsByTrackerId.set(id, { ...existing, referral: true });
+    markTracker(toString(row.id, ""), { referral: true }, "referral lock flag");
   }
   for (const row of financialLockedRows ?? []) {
-    const id = toString(row.tracker_entry_id, "");
-    if (!id) continue;
-    const existing = flagsByTrackerId.get(id) ?? { financial: false, referral: false };
-    flagsByTrackerId.set(id, { ...existing, financial: true });
+    markTracker(toString(row.tracker_entry_id, ""), { financial: true }, "financial lock flag");
+  }
+  for (const row of arrangementRows ?? []) {
+    markTracker(toString(row.id, ""), { referral: true }, "referral arrangement text");
+  }
+  for (const row of manualBackfillRows ?? []) {
+    markTracker(toString(row.tracker_entry_id, ""), { financial: true }, "CSV manual disbursement row");
   }
 
   if (flagsByTrackerId.size === 0) {
@@ -891,6 +910,7 @@ export async function resetSettlementFinancialBackfill(): Promise<SettlementFina
   let disbursementsRemoved = 0;
 
   for (const [trackerEntryId, flags] of flagsByTrackerId) {
+    if (!trackerEntryId) continue;
     const { data: entry, error: entryError } = await admin
       .from("case_tracker_entries")
       .select("id, case_id, case_number, case_stage, referral_fee_arrangement")
@@ -924,10 +944,7 @@ export async function resetSettlementFinancialBackfill(): Promise<SettlementFina
     };
     if (flags.referral) {
       trackerUpdate.referral_fee = null;
-      const arrangement = toStringOrNull(entry.referral_fee_arrangement);
-      if (arrangement?.includes("Financial backfill")) {
-        trackerUpdate.referral_fee_arrangement = null;
-      }
+      trackerUpdate.referral_fee_arrangement = null;
     }
 
     if (flags.financial && caseNumber) {
@@ -1007,6 +1024,7 @@ export async function resetSettlementFinancialBackfill(): Promise<SettlementFina
       stageRestored,
       restoredStage,
       disbursementsRemoved: removedForCase,
+      detectedBy: flags.reasons,
       summary: summaryParts.length > 0 ? summaryParts.join("; ") : "locks cleared",
     });
   }
@@ -1036,7 +1054,7 @@ export async function updateSharedCaseFields(
   let statusToWrite = options?.explicitStatus;
   if (!statusToWrite) {
     statusToWrite = record
-      ? deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result.disbursedStatus)
+      ? deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result)
       : input.status;
   }
   if (statusToWrite) payload.status = statusToWrite === "Closed" ? "archived" : "active";
@@ -1369,18 +1387,33 @@ async function recomputeCaseResultFromDisbursements(
   if (existingResult?.id) {
     const { error } = await admin.from("case_tracker_results").update(resultPayload).eq("id", existingResult.id);
     if (error) throw new Error(error.message);
-    return;
+  } else {
+    const { error } = await admin.from("case_tracker_results").insert({
+      case_id: linkedDocketFlowCaseId(trackerRow),
+      tracker_entry_id: input.trackerEntryId,
+      release_status: "No",
+      closing_status: "No",
+      check_status: "No",
+      ...resultPayload,
+    });
+    if (error) throw new Error(error.message);
   }
 
-  const { error } = await admin.from("case_tracker_results").insert({
-    case_id: linkedDocketFlowCaseId(trackerRow),
-    tracker_entry_id: input.trackerEntryId,
-    release_status: "No",
-    closing_status: "No",
-    check_status: "No",
-    ...resultPayload,
-  });
-  if (error) throw new Error(error.message);
+  const fullyDisbursed = aggregated.disbursedStatus === "Yes" && Boolean(aggregated.disburseDate);
+  if (!fullyDisbursed) {
+    const currentStage = normalizeStage(toStringOrNull(trackerRow.case_stage));
+    const hasSettlement =
+      aggregated.settlementAmount != null ||
+      Boolean(aggregated.settlementDate) ||
+      disbursements.some((party) => party.settlementAmount != null || Boolean(party.settlementDate));
+    if (hasSettlement && !CLOSED_CASE_STAGES.has(currentStage) && currentStage !== "Settled") {
+      const { error: stageError } = await admin
+        .from("case_tracker_entries")
+        .update({ case_stage: "Settled" })
+        .eq("id", input.trackerEntryId);
+      if (stageError) throw new Error(stageError.message);
+    }
+  }
 }
 
 /** Manual disbursement rows (sheet_row_key null) are never deleted by sheet sync. */
@@ -1744,7 +1777,8 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
           ? sheetSettlementDate
           : null);
     const resolvedDisburseDate =
-      aggregated?.disburseDate ?? (sheetDisburseDate ? toDateOnly(sheetDisburseDate) : null);
+      aggregated?.disburseDate ??
+      (allPartiesDisbursed && sheetDisburseDate ? toDateOnly(sheetDisburseDate) : null);
     const resolvedDisbursedStatus = aggregated?.disbursedStatus ?? (allPartiesDisbursed ? "Yes" : "No");
     const resolvedCheckDisbursedAt =
       aggregated?.checkDisbursedAt ??
@@ -2357,7 +2391,7 @@ function rowToCaseRecord(
       clientName: caseRow?.client_name ?? caseRow?.name ?? toString(trackerRow.client_name_snapshot, "Unknown client"),
       attorneyId: attorneyContact.id,
       paralegalId: paralegalContact.id,
-      status: deriveCaseStatusFromTracker(tracker.caseStage, tracker.result.disbursedStatus),
+      status: deriveCaseStatusFromTracker(tracker.caseStage, tracker.result),
       caseType: caseTypeFromCasesTable(
         caseRow ? caseRow.case_type : toStringOrNull(trackerRow.case_type),
       ),
@@ -2476,14 +2510,15 @@ function rowToTrackerEntry(
     updatedAt: toString(row.updated_at, new Date().toISOString()),
   };
   const result = applyDerivedSettlementResult(entry.result, entry);
+  const withFallback = applyOpenSettledTrackerFallback({ ...entry, result });
   return {
-    ...entry,
-    result,
-    actualFeeValue: result.attorneyFees ?? entry.actualFeeValue,
+    ...withFallback,
+    actualFeeValue: withFallback.result.attorneyFees ?? entry.actualFeeValue,
   };
 }
 
 function rowToResult(row: ResultRow | null): SettlementResult {
+  const disburseDate = toStringOrNull(row?.disburse_date);
   return applyDerivedResultFields({
     settlementDate: toStringOrNull(row?.settlement_date),
     settlementAmount: toNumber(row?.settlement_amount),
@@ -2492,13 +2527,13 @@ function rowToResult(row: ResultRow | null): SettlementResult {
     releaseStatus: normalizeReleaseStatus(toStringOrNull(row?.release_status), toStringOrNull(row?.release_signed_at)),
     closingStatus: normalizeClosingStatus(toStringOrNull(row?.closing_status), toStringOrNull(row?.closing_signed_at)),
     checkStatus: normalizeCheckStatus(toStringOrNull(row?.check_status), toStringOrNull(row?.check_deposited_at)),
-    disbursedStatus: normalizeDisbursedStatus(toStringOrNull(row?.disbursed_status), toStringOrNull(row?.check_disbursed_at)),
+    disbursedStatus: normalizeDisbursedStatus(toStringOrNull(row?.disbursed_status), toStringOrNull(row?.check_disbursed_at), disburseDate),
     reductionsStatus: coerceReductionsStatus(toStringOrNull(row?.reductions_status)),
     releaseSignedAt: toStringOrNull(row?.release_signed_at),
     closingSignedAt: toStringOrNull(row?.closing_signed_at),
     checkDepositedAt: toStringOrNull(row?.check_deposited_at),
     checkDisbursedAt: toStringOrNull(row?.check_disbursed_at),
-    disburseDate: toStringOrNull(row?.disburse_date),
+    disburseDate,
     resultQuarter: toStringOrNull(row?.result_quarter),
     financialBackfillLocked: toBoolean(row?.financial_backfill_locked, false),
   });
@@ -2763,7 +2798,7 @@ async function syncDerivedSharedCaseStatus(caseId: string, tracker: TrackerEntry
   const resolved = record ?? (await getCaseById(caseId));
   if (!resolved || isOrphanTrackerRecord(resolved)) return;
 
-  const status = deriveCaseStatusFromTracker(tracker.caseStage, tracker.result.disbursedStatus);
+  const status = deriveCaseStatusFromTracker(tracker.caseStage, tracker.result);
   await updateSharedCaseFields(resolved.shared.id, {}, { explicitStatus: status });
 }
 
@@ -2808,7 +2843,12 @@ function normalizeCheckStatus(value: string | null | undefined, depositedAt: str
   return depositedAt ? "Deposited" : "No";
 }
 
-function normalizeDisbursedStatus(value: string | null | undefined, disbursedAt: string | null): DisbursedStatus {
+function normalizeDisbursedStatus(
+  value: string | null | undefined,
+  disbursedAt: string | null,
+  disburseDate: string | null,
+): DisbursedStatus {
+  if (!disburseDate?.trim()) return "No";
   return value === "Yes" || disbursedAt ? "Yes" : "No";
 }
 
