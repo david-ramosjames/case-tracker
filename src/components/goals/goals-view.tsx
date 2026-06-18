@@ -7,7 +7,6 @@ import {
   getAttorneyCommissionQuarterRows,
   getAttorneyGoalProgress,
   getCurrentCommissionYearGoals,
-  getFirmOutperformProgress,
   sum,
 } from "@/lib/calculations";
 import {
@@ -42,48 +41,46 @@ export function GoalsView({
 
   const progress = getAttorneyGoalProgress(scopedRecords, attorneyGoals);
   const firmOutperformGoal = getCurrentFirmOutperformGoal(goals);
-  const firmOutperformProgress = firmOutperformGoal ? getFirmOutperformProgress(scopedRecords, firmOutperformGoal) : null;
-  const showFirmOutperform = !viewer.isAttorney && firmOutperformProgress != null;
-  const showFirmOverall = !viewer.isAttorney && !showFirmOutperform && progress.length > 1;
+  const scopedProgress = progress.filter((item) =>
+    scopedGoals.some((goal) => goal.attorneyId === item.goal.attorneyId && goal.year === item.goal.year),
+  );
+  const showFirmCombined =
+    !viewer.isAttorney && (firmOutperformGoal != null || scopedProgress.length > 1);
+  const attorneyGrossGoal = sum(scopedGoals.map((goal) => goal.annualGrossGoal));
+  const attorneyFeesGoal = sum(scopedGoals.map((goal) => goal.annualRjlFeesGoal));
 
   const firmTotals = {
-    annualGrossGoal: showFirmOutperform
-      ? firmOutperformProgress.goal.annualGrossGoal
-      : sum(scopedGoals.map((goal) => goal.annualGrossGoal)),
-    annualRjlFeesGoal: showFirmOutperform
-      ? firmOutperformProgress.goal.annualRjlFeesGoal
-      : sum(scopedGoals.map((goal) => goal.annualRjlFeesGoal)),
-    grossDisbursed: showFirmOutperform
-      ? firmOutperformProgress.actualGrossDisbursed
-      : sum(progress.map((item) => item.actualGrossDisbursed)),
-    disbursedFees: showFirmOutperform
-      ? firmOutperformProgress.actualDisbursedFees
-      : sum(progress.map((item) => item.actualDisbursedFees)),
-    yearElapsed: showFirmOutperform
-      ? firmOutperformProgress.yearElapsed
-      : progress.length > 0
-        ? progress.reduce((total, item) => total + item.yearElapsed, 0) / progress.length
+    annualGrossGoal: attorneyGrossGoal + (firmOutperformGoal?.annualGrossGoal ?? 0),
+    annualRjlFeesGoal: attorneyFeesGoal + (firmOutperformGoal?.annualRjlFeesGoal ?? 0),
+    grossDisbursed: sum(scopedProgress.map((item) => item.actualGrossDisbursed)),
+    disbursedFees: sum(scopedProgress.map((item) => item.actualDisbursedFees)),
+    yearElapsed:
+      scopedProgress.length > 0
+        ? scopedProgress.reduce((total, item) => total + item.yearElapsed, 0) / scopedProgress.length
         : 0,
   };
   const firmGrossProgress =
     firmTotals.annualGrossGoal > 0 ? (firmTotals.grossDisbursed / firmTotals.annualGrossGoal) * 100 : 0;
   const firmFeeProgress =
     firmTotals.annualRjlFeesGoal > 0 ? (firmTotals.disbursedFees / firmTotals.annualRjlFeesGoal) * 100 : 0;
-  const firmPace = showFirmOutperform ? firmOutperformProgress.pace : firmGrossProgress >= firmTotals.yearElapsed ? "ahead" : "behind";
+  const firmPace = firmGrossProgress >= firmTotals.yearElapsed ? "ahead" : "behind";
+  const firmGoalYear = firmOutperformGoal?.year ?? scopedGoals[0]?.year;
 
   return (
     <div className="space-y-10">
-      {showFirmOutperform || showFirmOverall ? (
+      {showFirmCombined ? (
         <section className="space-y-4">
           <Card>
             <CardHeader>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <CardTitle>{showFirmOutperform ? "Firm Outperform Goal" : "Firm overall"}</CardTitle>
+                  <CardTitle>
+                    {firmOutperformGoal ? "Total Firm (attorney + outperform)" : "Firm overall"}
+                  </CardTitle>
                   <CardDescription>
-                    {showFirmOutperform
-                      ? `Firm-wide growth target for the ${firmOutperformProgress.goal.year} commission year — all attorneys combined.`
-                      : `Combined totals across ${progress.length} attorneys for the current commission year.`}
+                    {firmOutperformGoal
+                      ? `Combined attorney targets plus Outperform for the ${firmGoalYear} commission year. Actuals sum each attorney's disbursements in their commission year.`
+                      : `Combined totals across ${scopedProgress.length} attorneys for the current commission year.`}
                   </CardDescription>
                 </div>
                 <Badge variant={firmPace === "ahead" ? "success" : "warning"}>

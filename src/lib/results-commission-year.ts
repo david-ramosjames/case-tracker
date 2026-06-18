@@ -1,6 +1,11 @@
 import { getAttorneyCommissionStartMonth } from "@/lib/auth/access";
-import { isCaseFullyDisbursed } from "@/lib/case-status";
-import { formatCommissionYearPeriod, getCurrentCommissionYear } from "@/lib/commission-year";
+import { deriveCaseStatusFromTracker, isCaseFullyDisbursed } from "@/lib/case-status";
+import {
+  formatCommissionYearPeriod,
+  getCurrentCommissionYear,
+  getRecordDisburseDate,
+  isDateInCommissionYear,
+} from "@/lib/commission-year";
 import { getAttorneyOnlyGoals } from "@/lib/firm-goals";
 import {
   getWeightedDisbursedFeesInCommissionYear,
@@ -10,7 +15,7 @@ import {
 import { type AttorneyGoal, type CaseRecord } from "@/lib/types";
 
 /** Cases with open/partial settlement activity or disbursement parties on the sheet. */
-export function isResultsTabCase(record: CaseRecord) {
+function hasResultsSettlementOrDisbursementActivity(record: CaseRecord) {
   const { tracker } = record;
   const result = tracker.result;
 
@@ -19,6 +24,57 @@ export function isResultsTabCase(record: CaseRecord) {
   if ((result.settlementAmount ?? 0) > 0 || (result.attorneyFees ?? 0) > 0) return true;
 
   return false;
+}
+
+export function hasSettlementOrDisbursementInCommissionYear(
+  record: CaseRecord,
+  commissionYear: number,
+  startMonth: number,
+) {
+  const { tracker } = record;
+  const result = tracker.result;
+
+  for (const party of tracker.disbursements) {
+    if (party.settlementDate && isDateInCommissionYear(party.settlementDate, commissionYear, startMonth)) {
+      return true;
+    }
+    if (party.disburseDate && isDateInCommissionYear(party.disburseDate, commissionYear, startMonth)) {
+      return true;
+    }
+  }
+
+  if (result.settlementDate && isDateInCommissionYear(result.settlementDate, commissionYear, startMonth)) {
+    return true;
+  }
+
+  const legacyDisburseDate = getRecordDisburseDate(result);
+  if (legacyDisburseDate && isDateInCommissionYear(legacyDisburseDate, commissionYear, startMonth)) {
+    return true;
+  }
+
+  return false;
+}
+
+/** Whether a case belongs on the Results tab for the attorney's current commission year. */
+export function isResultsTabCase(record: CaseRecord, goals: AttorneyGoal[] = []) {
+  if (!hasResultsSettlementOrDisbursementActivity(record)) return false;
+
+  const status = deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result);
+  if (status === "Active") return true;
+
+  const goal = resolveAttorneyCommissionYearGoal(record, goals);
+  if (!goal) {
+    const attorneyGoals = getAttorneyOnlyGoals(goals);
+    const startMonth = getAttorneyCommissionStartMonth(attorneyGoals, record.shared.attorneyId);
+    const commissionYear = getCurrentCommissionYear(startMonth);
+    return hasSettlementOrDisbursementInCommissionYear(record, commissionYear, startMonth);
+  }
+
+  return hasSettlementOrDisbursementInCommissionYear(
+    record,
+    goal.year,
+    goal.commissionYearStartMonth,
+  );
 }
 
 export function hasOpenSettlementActivity(record: CaseRecord) {

@@ -20,7 +20,7 @@ export default async function ResultsPage({
 }) {
   const { disbursed } = await searchParams;
   const { records, goals, users, settings, viewer } = await loadViewerCaseBundle();
-  const resultsRecords = records.filter(isResultsTabCase);
+  const resultsRecords = records.filter((record) => isResultsTabCase(record, goals));
 
   return (
     <>

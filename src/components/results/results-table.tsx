@@ -61,7 +61,11 @@ function isRowPinnedBySaveFeedback(caseId: string, rowSaveStatus: Record<string,
   return status === "saving" || status === "saved";
 }
 
-function buildNextResultRecord(record: CaseRecord, updater: (result: SettlementResult) => SettlementResult): CaseRecord | null {
+function buildNextResultRecord(
+  record: CaseRecord,
+  goals: AttorneyGoal[],
+  updater: (result: SettlementResult) => SettlementResult,
+): CaseRecord | null {
   const result = applyDerivedSettlementResult(updater(record.tracker.result), record.tracker, {
     skipDisbursementAggregation: true,
   });
@@ -72,7 +76,7 @@ function buildNextResultRecord(record: CaseRecord, updater: (result: SettlementR
       result,
     },
   };
-  if (!isResultsTabCase(nextRecord)) return null;
+  if (!isResultsTabCase(nextRecord, goals)) return null;
   return nextRecord;
 }
 
@@ -91,7 +95,9 @@ export function ResultsTable({
   viewer: ViewerContext;
   initialDisbursed?: string;
 }) {
-  const [workingRecords, setWorkingRecords] = useState(() => records.filter(isResultsTabCase));
+  const [workingRecords, setWorkingRecords] = useState(() =>
+    records.filter((record) => isResultsTabCase(record, goals)),
+  );
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [rowSaveErrors, setRowSaveErrors] = useState<Record<string, string>>({});
   const [rowSaveStatus, setRowSaveStatus] = useState<Record<string, RowSaveStatus>>({});
@@ -154,7 +160,7 @@ export function ResultsTable({
     const normalizedSearch = search.toLowerCase();
 
     return workingRecords
-      .filter(isResultsTabCase)
+      .filter((record) => isResultsTabCase(record, goals))
       .filter((record) => {
         const result = record.tracker.result;
         const matchesSearch =
@@ -227,7 +233,7 @@ export function ResultsTable({
       const pendingCaseIds = new Set(pendingPatchesRef.current.keys());
       const currentById = new Map(current.map((record) => [record.shared.id, record]));
       return records
-        .filter(isResultsTabCase)
+        .filter((record) => isResultsTabCase(record, goals))
         .map((record) => {
           if (pendingCaseIds.has(record.shared.id)) {
             return currentById.get(record.shared.id) ?? record;
@@ -239,7 +245,7 @@ export function ResultsTable({
           return record;
         });
     });
-  }, [recordsVersion]);
+  }, [goals, recordsVersion]);
 
   useEffect(() => {
     function updateScrollWidth() {
@@ -398,7 +404,7 @@ export function ResultsTable({
     const record = recordsRef.current.find((entry) => entry.shared.id === recordId);
     if (!record) return;
 
-    const nextRecord = buildNextResultRecord(record, updater);
+    const nextRecord = buildNextResultRecord(record, goals, updater);
     if (!nextRecord) {
       setWorkingRecords((current) => current.filter((entry) => entry.shared.id !== recordId));
       return;
