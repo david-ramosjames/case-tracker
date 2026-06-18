@@ -86,11 +86,19 @@ function getSlackContextForRecord(
   return { channelId };
 }
 
+export type MissingFieldPreviewItem = {
+  caseNumber: string;
+  clientName: string;
+  action: "post" | "skip";
+  missingFields: string[];
+  reason?: string;
+};
+
 export async function sendSlackMissingFieldNotices(
   records: CaseRecord[],
-  options?: { force?: boolean; forceSend?: boolean },
+  options?: { force?: boolean; forceSend?: boolean; dryRun?: boolean },
 ) {
-  if (!isSlackEnabled()) return { posted: 0, skipped: 0 };
+  if (!isSlackEnabled()) return { posted: 0, skipped: 0, dryRun: Boolean(options?.dryRun), previewItems: [] as MissingFieldPreviewItem[] };
 
   const appUrl = getAppOriginForNotifications();
   if (!appUrl) throw new Error("Set NEXT_PUBLIC_SITE_URL for Slack links.");
@@ -98,16 +106,35 @@ export async function sendSlackMissingFieldNotices(
   const channelMap = await loadSlackChannelMapByCaseNumber();
   let posted = 0;
   let skipped = 0;
+  const previewItems: MissingFieldPreviewItem[] = [];
 
   for (const record of records) {
     if (!options?.forceSend && (!record.tracker.isActive || record.shared.status !== "Active")) {
       skipped += 1;
+      if (options?.dryRun) {
+        previewItems.push({
+          caseNumber: record.shared.caseNumber,
+          clientName: record.shared.clientName,
+          action: "skip",
+          missingFields: [],
+          reason: "inactive case",
+        });
+      }
       continue;
     }
 
     const missing = getIncompleteCompletenessLabels(record);
     if (missing.length === 0 && !options?.forceSend) {
       skipped += 1;
+      if (options?.dryRun) {
+        previewItems.push({
+          caseNumber: record.shared.caseNumber,
+          clientName: record.shared.clientName,
+          action: "skip",
+          missingFields: [],
+          reason: "no missing fields",
+        });
+      }
       continue;
     }
 
@@ -117,12 +144,41 @@ export async function sendSlackMissingFieldNotices(
       daysSince(record.tracker.lastSlackReminderAt) < SLACK_REMINDER_COOLDOWN_DAYS
     ) {
       skipped += 1;
+      if (options?.dryRun) {
+        previewItems.push({
+          caseNumber: record.shared.caseNumber,
+          clientName: record.shared.clientName,
+          action: "skip",
+          missingFields: missing,
+          reason: "reminder cooldown",
+        });
+      }
       continue;
     }
 
     const context = getSlackContextForRecord(record, channelMap);
     if (!context) {
       skipped += 1;
+      if (options?.dryRun) {
+        previewItems.push({
+          caseNumber: record.shared.caseNumber,
+          clientName: record.shared.clientName,
+          action: "skip",
+          missingFields: missing,
+          reason: "no Slack channel",
+        });
+      }
+      continue;
+    }
+
+    if (options?.dryRun) {
+      previewItems.push({
+        caseNumber: record.shared.caseNumber,
+        clientName: record.shared.clientName,
+        action: "post",
+        missingFields: missing,
+      });
+      posted += 1;
       continue;
     }
 
@@ -155,5 +211,5 @@ export async function sendSlackMissingFieldNotices(
     posted += 1;
   }
 
-  return { posted, skipped };
+  return { posted, skipped, dryRun: Boolean(options?.dryRun), previewItems };
 }

@@ -155,7 +155,7 @@ export {
 
 const PULSE_LOOKBACK_HOURS = 48;
 
-export async function processDailyPulseRecap(options?: { force?: boolean }) {
+export async function processDailyPulseRecap(options?: { force?: boolean; dryRun?: boolean }) {
   if (!isSlackEnabled()) {
     return { processed: 0, posted: 0, skipped: 0, itemOutcomes: [] as PulseItemOutcome[], reason: "slack_disabled" };
   }
@@ -214,7 +214,9 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
     for (const item of items) {
       const match = resolvePulseChannelMatch(item, pulseContext);
       const record = match ? await getCaseById(match.caseId) : null;
-      const result = await fanOutPulseItem(item, message.ts, pulseContext, match, record);
+      const result = await fanOutPulseItem(item, message.ts, pulseContext, match, record, {
+        dryRun: options?.dryRun,
+      });
       itemOutcomes.push({
         channelRef: item.channelRef,
         pulseLabel: item.pulseLabel,
@@ -234,7 +236,7 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
     }
   }
 
-  if (newestTs && newestTs !== lastTs) {
+  if (!options?.dryRun && newestTs && newestTs !== lastTs) {
     await setDailyPulseLastTs(newestTs);
   }
 
@@ -251,6 +253,7 @@ export async function processDailyPulseRecap(options?: { force?: boolean }) {
     recapHeadersFound,
     lookbackHours: PULSE_LOOKBACK_HOURS,
     forced: Boolean(options?.force),
+    dryRun: Boolean(options?.dryRun),
   };
 }
 
@@ -283,6 +286,7 @@ async function fanOutPulseItem(
   pulseContext: Awaited<ReturnType<typeof loadPulseChannelContext>>,
   match: PulseChannelMatch | null = resolvePulseChannelMatch(item, pulseContext),
   record: Awaited<ReturnType<typeof getCaseById>> | null = null,
+  options?: { dryRun?: boolean },
 ): Promise<PulseFanOutResult> {
   if (isIgnoredPulseChannelRef(item.channelRef)) return "skipped_ignored_channel";
 
@@ -302,6 +306,10 @@ async function fanOutPulseItem(
 
   const existing = existingLine ?? (await getOpenStageSuggestionForCase(match.caseId, item.suggestedStage));
   if (existing?.confirmationPostedAt) return "skipped_already_posted";
+
+  if (options?.dryRun) {
+    return "posted";
+  }
 
   const suggestion =
     existing ??

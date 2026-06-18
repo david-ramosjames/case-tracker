@@ -160,7 +160,9 @@ function buildSettlementCasePayload(caseNumber: string, caseRows: ParsedSettleme
   };
 }
 
-export async function syncSettlementsFromGoogleSheetIfConfigured(): Promise<SettlementSheetSyncResult> {
+export async function syncSettlementsFromGoogleSheetIfConfigured(options?: {
+  dryRun?: boolean;
+}): Promise<SettlementSheetSyncResult> {
   if (!isGoogleSheetsSettlementSyncConfigured()) {
     return {
       configured: false,
@@ -174,10 +176,10 @@ export async function syncSettlementsFromGoogleSheetIfConfigured(): Promise<Sett
       details: [],
     };
   }
-  return { configured: true, ...(await syncSettlementsFromGoogleSheet()) };
+  return { configured: true, ...(await syncSettlementsFromGoogleSheet(options)) };
 }
 
-export async function syncSettlementsFromGoogleSheet() {
+export async function syncSettlementsFromGoogleSheet(options?: { dryRun?: boolean }) {
   const config = getGoogleSheetsSettlementConfig();
   const credentials = getGoogleSheetsCredentials();
   if (!config || !credentials) {
@@ -189,7 +191,7 @@ export async function syncSettlementsFromGoogleSheet() {
   const rows = await fetchGoogleSheetValues(config.spreadsheetId, config.range, credentials);
   const parsed = parseSettlementSheetRows(rows, config.spreadsheetId);
   const payload = buildSettlementCasePayloads(parsed);
-  return syncSettlementsFromSheet(payload);
+  return syncSettlementsFromSheet(payload, { dryRun: options?.dryRun });
 }
 
 export type SettlementSheetCaseSyncOptions = {

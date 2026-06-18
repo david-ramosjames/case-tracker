@@ -1,8 +1,8 @@
 import { cleanCaseNumber, parseSheetDate } from "@/lib/csv/parse";
 import { fetchGoogleSheetValues, findSheetColumnIndex } from "@/lib/google/client";
 import { normalizeSlackChannelId } from "@/lib/slack/client";
+import { loadSlackChannelMapByCaseNumber, upsertSlackChannels } from "@/lib/slack/channels";
 import { getGoogleSheetsConfig, getGoogleSheetsRange, isGoogleSheetsSyncConfigured } from "@/lib/slack/config";
-import { upsertSlackChannels } from "@/lib/slack/channels";
 import { syncDateSignedFromSheet } from "@/lib/supabase/services";
 
 export type SheetSyncResult = {
@@ -10,28 +10,47 @@ export type SheetSyncResult = {
   configured: boolean;
   duplicatesRemoved?: number;
   dateSignedUpdated?: number;
+  dryRun?: boolean;
 };
 
-/** Reads your Google Sheet and upserts case_number → Slack channel rows. No manual entry in the app. */
-export async function syncSlackChannelsFromGoogleSheetIfConfigured(): Promise<SheetSyncResult> {
-  if (!isGoogleSheetsSyncConfigured()) {
-    return { synced: 0, configured: false };
-  }
-  const { synced, duplicatesRemoved, dateSignedUpdated } = await syncSlackChannelsFromGoogleSheet();
-  return { synced, configured: true, duplicatesRemoved, dateSignedUpdated };
-}
+export type SlackSheetSyncPreviewItem = {
+  caseNumber: string;
+  channelName: string;
+  slackChannelId: string | null;
+  topicStage: string | null;
+  dateSigned: string | null;
+  status: "new" | "update" | "unchanged";
+  changes: string[];
+};
 
-export async function syncSlackChannelsFromGoogleSheet() {
+export type SlackSheetSyncPreviewResult = SheetSyncResult & {
+  previewItems: SlackSheetSyncPreviewItem[];
+  wouldSync: number;
+  dateSignedWouldUpdate: number;
+};
+
+type ParsedSlackChannelRow = {
+  caseNumber: string;
+  slackChannelId: string | null;
+  slackChannelName: string;
+  topicStage: string | null;
+  dateSigned: string | null;
+};
+
+async function readSlackChannelRowsFromSheet(): Promise<{
+  mapped: ParsedSlackChannelRow[];
+  dateSignedEntries: Array<{ caseNumber: string; dateSigned: string }>;
+  duplicatesRemoved: number;
+}> {
   const config = getGoogleSheetsConfig();
   if (!config) {
     throw new Error("Google Sheets sync is not configured. Set GOOGLE_SHEETS_SPREADSHEET_ID and service account env vars.");
   }
 
   const rows = await fetchGoogleSheetValues(config.spreadsheetId, getGoogleSheetsRange(), config);
-  if (rows.length < 2) return { synced: 0, dateSignedUpdated: 0 };
+  if (rows.length < 2) return { mapped: [], dateSignedEntries: [], duplicatesRemoved: 0 };
 
   const header = rows[0].map((cell) => cell.trim().toLowerCase());
-  // Client Contact Status: A Slack Channel, B Case No, … F Status, G Slack Channel ID, H Date Created (Date Signed)
   const caseIdx = findSheetColumnIndex(header, [
     (cell) => /case\s*(#|no|number)/.test(cell),
     (cell) => cell === "case no" || cell === "case #",
@@ -61,7 +80,7 @@ export async function syncSlackChannelsFromGoogleSheet() {
     throw new Error('Sheet must include "Case No" and "Slack Channel" columns (see Client Contact Status / Sheet1).');
   }
 
-  const mapped = [];
+  const rawMapped: Array<Omit<ParsedSlackChannelRow, "dateSigned">> = [];
   const dateSignedEntries: Array<{ caseNumber: string; dateSigned: string }> = [];
   for (const row of rows.slice(1)) {
     const caseNumber = cleanCaseNumber(row[caseIdx] ?? "");
@@ -70,21 +89,108 @@ export async function syncSlackChannelsFromGoogleSheet() {
 
     const channelIdRaw = channelIdIdx >= 0 ? (row[channelIdIdx] ?? "").trim() : "";
     const slackChannelId = normalizeSlackChannelId(channelIdRaw);
+    const dateSigned = dateSignedIdx >= 0 ? parseSheetDate(row[dateSignedIdx] ?? "") : null;
 
-    mapped.push({
+    rawMapped.push({
       caseNumber,
       slackChannelId,
       slackChannelName: channelName.replace(/^#/, ""),
       topicStage: statusIdx >= 0 ? row[statusIdx]?.trim() || null : null,
     });
 
-    if (dateSignedIdx >= 0) {
-      const dateSigned = parseSheetDate(row[dateSignedIdx] ?? "");
-      if (dateSigned) dateSignedEntries.push({ caseNumber, dateSigned });
-    }
+    if (dateSigned) dateSignedEntries.push({ caseNumber, dateSigned });
   }
 
-  const { synced, duplicatesRemoved } = await upsertSlackChannels(mapped);
+  const byCaseNumber = new Map<string, Omit<ParsedSlackChannelRow, "dateSigned">>();
+  for (const row of rawMapped) {
+    byCaseNumber.set(cleanCaseNumber(row.caseNumber), row);
+  }
+  const deduped = [...byCaseNumber.values()];
+  const dateSignedByCase = new Map(dateSignedEntries.map((entry) => [cleanCaseNumber(entry.caseNumber), entry.dateSigned]));
+
+  const mapped = deduped.map((row) => ({
+    ...row,
+    dateSigned: dateSignedByCase.get(cleanCaseNumber(row.caseNumber)) ?? null,
+  }));
+
+  return {
+    mapped,
+    dateSignedEntries,
+    duplicatesRemoved: rawMapped.length - deduped.length,
+  };
+}
+
+/** Preview channel sheet import without writing to Supabase. */
+export async function previewSlackChannelsFromGoogleSheet(): Promise<SlackSheetSyncPreviewResult> {
+  const { mapped, dateSignedEntries, duplicatesRemoved } = await readSlackChannelRowsFromSheet();
+  const existing = await loadSlackChannelMapByCaseNumber();
+
+  const previewItems: SlackSheetSyncPreviewItem[] = mapped.map((row) => {
+    const prev = existing.get(cleanCaseNumber(row.caseNumber));
+    const changes: string[] = [];
+
+    if (!prev) {
+      changes.push("new channel mapping");
+      if (row.dateSigned) changes.push("date signed");
+      return {
+        caseNumber: row.caseNumber,
+        channelName: row.slackChannelName,
+        slackChannelId: row.slackChannelId,
+        topicStage: row.topicStage,
+        dateSigned: row.dateSigned,
+        status: "new",
+        changes,
+      };
+    }
+
+    if (prev.slackChannelName !== row.slackChannelName) changes.push("channel name");
+    if ((prev.slackChannelId ?? null) !== (row.slackChannelId ?? null)) changes.push("channel ID");
+    if ((prev.topicStage ?? null) !== (row.topicStage ?? null)) changes.push("status");
+    if (row.dateSigned) changes.push("date signed");
+
+    return {
+      caseNumber: row.caseNumber,
+      channelName: row.slackChannelName,
+      slackChannelId: row.slackChannelId,
+      topicStage: row.topicStage,
+      dateSigned: row.dateSigned,
+      status: changes.length > 0 ? "update" : "unchanged",
+      changes,
+    };
+  });
+
+  const wouldSync = previewItems.filter((item) => item.status !== "unchanged").length;
+  const dateSignedWouldUpdate = new Set(dateSignedEntries.map((entry) => cleanCaseNumber(entry.caseNumber))).size;
+
+  return {
+    configured: true,
+    dryRun: true,
+    synced: wouldSync,
+    duplicatesRemoved,
+    dateSignedUpdated: 0,
+    wouldSync,
+    dateSignedWouldUpdate,
+    previewItems,
+  };
+}
+
+/** Reads your Google Sheet and upserts case_number → Slack channel rows. No manual entry in the app. */
+export async function syncSlackChannelsFromGoogleSheetIfConfigured(options?: {
+  dryRun?: boolean;
+}): Promise<SheetSyncResult | SlackSheetSyncPreviewResult> {
+  if (!isGoogleSheetsSyncConfigured()) {
+    return { synced: 0, configured: false };
+  }
+  if (options?.dryRun) {
+    return previewSlackChannelsFromGoogleSheet();
+  }
+  const { synced, duplicatesRemoved, dateSignedUpdated } = await syncSlackChannelsFromGoogleSheet();
+  return { synced, configured: true, duplicatesRemoved, dateSignedUpdated };
+}
+
+export async function syncSlackChannelsFromGoogleSheet() {
+  const { mapped, dateSignedEntries, duplicatesRemoved } = await readSlackChannelRowsFromSheet();
+  const { synced } = await upsertSlackChannels(mapped);
   const dateSignedUpdated =
     dateSignedEntries.length > 0 ? (await syncDateSignedFromSheet(dateSignedEntries)).updated : 0;
   return { synced, duplicatesRemoved, dateSignedUpdated };

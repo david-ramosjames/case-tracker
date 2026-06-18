@@ -4,7 +4,7 @@ import {
   CASE_BACKFILL_REFERRAL_FEE_HEADERS,
   CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS,
 } from "@/lib/csv/case-backfill";
-import { cleanCaseNumber, getCsvCellAny, hasCsvHeaderAny, normalizeCsvHeader, parseCsv, parseSheetDate } from "@/lib/csv/parse";
+import { cleanCaseNumber, getCsvCellAny, getCsvMoneyCellAny, hasCsvHeaderAny, normalizeCsvHeader, parseCsv, parseSheetDate } from "@/lib/csv/parse";
 import { deriveResultQuarterFromDisburseDate } from "@/lib/case-options";
 import { deriveFeePercentFromSettlement } from "@/lib/fee-percent";
 import { type CaseStage, type ManualDisbursementInput, type SettlementResult, type TrackerUpdateInput } from "@/lib/types";
@@ -117,17 +117,9 @@ function parseClaimLine(
   const closedDateRaw = getCsvCellAny(row, headers, [...SETTLEMENT_FINANCIAL_CLOSED_DATE_HEADERS]);
   const closedDate = closedDateRaw ? parseSheetDate(closedDateRaw)?.slice(0, 10) ?? null : null;
 
-  let settlementAmount: number | null = null;
-  const settlementAmountRaw = getCsvCellAny(row, headers, [...SETTLEMENT_FINANCIAL_SETTLEMENT_AMOUNT_HEADERS]);
-  if (settlementAmountRaw) {
-    settlementAmount = parseMoney(settlementAmountRaw);
-  }
+  let settlementAmount = getCsvMoneyCellAny(row, headers, [...SETTLEMENT_FINANCIAL_SETTLEMENT_AMOUNT_HEADERS]);
 
-  let attorneyFees: number | null = null;
-  const attorneyFeesRaw = getCsvCellAny(row, headers, [...SETTLEMENT_FINANCIAL_ATTORNEY_FEES_HEADERS]);
-  if (attorneyFeesRaw) {
-    attorneyFees = parseMoney(attorneyFeesRaw);
-  }
+  let attorneyFees = getCsvMoneyCellAny(row, headers, [...SETTLEMENT_FINANCIAL_ATTORNEY_FEES_HEADERS]);
 
   const statusRaw = getStatusCell(row, headers);
   const fullSettlement = parseFullSettlementCell(statusRaw);
@@ -264,11 +256,6 @@ function sumNullable(values: Array<number | null>) {
     seen = true;
   }
   return seen ? total : null;
-}
-
-function parseMoney(value: string) {
-  const numeric = Number(value.replace(/[$,%\s]/g, ""));
-  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function parsePercent(value: string) {

@@ -42,18 +42,24 @@ export function parseCsv(csvText: string) {
   return rows;
 }
 
-export function getCsvCell(row: string[], headers: string[], headerName: string, occurrence = 0) {
+export function getCsvColumnIndex(headers: string[], headerName: string, occurrence = 0) {
   const normalizedTarget = normalizeCsvHeader(headerName);
   let seen = 0;
 
   for (let index = 0; index < headers.length; index += 1) {
     if (normalizeCsvHeader(headers[index]) === normalizedTarget) {
-      if (seen === occurrence) return row[index]?.trim() ?? "";
+      if (seen === occurrence) return index;
       seen += 1;
     }
   }
 
-  return "";
+  return -1;
+}
+
+export function getCsvCell(row: string[], headers: string[], headerName: string, occurrence = 0) {
+  const columnIndex = getCsvColumnIndex(headers, headerName, occurrence);
+  if (columnIndex < 0) return "";
+  return row[columnIndex]?.trim() ?? "";
 }
 
 export function hasCsvHeader(row: string[], headerName: string) {
@@ -71,6 +77,62 @@ export function getCsvCellAny(row: string[], headers: string[], headerNames: str
     if (value) return value;
   }
   return "";
+}
+
+function looksLikeSplitThousandsSegment(current: string, next: string) {
+  if (!next || !/^\d{3}(\.\d+)?$/.test(next)) return false;
+
+  const normalized = current.trim();
+  if (!normalized) return false;
+  if (normalized.includes(",")) return true;
+  if (/^\$\d{1,3}$/.test(normalized)) return true;
+  return /^\d{1,3}$/.test(normalized);
+}
+
+function readCsvMoneyRaw(row: string[], startIndex: number) {
+  let raw = row[startIndex]?.trim() ?? "";
+  if (!raw) return "";
+
+  let index = startIndex + 1;
+  while (index < row.length) {
+    const next = row[index]?.trim() ?? "";
+    if (!looksLikeSplitThousandsSegment(raw, next)) break;
+    raw = `${raw},${next}`;
+    index += 1;
+  }
+
+  return raw;
+}
+
+/** Parse currency from a CSV row, rejoining unquoted thousands split across columns (e.g. $100,000). */
+export function parseMoney(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  let normalized = trimmed.replace(/[$\s]/g, "").replace(/,/g, "");
+  const kMatch = /^([\d.]+)k$/i.exec(normalized);
+  if (kMatch) {
+    const base = Number(kMatch[1]);
+    return Number.isFinite(base) ? base * 1000 : null;
+  }
+
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+export function getCsvMoneyCell(row: string[], headers: string[], headerName: string, occurrence = 0) {
+  const columnIndex = getCsvColumnIndex(headers, headerName, occurrence);
+  if (columnIndex < 0) return null;
+  return parseMoney(readCsvMoneyRaw(row, columnIndex));
+}
+
+/** Return the first parsed money value matching any of the given header names. */
+export function getCsvMoneyCellAny(row: string[], headers: string[], headerNames: string[]) {
+  for (const headerName of headerNames) {
+    const value = getCsvMoneyCell(row, headers, headerName);
+    if (value != null) return value;
+  }
+  return null;
 }
 
 export function normalizeCsvHeader(value: string) {

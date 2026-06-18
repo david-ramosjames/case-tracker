@@ -10,6 +10,8 @@ import {
   cleanCaseNumber,
   getCsvCell,
   getCsvCellAny,
+  getCsvMoneyCell,
+  getCsvMoneyCellAny,
   hasCsvHeaderAny,
   parseCsv,
   parseSheetDate,
@@ -40,6 +42,7 @@ export const CASE_BACKFILL_STATUS_HEADERS = ["Status", "Case Status"] as const;
 export const CASE_BACKFILL_REFERRAL_FEE_HEADERS = ["Referral Fee", "Referral fee"] as const;
 export const CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS = ["Settlement Amount", "Settlement amount"] as const;
 export const CASE_BACKFILL_ATTORNEY_FEES_HEADERS = ["RJL Attorney Fees", "Attorney Fees", "RJL Fees"] as const;
+export const CASE_BACKFILL_MINIMUM_VALUE_HEADERS = ["Minimum Value", "Minimum value", "Min Value"] as const;
 export const CASE_BACKFILL_REQUIRED_HEADERS = ["Case #"] as const;
 
 export const CASE_BACKFILL_HEADER_GROUPS = [
@@ -132,7 +135,7 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       if (normalizedStatus) shared.status = normalizedStatus;
 
       const stage = getCsvCell(row, headers, "Stage");
-      const minimumValue = parseMoney(getCsvCell(row, headers, "Minimum Value"));
+      const minimumValue = getCsvMoneyCellAny(row, headers, [...CASE_BACKFILL_MINIMUM_VALUE_HEADERS]);
       const expectedLit = getCsvCell(row, headers, "Expected Lit");
       const tracker: TrackerUpdateInput = {};
 
@@ -168,8 +171,8 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
         }
       }
 
-      const policyLimits = getCsvCell(row, headers, "Policy Limits");
-      if (policyLimits) tracker.policyLimits = parseMoney(policyLimits);
+      const policyLimits = getCsvMoneyCell(row, headers, "Policy Limits");
+      if (policyLimits != null) tracker.policyLimits = policyLimits;
 
       const sources = getCsvCell(row, headers, "Sources");
       if (sources) {
@@ -191,11 +194,11 @@ export function parseCaseBackfillCsv(csvText: string): ParsedCaseBackfillRow[] {
       const settlementDate = getCsvCell(row, headers, "Settlement Date");
       if (settlementDate) result.settlementDate = parseSheetDate(settlementDate);
 
-      const settlementAmount = getCsvCellAny(row, headers, [...CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS]);
-      if (settlementAmount) result.settlementAmount = parseMoney(settlementAmount);
+      const settlementAmount = getCsvMoneyCellAny(row, headers, [...CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS]);
+      if (settlementAmount != null) result.settlementAmount = settlementAmount;
 
-      const attorneyFees = getCsvCellAny(row, headers, [...CASE_BACKFILL_ATTORNEY_FEES_HEADERS]);
-      if (attorneyFees) result.attorneyFees = parseMoney(attorneyFees);
+      const attorneyFees = getCsvMoneyCellAny(row, headers, [...CASE_BACKFILL_ATTORNEY_FEES_HEADERS]);
+      if (attorneyFees != null) result.attorneyFees = attorneyFees;
 
       const feePercent = getCsvCell(row, headers, "Fee Percent");
       if (feePercent) {
@@ -275,11 +278,6 @@ function parseBackfillDate(value: string) {
     return null;
   }
   return parseSheetDate(trimmed);
-}
-
-function parseMoney(value: string) {
-  const numeric = Number(value.replace(/[$,%\s]/g, ""));
-  return Number.isFinite(numeric) ? numeric : null;
 }
 
 function parsePercent(value: string) {

@@ -28,6 +28,7 @@ export async function POST(request: Request) {
       caseNumber?: string;
       force?: boolean;
       skipSheetSync?: boolean;
+      dryRun?: boolean;
     };
 
     const step = body.step as DailyJobStep | undefined;
@@ -39,6 +40,7 @@ export async function POST(request: Request) {
       force: body.force ?? true,
       skipSheetSync: body.skipSheetSync ?? false,
       caseNumber: body.caseNumber,
+      dryRun: body.dryRun ?? false,
     });
 
     return NextResponse.json(result, { status: result.ok ? 200 : 500 });

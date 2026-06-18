@@ -15,6 +15,7 @@ import {
   CASE_BACKFILL_DATE_SIGNED_HEADERS,
   CASE_BACKFILL_DOL_HEADERS,
   CASE_BACKFILL_HEADER_GROUPS,
+  CASE_BACKFILL_MINIMUM_VALUE_HEADERS,
   CASE_BACKFILL_REFERRAL_FEE_HEADERS,
   CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS,
   CASE_BACKFILL_STATUS_HEADERS,
@@ -57,6 +58,7 @@ export function BackfillImportCard() {
       ...CASE_BACKFILL_REFERRAL_FEE_HEADERS,
       ...CASE_BACKFILL_SETTLEMENT_AMOUNT_HEADERS,
       ...CASE_BACKFILL_ATTORNEY_FEES_HEADERS,
+      ...CASE_BACKFILL_MINIMUM_VALUE_HEADERS,
     ];
     return headers.filter(
       (header) =>
@@ -186,7 +188,8 @@ export function BackfillImportCard() {
           Match existing cases by case number only — extra rows in the CSV are ignored. Upload{" "}
           <span className="font-medium text-navy-950">Case #</span> with <span className="font-medium text-navy-950">DOL</span>{" "}
           and/or <span className="font-medium text-navy-950">Date Signed</span> to overwrite those fields. Filled cells replace
-          existing values; empty cells are skipped. Client, attorney, and paralegal are never changed.
+          existing values; empty cells are skipped. Dollar amounts with commas (e.g. $100,000) are supported. Client, attorney,
+          and paralegal are never changed.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">

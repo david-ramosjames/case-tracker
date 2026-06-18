@@ -562,12 +562,11 @@ export async function importCaseBackfillRows(
         const hasResultPatch = Object.keys(resultPatch).length > 0;
 
         if (hasTrackerPatch || hasResultPatch) {
-          const mergedTracker = mergeTrackerImport(existing.tracker, trackerPatch);
           const mergedResult = hasResultPatch ? { ...existing.tracker.result, ...resultPatch } : undefined;
-          await updateTrackerEntry(
+          const { tracker: savedTracker } = await updateTrackerEntry(
             caseId,
             {
-              ...mergedTracker,
+              ...trackerPatch,
               ...(mergedResult ? { result: mergedResult } : {}),
             },
             {
@@ -580,6 +579,11 @@ export async function importCaseBackfillRows(
               },
             },
           );
+          byCaseNumber.set(row.caseNumber, {
+            ...existing,
+            shared: Object.keys(row.shared).length > 0 ? { ...existing.shared, ...row.shared } : existing.shared,
+            tracker: savedTracker,
+          });
         } else if (Object.keys(row.shared).length > 0) {
           await createActivityEntry(
             caseId,
@@ -703,10 +707,9 @@ export async function importSettlementFinancialBackfillRows(
 
       try {
         const caseNumber = cleanCaseNumber(existing.shared.caseNumber);
-        let mergedTracker = mergeTrackerImport(existing.tracker, row.tracker);
-
+        let trackerPatch = { ...row.tracker };
         if (row.keepCaseActive) {
-          mergedTracker = { ...mergedTracker, caseStage: "Settled" };
+          trackerPatch = { ...trackerPatch, caseStage: "Settled" };
         }
 
         if (admin && row.lockFinancialBackfill && caseNumber) {
@@ -717,10 +720,10 @@ export async function importSettlementFinancialBackfillRows(
           if (clearError) throw new Error(clearError.message);
         }
 
-        await updateTrackerEntry(
+        const { tracker: savedTracker } = await updateTrackerEntry(
           caseId,
           {
-            ...mergedTracker,
+            ...trackerPatch,
             ...(row.lockFinancialBackfill
               ? {
                   manualDisbursements: row.manualDisbursements,
@@ -732,11 +735,12 @@ export async function importSettlementFinancialBackfillRows(
             actor: options.actor,
             markReviewed: false,
             changeInput: {
-              ...row.tracker,
+              ...trackerPatch,
               ...(row.lockFinancialBackfill ? { manualDisbursements: row.manualDisbursements } : {}),
             },
           },
         );
+        byCaseNumber.set(row.caseNumber, { ...existing, tracker: savedTracker });
 
         if (admin && row.keepCaseActive) {
           const trackerEntryId = existing.tracker.id;
@@ -757,10 +761,10 @@ export async function importSettlementFinancialBackfillRows(
             .or(filter);
           if (partialResultError) throw new Error(partialResultError.message);
 
-          if (mergedTracker.caseStage && mergedTracker.caseStage !== "Settled") {
+          if (savedTracker.caseStage && savedTracker.caseStage !== "Settled") {
             const { error: stageError } = await admin
               .from("case_tracker_entries")
-              .update({ case_stage: toDatabaseStage(mergedTracker.caseStage) })
+              .update({ case_stage: toDatabaseStage(savedTracker.caseStage) })
               .eq("id", trackerEntryId);
             if (stageError) throw new Error(stageError.message);
           }
@@ -1601,7 +1605,11 @@ function buildSettlementSyncCaseSummary(input: {
 }
 
 /** Apply settlement/disbursement rows from the settlements Google Sheet. */
-export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload[]): Promise<SettlementSheetSyncResult> {
+export async function syncSettlementsFromSheet(
+  cases: SettlementSheetCasePayload[],
+  options?: { dryRun?: boolean },
+): Promise<SettlementSheetSyncResult & { dryRun?: boolean }> {
+  const dryRun = Boolean(options?.dryRun);
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required to sync settlements from sheet.");
 
@@ -1661,51 +1669,69 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     const totalSlots = Math.max(attorneyExpected, item.sheetRowCount);
     const weight = disbursementWeight(totalSlots);
 
-    const { error: trackerUpdateError } = await admin
-      .from("case_tracker_entries")
-      .update({
-        expected_disbursement_count: totalSlots,
-        multiple_disbursements_enabled: totalSlots > 1,
-      })
-      .eq("id", trackerEntryId);
-    if (trackerUpdateError) throw new Error(trackerUpdateError.message);
+    if (!dryRun) {
+      const { error: trackerUpdateError } = await admin
+        .from("case_tracker_entries")
+        .update({
+          expected_disbursement_count: totalSlots,
+          multiple_disbursements_enabled: totalSlots > 1,
+        })
+        .eq("id", trackerEntryId);
+      if (trackerUpdateError) throw new Error(trackerUpdateError.message);
 
-    const { error: pruneError } = await admin
-      .from("case_tracker_disbursements")
-      .delete()
-      .eq("case_number", resolvedCaseNumber)
-      .not("sheet_row_key", "is", null);
-    if (pruneError) throw new Error(pruneError.message);
+      const { error: pruneError } = await admin
+        .from("case_tracker_disbursements")
+        .delete()
+        .eq("case_number", resolvedCaseNumber)
+        .not("sheet_row_key", "is", null);
+      if (pruneError) throw new Error(pruneError.message);
 
-    for (const disbursement of item.disbursements) {
-      const payload: DisbursementRowPayload = {
-        tracker_entry_id: trackerEntryId,
-        case_id: linkedCaseId,
-        case_number: resolvedCaseNumber,
-        label: disbursement.partyLabel,
-        disburse_date: disbursement.disburseDate ? toDateOnly(disbursement.disburseDate) : null,
-        settlement_date: disbursement.settlementDate ? toDateOnly(disbursement.settlementDate) : null,
-        settlement_amount: disbursement.settlementAmount,
-        attorney_fees: disbursement.attorneyFees,
-        weight,
-        pending_remaining: disbursement.pendingRemaining ?? false,
-        sheet_row_key: disbursement.sheetRowKey,
-        synced_at: syncedAt,
-      };
-      await upsertDisbursementBySheetRowKey(admin, payload);
-      disbursementsSynced += 1;
+      for (const disbursement of item.disbursements) {
+        const payload: DisbursementRowPayload = {
+          tracker_entry_id: trackerEntryId,
+          case_id: linkedCaseId,
+          case_number: resolvedCaseNumber,
+          label: disbursement.partyLabel,
+          disburse_date: disbursement.disburseDate ? toDateOnly(disbursement.disburseDate) : null,
+          settlement_date: disbursement.settlementDate ? toDateOnly(disbursement.settlementDate) : null,
+          settlement_amount: disbursement.settlementAmount,
+          attorney_fees: disbursement.attorneyFees,
+          weight,
+          pending_remaining: disbursement.pendingRemaining ?? false,
+          sheet_row_key: disbursement.sheetRowKey,
+          synced_at: syncedAt,
+        };
+        await upsertDisbursementBySheetRowKey(admin, payload);
+        disbursementsSynced += 1;
+      }
+    } else {
+      disbursementsSynced += item.disbursements.length;
     }
 
-    const { data: allDisbursementRows, error: fetchAllError } = await admin
-      .from("case_tracker_disbursements")
-      .select("*")
-      .eq("case_number", resolvedCaseNumber)
-      .order("created_at", { ascending: true });
-    if (fetchAllError) throw new Error(fetchAllError.message);
-
-    const mappedDisbursements = uniqueDisbursements((allDisbursementRows ?? []) as DisbursementRow[]);
+    let mappedDisbursements: CaseDisbursement[];
+    if (dryRun) {
+      const { data: manualRows, error: manualError } = await admin
+        .from("case_tracker_disbursements")
+        .select("*")
+        .eq("case_number", resolvedCaseNumber)
+        .is("sheet_row_key", null);
+      if (manualError) throw new Error(manualError.message);
+      const manualDisbursements = (manualRows ?? []).map((row) => disbursementRowToDisbursement(row as DisbursementRow));
+      const sheetDisbursements = item.disbursements.map((disbursement) =>
+        sheetPayloadDisbursementToCaseDisbursement(disbursement, weight),
+      );
+      mappedDisbursements = [...manualDisbursements, ...sheetDisbursements];
+    } else {
+      const { data: allDisbursementRows, error: fetchAllError } = await admin
+        .from("case_tracker_disbursements")
+        .select("*")
+        .eq("case_number", resolvedCaseNumber)
+        .order("created_at", { ascending: true });
+      if (fetchAllError) throw new Error(fetchAllError.message);
+      mappedDisbursements = uniqueDisbursements((allDisbursementRows ?? []) as DisbursementRow[]);
+    }
     const partyCount = Math.max(totalSlots, mappedDisbursements.length);
-    if (partyCount > totalSlots) {
+    if (!dryRun && partyCount > totalSlots) {
       const { error: countError } = await admin
         .from("case_tracker_entries")
         .update({
@@ -1786,12 +1812,14 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
       result_quarter: resolvedResultQuarter,
     };
 
-    if (existingResult) {
-      const { error } = await admin.from("case_tracker_results").update(resultPayload).eq("id", existingResult.id);
-      if (error) throw new Error(error.message);
-    } else {
-      const { error } = await admin.from("case_tracker_results").insert(resultPayload);
-      if (error) throw new Error(error.message);
+    if (!dryRun) {
+      if (existingResult) {
+        const { error } = await admin.from("case_tracker_results").update(resultPayload).eq("id", existingResult.id);
+        if (error) throw new Error(error.message);
+      } else {
+        const { error } = await admin.from("case_tracker_results").insert(resultPayload);
+        if (error) throw new Error(error.message);
+      }
     }
 
     casesProcessed += 1;
@@ -1801,16 +1829,20 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     if (resolvedSettlementDate && item.fullSettlement) {
       const currentStage = normalizeStage(toStringOrNull(trackerRow.case_stage));
       if (currentStage !== "Settled") {
-        const record = await getCaseById(linkedCaseId ?? trackerEntryId);
-        if (record) {
-          const patch = buildStagePatchFromConfirmation(record, "Settled");
-          await updateTrackerEntry(linkedCaseId ?? trackerEntryId, patch, {
-            actor: { userName: "Disbursing spreadsheet sync" },
-            markReviewed: true,
-            changeInput: patch,
-          });
+        stageAutoSettled = true;
+        if (!dryRun) {
+          const record = await getCaseById(linkedCaseId ?? trackerEntryId);
+          if (record) {
+            const patch = buildStagePatchFromConfirmation(record, "Settled");
+            await updateTrackerEntry(linkedCaseId ?? trackerEntryId, patch, {
+              actor: { userName: "Disbursing spreadsheet sync" },
+              markReviewed: true,
+              changeInput: patch,
+            });
+            stagesAutoSettled += 1;
+          }
+        } else {
           stagesAutoSettled += 1;
-          stageAutoSettled = true;
         }
       }
     }
@@ -1853,6 +1885,7 @@ export async function syncSettlementsFromSheet(cases: SettlementSheetCasePayload
     skippedFinancialLocked,
     sheetCasesFound: cases.length,
     details,
+    dryRun,
   };
 }
 
@@ -1931,8 +1964,7 @@ export async function applySlackThreadUpdate(caseId: string, text: string, actor
 
   const hasTrackerPatch = Object.keys(parsed.tracker).length > 0;
   if (hasTrackerPatch) {
-    const merged = mergeTrackerImport(existing.tracker, parsed.tracker);
-    await updateTrackerEntry(caseId, merged, {
+    await updateTrackerEntry(caseId, parsed.tracker, {
       actor: actor ?? { userName: "Slack thread" },
       markReviewed: true,
       changeInput: parsed.tracker,
@@ -2414,6 +2446,26 @@ function disbursementRowToDisbursement(row: DisbursementRow): CaseDisbursement {
     disburseDateLocked: toBoolean(row.disburse_date_locked, false),
     settlementDateLocked: toBoolean(row.settlement_date_locked, false),
     syncedAt: toStringOrNull(row.synced_at),
+  };
+}
+
+function sheetPayloadDisbursementToCaseDisbursement(
+  disbursement: SettlementSheetCasePayload["disbursements"][number],
+  weight: number,
+): CaseDisbursement {
+  return {
+    id: `preview-${disbursement.sheetRowKey}`,
+    partyLabel: disbursement.partyLabel ?? "",
+    disburseDate: disbursement.disburseDate,
+    settlementDate: disbursement.settlementDate,
+    settlementAmount: disbursement.settlementAmount,
+    attorneyFees: disbursement.attorneyFees,
+    weight,
+    pendingRemaining: disbursement.pendingRemaining ?? false,
+    sheetRowKey: disbursement.sheetRowKey,
+    disburseDateLocked: false,
+    settlementDateLocked: false,
+    syncedAt: null,
   };
 }
 

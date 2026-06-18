@@ -23,6 +23,7 @@ export type DailyJobOptions = {
   force?: boolean;
   skipSheetSync?: boolean;
   caseNumber?: string;
+  dryRun?: boolean;
 };
 
 export async function runDailyJobStep<T>(
@@ -52,6 +53,7 @@ async function runMissingFields(options: DailyJobOptions) {
   return sendSlackMissingFieldNotices(records, {
     force,
     forceSend: force && Boolean(options.caseNumber?.trim()),
+    dryRun: options.dryRun,
   });
 }
 
@@ -62,12 +64,14 @@ async function runFieldReminders(options: DailyJobOptions) {
   return sendSlackFieldReminders(records, {
     force,
     forceSend: force && Boolean(options.caseNumber?.trim()),
+    dryRun: options.dryRun,
   });
 }
 
 export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions = {}) {
   const force = options.force ?? true;
   const skipSheetSync = options.skipSheetSync ?? false;
+  const dryRun = Boolean(options.dryRun);
   const errors: DailyJobStepError[] = [];
 
   if (step === "all") {
@@ -138,45 +142,50 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
   }
 
   if (step === "sheetSync") {
-    const result = await runDailyJobStep("sheetSync", syncSlackChannelsFromGoogleSheetIfConfigured);
+    const result = await runDailyJobStep("sheetSync", () =>
+      syncSlackChannelsFromGoogleSheetIfConfigured({ dryRun }),
+    );
     if (result.error) {
-      return { ok: false, step, error: result.error.error, errors: [result.error] };
+      return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
     }
-    return { ok: true, step, result: result.data };
+    return { ok: true, step, dryRun, result: result.data };
   }
 
   if (step === "settlementSync") {
-    const result = await runDailyJobStep("settlementSync", syncSettlementsFromGoogleSheetIfConfigured);
+    const result = await runDailyJobStep("settlementSync", () =>
+      syncSettlementsFromGoogleSheetIfConfigured({ dryRun }),
+    );
     if (result.error) {
-      return { ok: false, step, error: result.error.error, errors: [result.error] };
+      return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
     }
-    return { ok: true, step, result: result.data };
+    return { ok: true, step, dryRun, result: result.data };
   }
 
   if (step === "treatmentPromotion") {
-    const result = await runDailyJobStep("treatmentPromotion", promoteOnboardingToTreatment);
+    const result = await runDailyJobStep("treatmentPromotion", () => promoteOnboardingToTreatment(undefined, { dryRun }));
     if (result.error) {
-      return { ok: false, step, error: result.error.error, errors: [result.error] };
+      return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
     }
-    return { ok: true, step, result: result.data };
+    return { ok: true, step, dryRun, result: result.data };
   }
 
   if (step === "dailyPulse") {
-    const result = await runDailyJobStep("dailyPulse", () => processDailyPulseRecap({ force }));
+    const result = await runDailyJobStep("dailyPulse", () => processDailyPulseRecap({ force, dryRun }));
     if (result.error) {
-      return { ok: false, step, error: result.error.error, errors: [result.error] };
+      return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
     }
-    return { ok: true, step, result: result.data };
+    return { ok: true, step, dryRun, result: result.data };
   }
 
   if (step === "missingFields") {
     const result = await runDailyJobStep("missingFields", () => runMissingFields(options));
     if (result.error) {
-      return { ok: false, step, error: result.error.error, errors: [result.error] };
+      return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
     }
     return {
       ok: true,
       step,
+      dryRun,
       result: result.data,
       filter: options.caseNumber ? { caseNumber: options.caseNumber, force } : null,
     };
@@ -185,11 +194,12 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
   if (step === "fieldReminders") {
     const result = await runDailyJobStep("fieldReminders", () => runFieldReminders(options));
     if (result.error) {
-      return { ok: false, step, error: result.error.error, errors: [result.error] };
+      return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
     }
     return {
       ok: true,
       step,
+      dryRun,
       result: result.data,
       filter: options.caseNumber ? { caseNumber: options.caseNumber, force } : null,
     };

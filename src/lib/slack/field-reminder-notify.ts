@@ -32,11 +32,19 @@ function getSlackContextForRecord(
   return { channelId };
 }
 
+export type FieldReminderPreviewItem = {
+  caseNumber: string;
+  clientName: string;
+  action: "post" | "skip";
+  fields: string[];
+  reason?: string;
+};
+
 export async function sendSlackFieldReminders(
   records: CaseRecord[],
-  options?: { force?: boolean; forceSend?: boolean; caseNumber?: string },
+  options?: { force?: boolean; forceSend?: boolean; caseNumber?: string; dryRun?: boolean },
 ) {
-  if (!isSlackEnabled()) return { posted: 0, skipped: 0, fields: 0 };
+  if (!isSlackEnabled()) return { posted: 0, skipped: 0, fields: 0, dryRun: Boolean(options?.dryRun), previewItems: [] as FieldReminderPreviewItem[] };
 
   const appUrl = getAppOriginForNotifications();
   if (!appUrl) throw new Error("Set NEXT_PUBLIC_SITE_URL for Slack links.");
@@ -45,10 +53,20 @@ export async function sendSlackFieldReminders(
   let posted = 0;
   let skipped = 0;
   let fields = 0;
+  const previewItems: FieldReminderPreviewItem[] = [];
 
   for (const record of records) {
     if (!options?.forceSend && (!record.tracker.isActive || record.shared.status !== "Active")) {
       skipped += 1;
+      if (options?.dryRun) {
+        previewItems.push({
+          caseNumber: record.shared.caseNumber,
+          clientName: record.shared.clientName,
+          action: "skip",
+          fields: [],
+          reason: "inactive case",
+        });
+      }
       continue;
     }
 
@@ -62,12 +80,42 @@ export async function sendSlackFieldReminders(
 
     if (fieldsToPost.length === 0) {
       skipped += 1;
+      if (options?.dryRun) {
+        previewItems.push({
+          caseNumber: record.shared.caseNumber,
+          clientName: record.shared.clientName,
+          action: "skip",
+          fields: [],
+          reason: "no due fields",
+        });
+      }
       continue;
     }
 
     const context = getSlackContextForRecord(record, channelMap);
     if (!context) {
       skipped += 1;
+      if (options?.dryRun) {
+        previewItems.push({
+          caseNumber: record.shared.caseNumber,
+          clientName: record.shared.clientName,
+          action: "skip",
+          fields: [...fieldsToPost],
+          reason: "no Slack channel",
+        });
+      }
+      continue;
+    }
+
+    if (options?.dryRun) {
+      previewItems.push({
+        caseNumber: record.shared.caseNumber,
+        clientName: record.shared.clientName,
+        action: "post",
+        fields: [...fieldsToPost],
+      });
+      posted += 1;
+      fields += fieldsToPost.length;
       continue;
     }
 
@@ -113,5 +161,5 @@ export async function sendSlackFieldReminders(
     }
   }
 
-  return { posted, skipped, fields };
+  return { posted, skipped, fields, dryRun: Boolean(options?.dryRun), previewItems };
 }
