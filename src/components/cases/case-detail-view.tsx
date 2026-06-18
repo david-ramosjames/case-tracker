@@ -187,6 +187,7 @@ export function CaseDetailView({
         clearedSheetData?: boolean;
         sheetDisbursementsRemoved?: number;
         stageRestored?: string | null;
+        details?: Array<{ stageRestored?: string | null; disbursedStatus?: string }>;
       };
       if (!response.ok) throw new Error(body.error ?? "Unable to import from disbursing sheet.");
 
@@ -202,9 +203,14 @@ export function CaseDetailView({
         }
         setSheetSyncMessage(parts.join(" "));
       } else {
-        setSheetSyncMessage(
-          `Imported ${body.disbursementsSynced ?? 0} disbursement party row(s) from the sheet.`,
-        );
+        const detail = body.details?.[0];
+        const parts = [`Imported ${body.disbursementsSynced ?? 0} disbursement party row(s) from the sheet.`];
+        if (detail?.stageRestored) {
+          parts.push(`Stage restored to ${detail.stageRestored} (Full Settlement is not Y on the sheet).`);
+        } else if (detail?.disbursedStatus === "No" && body.sheetRowsFound) {
+          parts.push("Case left Active — Full Settlement is not Y on the sheet.");
+        }
+        setSheetSyncMessage(parts.join(" "));
       }
       router.refresh();
     } catch (error) {

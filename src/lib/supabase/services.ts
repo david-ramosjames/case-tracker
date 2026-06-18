@@ -1191,6 +1191,7 @@ export type SettlementSheetSyncCaseDetail = {
   disbursedStatus?: DisbursedStatus;
   resultQuarter?: string | null;
   stageAutoSettled?: boolean;
+  stageRestored?: CaseStage | null;
   pendingPartyCount?: number;
   expectedPartyCount?: number;
   parties?: SettlementSheetSyncPartyDetail[];
@@ -1202,6 +1203,7 @@ export type SettlementSheetSyncResult = {
   disbursementsSynced: number;
   settlementsUpdated: number;
   stagesAutoSettled: number;
+  stagesRestored: number;
   skippedNoTracker: number;
   skippedFinancialLocked: number;
   sheetCasesFound: number;
@@ -1596,6 +1598,7 @@ function buildSettlementSyncCaseSummary(input: {
   disbursedStatus: DisbursedStatus;
   pendingPartyCount: number;
   stageAutoSettled: boolean;
+  stageRestored?: boolean;
 }) {
   const parts: string[] = [`${input.partiesSynced} sheet row(s) synced`];
   if (input.settlementDate) parts.push(`settlement date ${input.settlementDate}`);
@@ -1607,6 +1610,7 @@ function buildSettlementSyncCaseSummary(input: {
     parts.push(`${input.pendingPartyCount} part${input.pendingPartyCount === 1 ? "y" : "ies"} still pending`);
   }
   if (input.stageAutoSettled) parts.push("stage set to Settled");
+  if (input.stageRestored) parts.push("stage restored from Settled (Full Settlement is not Y)");
   return parts.join("; ");
 }
 
@@ -1734,6 +1738,7 @@ export async function syncSettlementsFromSheet(
   let disbursementsSynced = 0;
   let settlementsUpdated = 0;
   let stagesAutoSettled = 0;
+  let stagesRestored = 0;
   let skippedNoTracker = 0;
   let skippedFinancialLocked = 0;
   const details: SettlementSheetSyncCaseDetail[] = [];
@@ -1903,18 +1908,27 @@ export async function syncSettlementsFromSheet(
         : allPartiesSettled && sheetSettlementDate
           ? sheetSettlementDate
           : null);
-    const resolvedDisburseDate =
+    let resolvedDisburseDate =
       aggregated?.disburseDate ??
       (allPartiesDisbursed && sheetDisburseDate ? toDateOnly(sheetDisburseDate) : null);
-    const resolvedDisbursedStatus = aggregated?.disbursedStatus ?? (allPartiesDisbursed ? "Yes" : "No");
-    const resolvedCheckDisbursedAt =
+    let resolvedDisbursedStatus: DisbursedStatus =
+      aggregated?.disbursedStatus ?? (allPartiesDisbursed ? "Yes" : "No");
+    let resolvedCheckDisbursedAt =
       aggregated?.checkDisbursedAt ??
       (allPartiesDisbursed && resolvedDisburseDate
         ? new Date(`${resolvedDisburseDate}T12:00:00.000Z`).toISOString()
         : null);
-    const resolvedResultQuarter =
+    let resolvedResultQuarter =
       aggregated?.resultQuarter ??
       (resolvedDisburseDate ? deriveResultQuarterFromDisburseDate(resolvedDisburseDate) : null);
+
+    // Column G = Full Settlement. When not Y, keep partial financials but do not close the case.
+    if (!item.fullSettlement) {
+      resolvedDisburseDate = null;
+      resolvedDisbursedStatus = "No";
+      resolvedCheckDisbursedAt = null;
+      resolvedResultQuarter = null;
+    }
 
     const resultPayload = {
       case_id: linkedCaseId,
@@ -1964,6 +1978,32 @@ export async function syncSettlementsFromSheet(
       }
     }
 
+    let stageRestored: CaseStage | null = null;
+    if (!item.fullSettlement) {
+      const currentStage = normalizeStage(toStringOrNull(trackerRow.case_stage));
+      if (currentStage === "Settled") {
+        stageRestored = await lookupPriorCaseStageBeforeSettlement(admin, trackerEntryId);
+        if (!dryRun && stageRestored) {
+          const { error: stageError } = await admin
+            .from("case_tracker_entries")
+            .update({ case_stage: toDatabaseStage(stageRestored) })
+            .eq("id", trackerEntryId);
+          if (stageError) throw new Error(stageError.message);
+          stagesRestored += 1;
+        } else if (dryRun && stageRestored) {
+          stagesRestored += 1;
+        }
+      }
+    }
+
+    if (!dryRun) {
+      const refreshCaseId = linkedCaseId ?? trackerEntryId;
+      const refreshed = await getCaseById(refreshCaseId);
+      if (refreshed) {
+        await syncDerivedSharedCaseStatus(refreshCaseId, refreshed.tracker, refreshed);
+      }
+    }
+
     const pendingPartyCount = item.disbursements.filter((row) => row.pendingRemaining).length;
     details.push({
       caseNumber: resolvedCaseNumber,
@@ -1977,6 +2017,7 @@ export async function syncSettlementsFromSheet(
       disbursedStatus: resolvedDisbursedStatus,
       resultQuarter: resolvedResultQuarter,
       stageAutoSettled,
+      stageRestored,
       pendingPartyCount,
       expectedPartyCount: partyCount,
       parties: buildSettlementSyncPartyDetails(item),
@@ -1989,6 +2030,7 @@ export async function syncSettlementsFromSheet(
         disbursedStatus: resolvedDisbursedStatus,
         pendingPartyCount,
         stageAutoSettled,
+        stageRestored: Boolean(stageRestored),
       }),
     });
   }
@@ -1998,6 +2040,7 @@ export async function syncSettlementsFromSheet(
     disbursementsSynced,
     settlementsUpdated,
     stagesAutoSettled,
+    stagesRestored,
     skippedNoTracker,
     skippedFinancialLocked,
     sheetCasesFound: cases.length,

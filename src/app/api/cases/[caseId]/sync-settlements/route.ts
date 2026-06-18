@@ -43,6 +43,16 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ca
       );
     }
     if (result.casesProcessed === 0) {
+      if (result.skippedFinancialLocked > 0) {
+        return NextResponse.json(
+          {
+            error:
+              "Financial backfill is locked for this case — sheet import cannot update settlement data. Unlock in Settings or change stage/disbursement manually.",
+            ...result,
+          },
+          { status: 409 },
+        );
+      }
       return NextResponse.json(
         {
           error: `Found ${result.sheetRowsFound} sheet row(s) but could not match tracker entry for case ${result.caseNumber}.`,

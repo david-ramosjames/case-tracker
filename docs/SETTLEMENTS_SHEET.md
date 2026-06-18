@@ -50,6 +50,8 @@ Cases must already exist in the tracker (matched by Case #).
 
 When **Settlement Date (H)** is set and **Full Settlement (G)** is **Y**, the tracker sets case stage to **Settled** on sync — even when additional disbursement parties are not on the sheet yet.
 
+When **Full Settlement (G)** is **not Y** (e.g. **N**), sync keeps settlement amounts/dates but leaves the case **Active** (not fully disbursed) and restores the prior pipeline stage if the case had been auto-settled from the sheet.
+
 ## Case detail
 
 Shows total rows per case, per-slot status (awaiting vs disbursed), disburse date, and weighted fee share when column Z is set.
