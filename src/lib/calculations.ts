@@ -33,6 +33,7 @@ import {
   recordHasDisbursementInCalendarYear,
   recordHasDisbursementInCommissionYear,
 } from "@/lib/disbursements";
+import { getCommissionYearDisbursedAmounts } from "@/lib/results-commission-year";
 import {
   type AttorneyGoal,
   type CaseStage,
@@ -244,14 +245,10 @@ export function getAttorneyGoalProgress(records: CaseRecord[], goals: AttorneyGo
     const planGross = sum(activeRecords.map((record) => record.tracker.minimumValue));
     const planFees = sum(activeRecords.map((record) => getProjectedFeeValue(record)));
     const actualGrossDisbursed = sum(
-      attorneyRecords.map((record) =>
-        getWeightedGrossDisbursedInCommissionYear(record, goal.year, goal.commissionYearStartMonth),
-      ),
+      attorneyRecords.map((record) => getCommissionYearDisbursedAmounts(record, goal).grossDisbursed),
     );
     const actualDisbursedFees = sum(
-      attorneyRecords.map((record) =>
-        getWeightedDisbursedFeesInCommissionYear(record, goal.year, goal.commissionYearStartMonth),
-      ),
+      attorneyRecords.map((record) => getCommissionYearDisbursedAmounts(record, goal).disbursedFees),
     );
     const quarterGoal = [goal.q1Goal, goal.q2Goal, goal.q3Goal, goal.q4Goal][currentQuarterNumber - 1];
     const annualProgress = goal.annualGrossGoal > 0 ? (actualGrossDisbursed / goal.annualGrossGoal) * 100 : 0;
@@ -422,14 +419,10 @@ export function getFirmOutperformProgress(records: CaseRecord[], firmGoal: Attor
   const yearElapsed = getCommissionYearElapsedPercentage(firmGoal);
   const scopedRecords = records.filter((record) => isRecordInGoalCommissionYear(record, firmGoal));
   const actualGrossDisbursed = sum(
-    scopedRecords.map((record) =>
-      getWeightedGrossDisbursedInCommissionYear(record, firmGoal.year, firmGoal.commissionYearStartMonth),
-    ),
+    scopedRecords.map((record) => getCommissionYearDisbursedAmounts(record, firmGoal).grossDisbursed),
   );
   const actualDisbursedFees = sum(
-    scopedRecords.map((record) =>
-      getWeightedDisbursedFeesInCommissionYear(record, firmGoal.year, firmGoal.commissionYearStartMonth),
-    ),
+    scopedRecords.map((record) => getCommissionYearDisbursedAmounts(record, firmGoal).disbursedFees),
   );
   const annualProgress = firmGoal.annualGrossGoal > 0 ? (actualGrossDisbursed / firmGoal.annualGrossGoal) * 100 : 0;
   const feeProgress = firmGoal.annualRjlFeesGoal > 0 ? (actualDisbursedFees / firmGoal.annualRjlFeesGoal) * 100 : 0;

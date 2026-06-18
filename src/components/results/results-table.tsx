@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ArrowUpDown, Eye } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Eye, Loader2 } from "lucide-react";
 import { CaseCompletionCell } from "@/components/cases/case-completion-cell";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { type ViewerContext } from "@/lib/auth/access";
@@ -13,6 +13,7 @@ import { HeaderFilter, HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { getCurrentCommissionYearGoals } from "@/lib/calculations";
 import {
   applyDerivedSettlementResult,
   coerceReductionsStatus,
@@ -24,7 +25,14 @@ import {
   getTargetPeriodOptions,
 } from "@/lib/case-options";
 import {
+  formatAttorneyCommissionYearLabel,
+  getCommissionYearResultAmounts,
+  isResultsTabCase,
+  resolveAttorneyCommissionYearGoal,
+} from "@/lib/results-commission-year";
+import {
   type AppUser,
+  type AttorneyGoal,
   type CaseRecord,
   type CaseTrackerSettings,
   type CheckStatus,
@@ -33,31 +41,69 @@ import {
   type ReductionsStatus,
   type ReleaseStatus,
   type SettlementResult,
+  type TrackerEntry,
 } from "@/lib/types";
 import { cn, formatCurrency, getCalculatedAttorneyFees } from "@/lib/utils";
 import { useEffect, useMemo, useRef, useState, type RefObject, type UIEvent } from "react";
 
 type SortKey = "completion" | "caseNumber" | "clientName" | "settlementDate" | "settlementAmount" | "attorneyFees";
 type SortDirection = "asc" | "desc";
+type RowSaveStatus = "saving" | "saved";
 
-function hasSettlementDate(record: CaseRecord) {
-  return Boolean(record.tracker.result.settlementDate);
+type ResultPersistPatch = {
+  result: SettlementResult;
+};
+
+const SAVED_INDICATOR_MS = 2500;
+
+function isRowPinnedBySaveFeedback(caseId: string, rowSaveStatus: Record<string, RowSaveStatus>) {
+  const status = rowSaveStatus[caseId];
+  return status === "saving" || status === "saved";
+}
+
+function buildNextResultRecord(record: CaseRecord, updater: (result: SettlementResult) => SettlementResult): CaseRecord | null {
+  const result = applyDerivedSettlementResult(updater(record.tracker.result), record.tracker, {
+    skipDisbursementAggregation: true,
+  });
+  const nextRecord: CaseRecord = {
+    ...record,
+    tracker: {
+      ...record.tracker,
+      result,
+    },
+  };
+  if (!isResultsTabCase(nextRecord)) return null;
+  return nextRecord;
 }
 
 export function ResultsTable({
   records,
+  goals,
   users,
   settings,
   viewer,
   initialDisbursed = "all",
 }: {
   records: CaseRecord[];
+  goals: AttorneyGoal[];
   users: AppUser[];
   settings: CaseTrackerSettings;
   viewer: ViewerContext;
   initialDisbursed?: string;
 }) {
-  const [workingRecords, setWorkingRecords] = useState(() => records.filter(hasSettlementDate));
+  const [workingRecords, setWorkingRecords] = useState(() => records.filter(isResultsTabCase));
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [rowSaveErrors, setRowSaveErrors] = useState<Record<string, string>>({});
+  const [rowSaveStatus, setRowSaveStatus] = useState<Record<string, RowSaveStatus>>({});
+  const pendingPatchesRef = useRef(new Map<string, ResultPersistPatch>());
+  const preEditSnapshotsRef = useRef(new Map<string, CaseRecord>());
+  const persistChainRef = useRef(new Map<string, Promise<void>>());
+  const savedIndicatorTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const recordsRef = useRef(workingRecords);
+  const recordsVersion = useMemo(
+    () => records.map((record) => `${record.shared.id}:${record.tracker.updatedAt}:${record.tracker.result.disbursedStatus}`).join("|"),
+    [records],
+  );
   const [search, setSearch] = useState("");
   const [attorneyIds, setAttorneyIds] = useState<string[]>([]);
   const [release, setRelease] = useState("all");
@@ -78,6 +124,20 @@ export function ResultsTable({
   }, [initialDisbursed]);
 
   const attorneys = users.filter((user) => user.role === "attorney");
+  const commissionYearGoals = useMemo(
+    () => getCurrentCommissionYearGoals(goals, attorneys.map((user) => user.id)),
+    [attorneys, goals],
+  );
+  const commissionYearSummary = useMemo(() => {
+    if (viewer.isAttorney && viewer.contactId) {
+      const goal = commissionYearGoals.find((item) => item.attorneyId === viewer.contactId) ?? null;
+      return formatAttorneyCommissionYearLabel(goal);
+    }
+    if (commissionYearGoals.length === 1) {
+      return formatAttorneyCommissionYearLabel(commissionYearGoals[0] ?? null);
+    }
+    return "each attorney's current commission year";
+  }, [commissionYearGoals, viewer.contactId, viewer.isAttorney]);
   const quarters = Array.from(new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.result.resultQuarter).filter(Boolean)]));
 
   const activeFilterCount = [
@@ -94,7 +154,7 @@ export function ResultsTable({
     const normalizedSearch = search.toLowerCase();
 
     return workingRecords
-      .filter(hasSettlementDate)
+      .filter(isResultsTabCase)
       .filter((record) => {
         const result = record.tracker.result;
         const matchesSearch =
@@ -103,12 +163,13 @@ export function ResultsTable({
 
         if (!matchesSearch) return false;
         if (attorneyIds.length > 0 && !attorneyIds.includes(record.shared.attorneyId)) return false;
-        if (release !== "all" && result.releaseStatus !== release) return false;
-        if (closing !== "all" && result.closingStatus !== closing) return false;
-        if (check !== "all" && result.checkStatus !== check) return false;
-        if (disbursed !== "all" && result.disbursedStatus !== disbursed) return false;
-        if (reductions !== "all" && coerceReductionsStatus(result.reductionsStatus) !== reductions) return false;
-        if (quarter !== "all" && result.resultQuarter !== quarter) return false;
+        const pinRow = isRowPinnedBySaveFeedback(record.shared.id, rowSaveStatus);
+        if (release !== "all" && result.releaseStatus !== release && !pinRow) return false;
+        if (closing !== "all" && result.closingStatus !== closing && !pinRow) return false;
+        if (check !== "all" && result.checkStatus !== check && !pinRow) return false;
+        if (disbursed !== "all" && result.disbursedStatus !== disbursed && !pinRow) return false;
+        if (reductions !== "all" && coerceReductionsStatus(result.reductionsStatus) !== reductions && !pinRow) return false;
+        if (quarter !== "all" && result.resultQuarter !== quarter && !pinRow) return false;
 
         return true;
       })
@@ -140,24 +201,45 @@ export function ResultsTable({
         }
 
         if (sortKey === "settlementAmount") {
-          const aValue = a.tracker.result.settlementAmount ?? -Infinity;
-          const bValue = b.tracker.result.settlementAmount ?? -Infinity;
+          const goal = resolveAttorneyCommissionYearGoal(a, goals);
+          const bGoal = resolveAttorneyCommissionYearGoal(b, goals);
+          const aValue = getCommissionYearResultAmounts(a, goal).settlementAmount;
+          const bValue = getCommissionYearResultAmounts(b, bGoal).settlementAmount;
           const cmp = aValue - bValue;
           return cmp !== 0 ? dir * cmp : tieBreak();
         }
 
-        const aFees =
-          a.tracker.result.attorneyFees ??
-          getCalculatedAttorneyFees(a.tracker.result.settlementAmount, a.tracker.result.feePercent) ??
-          -Infinity;
-        const bFees =
-          b.tracker.result.attorneyFees ??
-          getCalculatedAttorneyFees(b.tracker.result.settlementAmount, b.tracker.result.feePercent) ??
-          -Infinity;
+        const aGoal = resolveAttorneyCommissionYearGoal(a, goals);
+        const bGoal = resolveAttorneyCommissionYearGoal(b, goals);
+        const aFees = getCommissionYearResultAmounts(a, aGoal).attorneyFees;
+        const bFees = getCommissionYearResultAmounts(b, bGoal).attorneyFees;
         const cmp = aFees - bFees;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [attorneyIds, check, closing, disbursed, quarter, reductions, release, search, settings, sortDirection, sortKey, workingRecords]);
+  }, [attorneyIds, check, closing, disbursed, goals, quarter, reductions, release, rowSaveStatus, search, settings, sortDirection, sortKey, workingRecords]);
+
+  useEffect(() => {
+    recordsRef.current = workingRecords;
+  }, [workingRecords]);
+
+  useEffect(() => {
+    setWorkingRecords((current) => {
+      const pendingCaseIds = new Set(pendingPatchesRef.current.keys());
+      const currentById = new Map(current.map((record) => [record.shared.id, record]));
+      return records
+        .filter(isResultsTabCase)
+        .map((record) => {
+          if (pendingCaseIds.has(record.shared.id)) {
+            return currentById.get(record.shared.id) ?? record;
+          }
+          const currentRecord = currentById.get(record.shared.id);
+          if (currentRecord && currentRecord.tracker.updatedAt > record.tracker.updatedAt) {
+            return currentRecord;
+          }
+          return record;
+        });
+    });
+  }, [recordsVersion]);
 
   useEffect(() => {
     function updateScrollWidth() {
@@ -194,27 +276,138 @@ export function ResultsTable({
     setSortDirection(nextKey === "clientName" || nextKey === "completion" ? "asc" : "desc");
   }
 
-  function updateResult(recordId: string, updater: (result: SettlementResult) => SettlementResult) {
-    let nextRecord: CaseRecord | null = null;
-    setWorkingRecords((current) =>
-      current.flatMap((record) => {
-        if (record.shared.id !== recordId) return [record];
-        const result = applyDerivedSettlementResult(updater(record.tracker.result), record.tracker, {
-          skipDisbursementAggregation: true,
-        });
-        if (!result.settlementDate) return [];
-        nextRecord = {
-          ...record,
-          tracker: {
-            ...record.tracker,
-            result,
-          },
-        };
-        return [nextRecord];
-      }),
-    );
+  function markRowSaving(caseId: string) {
+    const existing = savedIndicatorTimersRef.current.get(caseId);
+    if (existing) {
+      clearTimeout(existing);
+      savedIndicatorTimersRef.current.delete(caseId);
+    }
+    setRowSaveStatus((current) => ({ ...current, [caseId]: "saving" }));
+  }
 
-    if (nextRecord) void persistResult(nextRecord);
+  function markRowSaved(caseId: string) {
+    setRowSaveStatus((current) => ({ ...current, [caseId]: "saved" }));
+    const existing = savedIndicatorTimersRef.current.get(caseId);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      savedIndicatorTimersRef.current.delete(caseId);
+      setRowSaveStatus((current) => {
+        if (current[caseId] !== "saved") return current;
+        const next = { ...current };
+        delete next[caseId];
+        return next;
+      });
+    }, SAVED_INDICATOR_MS);
+    savedIndicatorTimersRef.current.set(caseId, timer);
+  }
+
+  function clearRowSaveStatus(caseId: string) {
+    const existing = savedIndicatorTimersRef.current.get(caseId);
+    if (existing) {
+      clearTimeout(existing);
+      savedIndicatorTimersRef.current.delete(caseId);
+    }
+    setRowSaveStatus((current) => {
+      if (!current[caseId]) return current;
+      const next = { ...current };
+      delete next[caseId];
+      return next;
+    });
+  }
+
+  function ensurePreEditSnapshot(caseId: string) {
+    if (preEditSnapshotsRef.current.has(caseId)) return;
+    const record = recordsRef.current.find((entry) => entry.shared.id === caseId);
+    if (record) preEditSnapshotsRef.current.set(caseId, structuredClone(record));
+  }
+
+  function mergePersistPatch(caseId: string, patch: ResultPersistPatch) {
+    pendingPatchesRef.current.set(caseId, patch);
+  }
+
+  function queuePersist(caseId: string, patch: ResultPersistPatch) {
+    ensurePreEditSnapshot(caseId);
+    mergePersistPatch(caseId, patch);
+    markRowSaving(caseId);
+    setRowSaveErrors((current) => {
+      if (!current[caseId]) return current;
+      const next = { ...current };
+      delete next[caseId];
+      return next;
+    });
+    const prior = persistChainRef.current.get(caseId) ?? Promise.resolve();
+    const next = prior.then(() => flushPersist(caseId));
+    persistChainRef.current.set(caseId, next);
+  }
+
+  async function flushPersist(caseId: string) {
+    while (true) {
+      const patch = pendingPatchesRef.current.get(caseId);
+      if (!patch) return;
+
+      pendingPatchesRef.current.delete(caseId);
+      const snapshotBefore =
+        preEditSnapshotsRef.current.get(caseId) ?? recordsRef.current.find((record) => record.shared.id === caseId);
+      if (!snapshotBefore) continue;
+
+      setSaveMessage(null);
+
+      try {
+        const response = await fetch(`/api/tracker/${caseId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tracker: { result: patch.result },
+            changeInput: { result: patch.result },
+            markReviewed: true,
+          }),
+        });
+
+        if (!response.ok) {
+          const body = (await response.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(body?.error ?? "Unable to save result update.");
+        }
+
+        const body = (await response.json()) as { tracker?: TrackerEntry };
+        if (body.tracker) {
+          setWorkingRecords((current) =>
+            current.map((record) =>
+              record.shared.id === caseId ? { ...record, tracker: body.tracker! } : record,
+            ),
+          );
+        }
+
+        preEditSnapshotsRef.current.delete(caseId);
+        markRowSaved(caseId);
+      } catch (error) {
+        clearRowSaveStatus(caseId);
+        preEditSnapshotsRef.current.delete(caseId);
+        const message = error instanceof Error ? error.message : "Unable to save result update.";
+        if (snapshotBefore) {
+          setWorkingRecords((current) =>
+            current.map((record) => (record.shared.id === caseId ? snapshotBefore : record)),
+          );
+        }
+        setSaveMessage(message);
+        setRowSaveErrors((current) => ({ ...current, [caseId]: message }));
+      }
+    }
+  }
+
+  function updateResult(recordId: string, updater: (result: SettlementResult) => SettlementResult) {
+    const record = recordsRef.current.find((entry) => entry.shared.id === recordId);
+    if (!record) return;
+
+    const nextRecord = buildNextResultRecord(record, updater);
+    if (!nextRecord) {
+      setWorkingRecords((current) => current.filter((entry) => entry.shared.id !== recordId));
+      return;
+    }
+
+    setWorkingRecords((current) =>
+      current.map((entry) => (entry.shared.id === recordId ? nextRecord : entry)),
+    );
+    queuePersist(recordId, { result: nextRecord.tracker.result });
   }
 
   function updateResultWorkflow<K extends "releaseStatus" | "closingStatus" | "checkStatus" | "disbursedStatus">(
@@ -233,17 +426,12 @@ export function ResultsTable({
     });
   }
 
-  async function persistResult(record: CaseRecord) {
-    await fetch(`/api/tracker/${record.shared.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        tracker: {
-          result: record.tracker.result,
-        },
-      }),
-    });
-  }
+  useEffect(() => {
+    return () => {
+      for (const timer of savedIndicatorTimersRef.current.values()) clearTimeout(timer);
+      savedIndicatorTimersRef.current.clear();
+    };
+  }, []);
 
   return (
     <Card>
@@ -259,6 +447,11 @@ export function ResultsTable({
             Showing {filteredRecords.length} of {workingRecords.length} settled cases. Use column headers to filter; click labels to sort.
           </p>
         </div>
+        {saveMessage ? <p className="mt-3 text-sm font-medium text-pink-600">{saveMessage}</p> : null}
+        <p className="mt-3 text-xs text-muted-foreground">
+          Changes save automatically when you update a field. A green checkmark in Actions confirms the server accepted the update.
+          Settlement Amount and RJL Attorney Fees show only amounts dated in {commissionYearSummary}; multi-client cases count each party by its own settlement or disburse date.
+        </p>
 
         <div className="mt-4 rounded-lg border bg-white">
           <div className="border-b bg-muted/40 px-4 py-2">
@@ -297,9 +490,23 @@ export function ResultsTable({
                 </TableHead>
                 <TableHead className="w-36">Paralegal</TableHead>
                 <SortableHead label="Settlement Date" sortKey="settlementDate" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-48" />
-                <SortableHead label="Settlement Amount" sortKey="settlementAmount" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
+                <SortableHead
+                  label="Settlement Amount (CY)"
+                  sortKey="settlementAmount"
+                  active={sortKey}
+                  direction={sortDirection}
+                  onSort={requestSort}
+                  className="w-40"
+                />
                 <TableHead className="w-24">Fee Percent</TableHead>
-                <SortableHead label="RJL Attorney Fees" sortKey="attorneyFees" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
+                <SortableHead
+                  label="RJL Fees (CY)"
+                  sortKey="attorneyFees"
+                  active={sortKey}
+                  direction={sortDirection}
+                  onSort={requestSort}
+                  className="w-36"
+                />
                 <TableHead className="w-32 align-top">
                   <HeaderFilter
                     label="Release"
@@ -373,6 +580,18 @@ export function ResultsTable({
             <TableBody>
               {filteredRecords.map((record) => {
                 const result = record.tracker.result;
+                const saveStatus = rowSaveStatus[record.shared.id];
+                const saveError = rowSaveErrors[record.shared.id];
+                const commissionGoal = resolveAttorneyCommissionYearGoal(record, goals);
+                const commissionAmounts = getCommissionYearResultAmounts(record, commissionGoal);
+                const caseTotalSettlement = result.settlementAmount ?? 0;
+                const caseTotalFees =
+                  result.attorneyFees ??
+                  getCalculatedAttorneyFees(result.settlementAmount, result.feePercent) ??
+                  0;
+                const showCaseTotalHint =
+                  commissionAmounts.settlementAmount !== caseTotalSettlement ||
+                  commissionAmounts.attorneyFees !== caseTotalFees;
 
                 return (
                   <TableRow key={record.shared.id}>
@@ -388,13 +607,37 @@ export function ResultsTable({
                     <TableCell className="w-48">
                       <Input className="h-9 w-full text-xs" type="date" value={toDateInput(result.settlementDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, settlementDate: fromDateInput(event.target.value) }))} />
                     </TableCell>
-                    <TableCell className="w-36">
-                      <InlineNumberInput prefix="$" value={result.settlementAmount} onCommit={(value) => updateResult(record.shared.id, (current) => ({ ...current, settlementAmount: value }))} />
+                    <TableCell className="w-40">
+                      <div className="space-y-0.5">
+                        <p className="whitespace-nowrap font-medium text-navy-950">
+                          {formatCurrency(commissionAmounts.settlementAmount)}
+                        </p>
+                        {showCaseTotalHint && caseTotalSettlement > 0 ? (
+                          <p className="text-[10px] text-muted-foreground" title="Full case total">
+                            Case total {formatCurrency(caseTotalSettlement)}
+                          </p>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell className="w-24 whitespace-nowrap text-sm text-muted-foreground">
-                      {Math.round((result.feePercent ?? 0) * 100)}%
+                      {commissionAmounts.feePercent != null
+                        ? `${Math.round(commissionAmounts.feePercent * 100)}%`
+                        : result.feePercent != null
+                          ? `${Math.round(result.feePercent * 100)}%`
+                          : "—"}
                     </TableCell>
-                    <TableCell className="w-36 whitespace-nowrap">{formatCurrency(result.attorneyFees)}</TableCell>
+                    <TableCell className="w-36">
+                      <div className="space-y-0.5">
+                        <p className="whitespace-nowrap font-medium text-navy-950">
+                          {formatCurrency(commissionAmounts.attorneyFees)}
+                        </p>
+                        {showCaseTotalHint && caseTotalFees > 0 ? (
+                          <p className="text-[10px] text-muted-foreground" title="Full case total">
+                            Case total {formatCurrency(caseTotalFees)}
+                          </p>
+                        ) : null}
+                      </div>
+                    </TableCell>
                     <TableCell className="w-32">
                       <InlineSelect value={result.releaseStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "releaseStatus", value as ReleaseStatus)}>
                         {RELEASE_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
@@ -439,12 +682,30 @@ export function ResultsTable({
                       <Input className="h-9 w-full text-xs" type="date" value={toDateInput(result.disburseDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, disburseDate: fromDateInput(event.target.value) }))} />
                     </TableCell>
                     <TableCell className="w-28">
-                      <Button asChild variant="outline" size="sm">
-                        <Link href={`/cases/${record.shared.id}`} target="_blank" rel="noopener noreferrer">
-                          <Eye className="h-4 w-4" />
-                          View
-                        </Link>
-                      </Button>
+                      <div className="flex flex-col gap-1">
+                        <div className="flex items-center gap-2">
+                          {saveStatus === "saving" ? (
+                            <span className="inline-flex w-5 shrink-0 justify-center" title="Saving…">
+                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+                              <span className="sr-only">Saving</span>
+                            </span>
+                          ) : saveStatus === "saved" ? (
+                            <span className="inline-flex w-5 shrink-0 justify-center" title="Saved">
+                              <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
+                              <span className="sr-only">Saved</span>
+                            </span>
+                          ) : (
+                            <span className="w-5 shrink-0" aria-hidden />
+                          )}
+                          <Button asChild variant="outline" size="sm">
+                            <Link href={`/cases/${record.shared.id}`} target="_blank" rel="noopener noreferrer">
+                              <Eye className="h-4 w-4" />
+                              View
+                            </Link>
+                          </Button>
+                        </div>
+                        {saveError ? <p className="max-w-32 text-xs font-medium text-pink-600">{saveError}</p> : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 );
@@ -497,73 +758,6 @@ function InlineSelect({ value, onChange, children }: { value: string; onChange: 
       {children}
     </Select>
   );
-}
-
-function InlineNumberInput({
-  value,
-  onCommit,
-  prefix,
-  suffix,
-}: {
-  value: number | null;
-  onCommit: (value: number | null) => void;
-  prefix?: string;
-  suffix?: string;
-}) {
-  const [isFocused, setIsFocused] = useState(false);
-  const [draft, setDraft] = useState(value == null ? "" : formatNumberForInput(value));
-
-  useEffect(() => {
-    if (!isFocused) setDraft(value == null ? "" : formatNumberForInput(value));
-  }, [isFocused, value]);
-
-  function commit() {
-    const nextValue = parseFormattedNumber(draft);
-    if (nextValue !== null && Number.isNaN(nextValue)) {
-      setDraft(value == null ? "" : formatNumberForInput(value));
-      return;
-    }
-    if (nextValue !== value) onCommit(nextValue);
-    setDraft(nextValue == null ? "" : formatNumberForInput(nextValue));
-    setIsFocused(false);
-  }
-
-  return (
-    <div className="flex h-9 w-full min-w-0 items-center rounded-md border border-input bg-white px-2 text-xs focus-within:ring-2 focus-within:ring-ring">
-      {prefix ? <span className="mr-1 text-muted-foreground">{prefix}</span> : null}
-      <Input
-        className="h-7 min-w-0 border-0 bg-transparent px-0 py-0 text-xs shadow-none focus-visible:ring-0"
-        inputMode="decimal"
-        type="text"
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onFocus={() => {
-          setIsFocused(true);
-          setDraft(value == null ? "" : String(value));
-        }}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
-          if (event.key === "Escape") {
-            setDraft(value == null ? "" : formatNumberForInput(value));
-            setIsFocused(false);
-            event.currentTarget.blur();
-          }
-        }}
-      />
-      {suffix ? <span className="ml-1 text-muted-foreground">{suffix}</span> : null}
-    </div>
-  );
-}
-
-function formatNumberForInput(value: number) {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
-}
-
-function parseFormattedNumber(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-  return Number(trimmed.replace(/[$,%\s,]/g, ""));
 }
 
 function toDateInput(value: string | null) {

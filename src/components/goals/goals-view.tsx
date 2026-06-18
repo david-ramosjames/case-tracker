@@ -130,6 +130,8 @@ export function GoalsView({
                     <CardTitle>{attorney?.name ?? "Attorney"}</CardTitle>
                     <CardDescription>
                       {item.goal.year} commission year · {commissionPeriod} · starts {startMonthLabel}
+                      {" · "}
+                      Actuals count settlement and disbursement parties dated in this commission year only.
                     </CardDescription>
                   </div>
                   <Badge variant={item.pace === "ahead" ? "success" : "warning"}>

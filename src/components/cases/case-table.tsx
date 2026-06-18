@@ -74,8 +74,14 @@ function assertTrackerPatchApplied(tracker: TrackerEntry, patch: CaseTablePersis
   if (t.liability !== undefined && tracker.liability !== t.liability) {
     throw new Error("Liability did not save.");
   }
-  if (t.targetResolutionQuarter !== undefined && tracker.targetResolutionQuarter !== t.targetResolutionQuarter) {
-    throw new Error("Expected disbursement quarter did not save.");
+  if (t.targetResolutionQuarter !== undefined) {
+    const expected =
+      toStandardTargetPeriodLabel(t.targetResolutionQuarter) ?? t.targetResolutionQuarter;
+    const actual =
+      toStandardTargetPeriodLabel(tracker.targetResolutionQuarter) ?? tracker.targetResolutionQuarter;
+    if (expected !== actual) {
+      throw new Error("Expected disbursement quarter did not save.");
+    }
   }
   if (t.minimumValue !== undefined && tracker.minimumValue !== t.minimumValue) {
     throw new Error("Minimum value did not save.");
@@ -86,6 +92,21 @@ function assertTrackerPatchApplied(tracker: TrackerEntry, patch: CaseTablePersis
   if (t.policyLimits !== undefined && tracker.policyLimits !== t.policyLimits) {
     throw new Error("Policy limits did not save.");
   }
+}
+
+function isRowPinnedBySaveFeedback(caseId: string, rowSaveStatus: Record<string, RowSaveStatus>) {
+  const status = rowSaveStatus[caseId];
+  return status === "saving" || status === "saved";
+}
+
+function normalizeTrackerFieldValue<K extends "caseStage" | "targetResolutionQuarter" | "liability" | "minimumValue" | "referralFee" | "policyLimits">(
+  key: K,
+  value: TrackerEntry[K],
+): TrackerEntry[K] {
+  if (key === "targetResolutionQuarter" && typeof value === "string" && value.trim()) {
+    return (toStandardTargetPeriodLabel(value) ?? value) as TrackerEntry[K];
+  }
+  return value;
 }
 
 export function CaseTable({
@@ -202,13 +223,14 @@ export function CaseTable({
         if (!matchesSearch) return false;
         if (attorneyIds.length > 0 && !attorneyIds.includes(record.shared.attorneyId)) return false;
         if (paralegal !== "all" && record.shared.paralegalId !== paralegal) return false;
-        if (stage !== "all" && record.tracker.caseStage !== stage) return false;
+        const pinRow = isRowPinnedBySaveFeedback(record.shared.id, rowSaveStatus);
+        if (stage !== "all" && record.tracker.caseStage !== stage && !pinRow) return false;
         const pipeline = getCasePipelineFilter(record, goals);
         if (status !== "all" && pipeline !== status) return false;
         if (caseType !== "all" && record.shared.caseType !== caseType) return false;
-        if (liability !== "all" && !matchesOptionalFieldFilter(liability, record.tracker.liability)) return false;
+        if (liability !== "all" && !matchesOptionalFieldFilter(liability, record.tracker.liability) && !pinRow) return false;
         if (caseSize !== "all" && !matchesOptionalFieldFilter(caseSize, record.tracker.caseSize)) return false;
-        if (quarter !== "all" && !matchesTargetPeriodFilter(quarter, record.tracker.targetResolutionQuarter)) return false;
+        if (quarter !== "all" && !matchesTargetPeriodFilter(quarter, record.tracker.targetResolutionQuarter) && !pinRow) return false;
         if (qualityFilter && !matchesCaseListQualityFilter(record, qualityFilter, settings)) return false;
 
         return true;
@@ -267,7 +289,7 @@ export function CaseTable({
         const cmp = aValue - bValue;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [attorneyIds, caseSize, caseType, goals, liability, paralegal, qualityFilter, quarter, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
+  }, [attorneyIds, caseSize, caseType, goals, liability, paralegal, qualityFilter, quarter, rowSaveStatus, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
 
   function requestSort(nextKey: SortKey) {
     if (nextKey === sortKey) {
@@ -415,10 +437,12 @@ export function CaseTable({
     });
   }
 
-  function queuePersist(caseId: string, patch: CaseTablePersistPatch) {
+  function queuePersist(caseId: string, patch: CaseTablePersistPatch, options?: { skipMarkSaving?: boolean }) {
     ensurePreEditSnapshot(caseId);
     mergePersistPatch(caseId, patch);
-    markRowSaving(caseId);
+    if (!options?.skipMarkSaving) {
+      markRowSaving(caseId);
+    }
     setRowSaveErrors((current) => {
       if (!current[caseId]) return current;
       const next = { ...current };
@@ -547,45 +571,53 @@ export function CaseTable({
     key: K,
     value: TrackerEntry[K],
   ) {
-    let persistPatch: CaseTablePersistPatch | undefined;
+    const record = recordsRef.current.find((entry) => entry.shared.id === recordId);
+    if (!record) return;
 
+    const normalizedValue = normalizeTrackerFieldValue(key, value);
+    const currentValue = record.tracker[key];
+    if (key === "liability" || key === "targetResolutionQuarter") {
+      if ((currentValue ?? null) === (normalizedValue ?? null)) return;
+    } else if (currentValue === normalizedValue) {
+      return;
+    }
+
+    const nextStage = key === "caseStage" ? (normalizedValue as CaseStage) : record.tracker.caseStage;
+    const tracker: TrackerEntry = {
+      ...record.tracker,
+      [key]: normalizedValue,
+      ...(key === "caseStage"
+        ? { expectedLitigation: coerceExpectedLitigationForStage(nextStage, record.tracker.expectedLitigation) }
+        : {}),
+      ...(key === "minimumValue"
+        ? { caseSize: deriveCaseSizeFromMinimumValue(normalizedValue as number | null) }
+        : {}),
+    };
+
+    if (key === "caseStage" || key === "referralFee" || key === "minimumValue") {
+      tracker.estimatedFeeValue = tracker.minimumValue
+        ? Math.round(tracker.minimumValue * deriveResultFeePercent(tracker))
+        : tracker.estimatedFeeValue;
+    }
+
+    const persistPatch = buildTrackerPersistPatch(record, key, normalizedValue, tracker);
+
+    markRowSaving(recordId);
     setWorkingRecords((current) =>
-      current.map((record) => {
-        if (record.shared.id !== recordId) return record;
-
-        const nextStage = key === "caseStage" ? (value as CaseStage) : record.tracker.caseStage;
-        const tracker: TrackerEntry = {
-          ...record.tracker,
-          [key]: value,
-          ...(key === "caseStage"
-            ? { expectedLitigation: coerceExpectedLitigationForStage(nextStage, record.tracker.expectedLitigation) }
-            : {}),
-          ...(key === "minimumValue"
-            ? { caseSize: deriveCaseSizeFromMinimumValue(value as number | null) }
-            : {}),
-        };
-
-        if (key === "caseStage" || key === "referralFee" || key === "minimumValue") {
-          tracker.estimatedFeeValue = tracker.minimumValue
-            ? Math.round(tracker.minimumValue * deriveResultFeePercent(tracker))
-            : tracker.estimatedFeeValue;
-        }
-
-        persistPatch = buildTrackerPersistPatch(record, key, value, tracker);
+      current.map((entry) => {
+        if (entry.shared.id !== recordId) return entry;
         return {
-          ...record,
+          ...entry,
           tracker,
           shared: {
-            ...record.shared,
+            ...entry.shared,
             status: deriveCaseStatusFromTracker(tracker.caseStage, tracker.result),
           },
         };
       }),
     );
 
-    if (persistPatch) {
-      queuePersist(recordId, persistPatch);
-    }
+    queuePersist(recordId, persistPatch, { skipMarkSaving: true });
   }
 
   function buildTrackerPersistPatch<K extends "caseStage" | "targetResolutionQuarter" | "liability" | "minimumValue" | "referralFee" | "policyLimits">(
