@@ -236,9 +236,12 @@ export type ActivityLogEntry = {
   createdAt: string;
 };
 
+export type GoalScope = "attorney" | "firm";
+
 export type AttorneyGoal = {
   id: string;
   attorneyId: string;
+  goalScope: GoalScope;
   year: number;
   /** Top-down target for gross disbursement dollars in the commission year. */
   annualGrossGoal: number;

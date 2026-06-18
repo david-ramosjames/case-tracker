@@ -108,7 +108,7 @@ export function OutputView({
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-6">
-        <SummaryCard label="Target (top-down)" value={formatCurrency(results.annualGrossGoal)} detail={`${commissionYearLabel} gross disbursements goal`} />
+        <SummaryCard label="Target (top-down)" value={formatCurrency(results.annualGrossGoal)} detail={`${commissionYearLabel} ${output.results.firmOutperformGoal ? "Outperform" : "gross disbursements"} goal`} />
         <SummaryCard label="Plan (bottom-up)" value={formatCurrency(results.planGross)} detail="Forecast gross disbursements from active cases in this commission year" />
         <SummaryCard label="Gross Settled" value={formatCurrency(results.grossSettled)} detail="Settlement amounts signed" />
         <SummaryCard label="Gross Disbursed" value={formatCurrency(results.grossDisbursed)} detail="Settlement dollars disbursed" />

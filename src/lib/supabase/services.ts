@@ -33,6 +33,11 @@ import {
   deriveResultQuarterFromDisburseDate,
   normalizeCaseType,
 } from "@/lib/case-options";
+import {
+  FIRM_OUTPERFORM_GOAL_ATTORNEY_ID,
+  FIRM_OUTPERFORM_GOAL_ATTORNEY_NAME,
+  normalizeGoalScope,
+} from "@/lib/firm-goals";
 import { deriveFeePercentFromSettlement } from "@/lib/fee-percent";
 import { deriveCaseStatusFromTracker, applyOpenSettledTrackerFallback } from "@/lib/case-status";
 import { pickNextScheduledEvents } from "@/lib/docketflow/case-events";
@@ -54,6 +59,7 @@ import {
   type ConfidenceLevel,
   type DisbursedStatus,
   type ExpectedLitigationStatus,
+  type GoalScope,
   type ManualDisbursementInput,
   type DisbursementPartyOverrideInput,
   type ReleaseStatus,
@@ -2057,6 +2063,7 @@ export async function createSnapshot(quarter: string, capturedBy: string): Promi
 export type AttorneyGoalInput = {
   attorneyId: string;
   attorneyName: string;
+  goalScope?: GoalScope;
   year: number;
   annualGrossGoal: number;
   annualRjlFeesGoal: number;
@@ -2087,6 +2094,8 @@ function parseMonthlyGoalsRow(value: unknown): Record<string, number> {
 
 export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<AttorneyGoal> {
   const client = await createTrackerClient();
+  const goalScope = normalizeGoalScope(input.goalScope);
+  const isFirmGoal = goalScope === "firm";
   const annualGrossGoal = input.q1Goal + input.q2Goal + input.q3Goal + input.q4Goal;
   const annualRjlFeesGoal = input.feeQ1Goal + input.feeQ2Goal + input.feeQ3Goal + input.feeQ4Goal;
   const monthlyGoals = input.monthlyGoals ?? {};
@@ -2096,10 +2105,12 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
   const commissionMonthCount = Number(input.commissionMonthCount ?? 12) === 13 ? 13 : 12;
 
   const payload = {
-    attorney_name: input.attorneyName,
+    attorney_name: isFirmGoal ? FIRM_OUTPERFORM_GOAL_ATTORNEY_NAME : input.attorneyName,
+    attorney_user_id: isFirmGoal ? null : input.attorneyId || null,
+    goal_scope: goalScope,
     year: input.year,
     annual_fee_goal: annualGrossGoal,
-    commission_threshold: input.commissionThreshold,
+    commission_threshold: isFirmGoal ? 0 : input.commissionThreshold,
     commission_year_start_month: commissionYearStartMonth,
     commission_month_count: commissionMonthCount,
     monthly_goals: monthlyGoals,
@@ -2124,7 +2135,8 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
 
   return {
     id: toString(data.id, "goal"),
-    attorneyId: input.attorneyId,
+    attorneyId: isFirmGoal ? FIRM_OUTPERFORM_GOAL_ATTORNEY_ID : input.attorneyId,
+    goalScope,
     year: input.year,
     annualGrossGoal,
     annualRjlFeesGoal,
@@ -2164,8 +2176,13 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
   const attorneys = ((contactRows ?? []) as ContactRow[]).filter((row) => row.role === "attorney");
 
   return ((goalRows ?? []) as UnknownRow[]).map((row) => {
+    const goalScope = normalizeGoalScope(row.goal_scope);
+    const isFirmGoal = goalScope === "firm";
     const attorneyName = toStringOrNull(row.attorney_name);
-    const matchedContact = attorneys.find((contact) => contact.name && attorneyName && namesMatch(contact.name, attorneyName));
+    const matchedContact =
+      isFirmGoal || !attorneyName
+        ? null
+        : attorneys.find((contact) => contact.name && namesMatch(contact.name, attorneyName));
     const commissionThreshold = Number(row.commission_threshold ?? 0);
     const q1Goal = Number(row.q1_goal ?? 0);
     const q2Goal = Number(row.q2_goal ?? 0);
@@ -2181,7 +2198,10 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
 
     return {
       id: toStringOrNull(row.id) ?? "unknown-goal",
-      attorneyId: matchedContact?.id ?? toStringOrNull(row.attorney_user_id) ?? attorneyName ?? "unknown-attorney",
+      attorneyId: isFirmGoal
+        ? FIRM_OUTPERFORM_GOAL_ATTORNEY_ID
+        : matchedContact?.id ?? toStringOrNull(row.attorney_user_id) ?? attorneyName ?? "unknown-attorney",
+      goalScope,
       year: Number(row.year ?? new Date().getFullYear()),
       annualGrossGoal: q1Goal + q2Goal + q3Goal + q4Goal,
       annualRjlFeesGoal: feeQ1Goal + feeQ2Goal + feeQ3Goal + feeQ4Goal,

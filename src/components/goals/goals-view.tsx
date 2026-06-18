@@ -7,12 +7,14 @@ import {
   getAttorneyCommissionQuarterRows,
   getAttorneyGoalProgress,
   getCurrentCommissionYearGoals,
+  getFirmOutperformProgress,
   sum,
 } from "@/lib/calculations";
 import {
   formatCommissionYearPeriod,
   getCommissionYearStartMonthLabel,
 } from "@/lib/commission-year";
+import { getCurrentFirmOutperformGoal, isFirmOutperformGoal, partitionGoals } from "@/lib/firm-goals";
 import { type AppUser, type AttorneyGoal, type CaseRecord } from "@/lib/types";
 import { formatCurrency, percent } from "@/lib/utils";
 
@@ -31,22 +33,35 @@ export function GoalsView({
   const visibleAttorneyIds =
     viewer.isAttorney && viewer.contactId ? [viewer.contactId] : attorneyUsers.map((user) => user.id);
 
-  const scopedGoals = getCurrentCommissionYearGoals(goals, visibleAttorneyIds);
+  const { attorneyGoals } = partitionGoals(goals);
+  const scopedGoals = getCurrentCommissionYearGoals(attorneyGoals, visibleAttorneyIds);
   const scopedRecords =
     viewer.isAttorney && viewer.contactId
       ? records.filter((record) => record.shared.attorneyId === viewer.contactId)
       : records;
 
-  const progress = getAttorneyGoalProgress(scopedRecords, scopedGoals);
-  const showFirmOverall = !viewer.isAttorney && progress.length > 1;
+  const progress = getAttorneyGoalProgress(scopedRecords, attorneyGoals);
+  const firmOutperformGoal = getCurrentFirmOutperformGoal(goals);
+  const firmOutperformProgress = firmOutperformGoal ? getFirmOutperformProgress(scopedRecords, firmOutperformGoal) : null;
+  const showFirmOutperform = !viewer.isAttorney && firmOutperformProgress != null;
+  const showFirmOverall = !viewer.isAttorney && !showFirmOutperform && progress.length > 1;
 
   const firmTotals = {
-    annualGrossGoal: sum(scopedGoals.map((goal) => goal.annualGrossGoal)),
-    annualRjlFeesGoal: sum(scopedGoals.map((goal) => goal.annualRjlFeesGoal)),
-    grossDisbursed: sum(progress.map((item) => item.actualGrossDisbursed)),
-    disbursedFees: sum(progress.map((item) => item.actualDisbursedFees)),
-    yearElapsed:
-      progress.length > 0
+    annualGrossGoal: showFirmOutperform
+      ? firmOutperformProgress.goal.annualGrossGoal
+      : sum(scopedGoals.map((goal) => goal.annualGrossGoal)),
+    annualRjlFeesGoal: showFirmOutperform
+      ? firmOutperformProgress.goal.annualRjlFeesGoal
+      : sum(scopedGoals.map((goal) => goal.annualRjlFeesGoal)),
+    grossDisbursed: showFirmOutperform
+      ? firmOutperformProgress.actualGrossDisbursed
+      : sum(progress.map((item) => item.actualGrossDisbursed)),
+    disbursedFees: showFirmOutperform
+      ? firmOutperformProgress.actualDisbursedFees
+      : sum(progress.map((item) => item.actualDisbursedFees)),
+    yearElapsed: showFirmOutperform
+      ? firmOutperformProgress.yearElapsed
+      : progress.length > 0
         ? progress.reduce((total, item) => total + item.yearElapsed, 0) / progress.length
         : 0,
   };
@@ -54,22 +69,25 @@ export function GoalsView({
     firmTotals.annualGrossGoal > 0 ? (firmTotals.grossDisbursed / firmTotals.annualGrossGoal) * 100 : 0;
   const firmFeeProgress =
     firmTotals.annualRjlFeesGoal > 0 ? (firmTotals.disbursedFees / firmTotals.annualRjlFeesGoal) * 100 : 0;
+  const firmPace = showFirmOutperform ? firmOutperformProgress.pace : firmGrossProgress >= firmTotals.yearElapsed ? "ahead" : "behind";
 
   return (
     <div className="space-y-10">
-      {showFirmOverall ? (
+      {showFirmOutperform || showFirmOverall ? (
         <section className="space-y-4">
           <Card>
             <CardHeader>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <CardTitle>Firm overall</CardTitle>
+                  <CardTitle>{showFirmOutperform ? "Firm Outperform Goal" : "Firm overall"}</CardTitle>
                   <CardDescription>
-                    Combined totals across {progress.length} attorneys for the current commission year.
+                    {showFirmOutperform
+                      ? `Firm-wide growth target for the ${firmOutperformProgress.goal.year} commission year — all attorneys combined.`
+                      : `Combined totals across ${progress.length} attorneys for the current commission year.`}
                   </CardDescription>
                 </div>
-                <Badge variant={firmGrossProgress >= firmTotals.yearElapsed ? "success" : "warning"}>
-                  {firmGrossProgress >= firmTotals.yearElapsed ? "Ahead" : "Behind"}
+                <Badge variant={firmPace === "ahead" ? "success" : "warning"}>
+                  {firmPace === "ahead" ? "Ahead" : "Behind"}
                 </Badge>
               </div>
             </CardHeader>
@@ -95,6 +113,7 @@ export function GoalsView({
       ) : null}
 
       {progress.map((item) => {
+        if (isFirmOutperformGoal(item.goal)) return null;
         const attorney = users.find((user) => user.id === item.goal.attorneyId);
         const attorneyRecords = scopedRecords.filter((record) => record.shared.attorneyId === item.goal.attorneyId);
         const commissionPeriod = formatCommissionYearPeriod(item.goal.year, item.goal.commissionYearStartMonth);

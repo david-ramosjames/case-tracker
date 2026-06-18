@@ -1,4 +1,5 @@
 import { getAttorneyDisbursementVisibility } from "@/lib/disbursements";
+import { FIRM_OUTPERFORM_GOAL_ATTORNEY_ID } from "@/lib/firm-goals";
 import { type SessionUser } from "@/lib/auth/types";
 import { type AppUser, type AttorneyGoal, type CaseRecord, type UserRole } from "@/lib/types";
 
@@ -36,6 +37,7 @@ export function buildViewerContext(session: SessionUser, users: AppUser[]): View
 }
 
 export function getAttorneyCommissionStartMonth(goals: AttorneyGoal[], attorneyId: string) {
+  if (attorneyId === FIRM_OUTPERFORM_GOAL_ATTORNEY_ID) return 1;
   const matches = goals.filter((goal) => goal.attorneyId === attorneyId);
   if (matches.length === 0) return 1;
   const sorted = [...matches].sort((a, b) => b.year - a.year);

@@ -24,7 +24,12 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { getGoalYearOptions } from "@/lib/case-options";
 import { COMMISSION_PERIOD_MONTH_OPTIONS, COMMISSION_YEAR_MONTH_OPTIONS } from "@/lib/commission-year";
-import { type AppUser, type AttorneyGoal } from "@/lib/types";
+import {
+  FIRM_OUTPERFORM_GOAL_ATTORNEY_ID,
+  isFirmOutperformGoal,
+  partitionGoals,
+} from "@/lib/firm-goals";
+import { type AppUser, type AttorneyGoal, type GoalScope } from "@/lib/types";
 import { formatCurrency, formatNumberInput, parseNumberInput } from "@/lib/utils";
 
 type GoalDraft = {
@@ -142,19 +147,28 @@ export function AttorneyGoalsManager({
   const [deletingGoalId, setDeletingGoalId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showAddFirmForm, setShowAddFirmForm] = useState(false);
   const [newAttorneyId, setNewAttorneyId] = useState(attorneys[0]?.id ?? "");
   const [newDraft, setNewDraft] = useState(() => createEmptyDraft(attorneys[0]?.id ?? "", defaultEndYear));
+  const [newFirmDraft, setNewFirmDraft] = useState(() => createEmptyDraft(FIRM_OUTPERFORM_GOAL_ATTORNEY_ID, defaultEndYear));
   const [drafts, setDrafts] = useState<Record<string, GoalDraft>>({});
 
+  const { attorneyGoals, firmGoals } = useMemo(() => partitionGoals(goals), [goals]);
+
   const displayedGoals = useMemo(() => {
-    const filtered = yearFilter === "all" ? goals : goals.filter((goal) => goal.year === yearFilter);
+    const filtered = yearFilter === "all" ? attorneyGoals : attorneyGoals.filter((goal) => goal.year === yearFilter);
     return [...filtered].sort((left, right) => {
       if (right.year !== left.year) return right.year - left.year;
       const leftName = attorneys.find((user) => user.id === left.attorneyId)?.name ?? "";
       const rightName = attorneys.find((user) => user.id === right.attorneyId)?.name ?? "";
       return leftName.localeCompare(rightName);
     });
-  }, [attorneys, goals, yearFilter]);
+  }, [attorneys, attorneyGoals, yearFilter]);
+
+  const displayedFirmGoals = useMemo(() => {
+    const filtered = yearFilter === "all" ? firmGoals : firmGoals.filter((goal) => goal.year === yearFilter);
+    return [...filtered].sort((left, right) => right.year - left.year);
+  }, [firmGoals, yearFilter]);
 
   function getDraft(goal: AttorneyGoal): GoalDraft {
     return drafts[goal.id] ?? buildDraftFromGoal(goal);
@@ -170,7 +184,10 @@ export function AttorneyGoalsManager({
     });
   }
 
-  async function saveGoal(attorneyId: string, attorneyName: string, draft: GoalDraft) {
+  async function saveGoal(
+    draft: GoalDraft,
+    options: { goalScope: GoalScope; attorneyId: string; attorneyName: string },
+  ) {
     const period = getPeriodFromDraft(draft);
     const monthlyGoals = parseMonthlyGoalsInput(
       Object.fromEntries(period.monthKeys.map((monthKey) => [monthKey, draft.monthlyValues[monthKey] ?? ""])),
@@ -195,12 +212,13 @@ export function AttorneyGoalsManager({
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        attorneyId,
-        attorneyName,
+        goalScope: options.goalScope,
+        attorneyId: options.attorneyId,
+        attorneyName: options.attorneyName,
         year: period.commissionYear,
         annualGrossGoal: derived.annualGrossGoal,
         annualRjlFeesGoal: derivedFees.annualGrossGoal,
-        commissionThreshold: parseGoalAmount(draft.commissionThreshold),
+        commissionThreshold: options.goalScope === "firm" ? 0 : parseGoalAmount(draft.commissionThreshold),
         commissionYearStartMonth: period.startMonth,
         commissionMonthCount: period.monthCount,
         monthlyGoals,
@@ -232,7 +250,11 @@ export function AttorneyGoalsManager({
     setIsSaving(true);
     setErrorMessage(null);
     try {
-      await saveGoal(goal.attorneyId, attorney.name, getDraft(goal));
+      await saveGoal(getDraft(goal), {
+        goalScope: "attorney",
+        attorneyId: goal.attorneyId,
+        attorneyName: attorney.name,
+      });
       router.refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to save goal.");
@@ -243,8 +265,8 @@ export function AttorneyGoalsManager({
 
   async function handleDeleteGoal(goal: AttorneyGoal) {
     const attorney = attorneys.find((user) => user.id === goal.attorneyId);
-    const attorneyLabel = attorney?.name ?? "this attorney";
-    if (!window.confirm(`Delete the ${goal.year} goal for ${attorneyLabel}? This cannot be undone.`)) {
+    const label = isFirmOutperformGoal(goal) ? "firm Outperform" : (attorney?.name ?? "this attorney");
+    if (!window.confirm(`Delete the ${goal.year} goal for ${label}? This cannot be undone.`)) {
       return;
     }
 
@@ -277,7 +299,11 @@ export function AttorneyGoalsManager({
     setIsSaving(true);
     setErrorMessage(null);
     try {
-      await saveGoal(attorney.id, attorney.name, { ...newDraft, attorneyId: attorney.id });
+      await saveGoal({ ...newDraft, attorneyId: attorney.id }, {
+        goalScope: "attorney",
+        attorneyId: attorney.id,
+        attorneyName: attorney.name,
+      });
       setShowAddForm(false);
       setNewDraft(createEmptyDraft(newAttorneyId, defaultEndYear));
       router.refresh();
@@ -288,16 +314,51 @@ export function AttorneyGoalsManager({
     }
   }
 
+  async function handleSaveFirmGoal(goal: AttorneyGoal) {
+    setIsSaving(true);
+    setErrorMessage(null);
+    try {
+      await saveGoal(getDraft(goal), {
+        goalScope: "firm",
+        attorneyId: FIRM_OUTPERFORM_GOAL_ATTORNEY_ID,
+        attorneyName: "Firm Outperform",
+      });
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to save firm goal.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function handleAddFirmGoal() {
+    setIsSaving(true);
+    setErrorMessage(null);
+    try {
+      await saveGoal(newFirmDraft, {
+        goalScope: "firm",
+        attorneyId: FIRM_OUTPERFORM_GOAL_ATTORNEY_ID,
+        attorneyName: "Firm Outperform",
+      });
+      setShowAddFirmForm(false);
+      setNewFirmDraft(createEmptyDraft(FIRM_OUTPERFORM_GOAL_ATTORNEY_ID, defaultEndYear));
+      router.refresh();
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Unable to add firm goal.");
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
   return (
     <Card>
       <CardHeader>
         <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
           <div>
-            <CardTitle>Attorney Goals</CardTitle>
+            <CardTitle>Goals</CardTitle>
             <CardDescription>
-              Set top-down <strong>gross disbursements</strong> and <strong>RJL attorney fees</strong> goals for each
-              commission year. The <strong>commission threshold</strong> is separate — commissions start once disbursed
-              fees exceed that amount.
+              Set firm-wide <strong>Outperform</strong> targets and per-attorney <strong>gross disbursements</strong> /{" "}
+              <strong>RJL attorney fees</strong> goals for each commission year.
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -331,8 +392,87 @@ export function AttorneyGoalsManager({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-6">
         {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
+
+        <section className="space-y-4">
+          <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+            <div>
+              <h3 className="text-base font-semibold text-navy-950">Firm Outperform Goal</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Overall firm growth target for the commission year — not tied to a single attorney. Shown on the Goals
+                and Output pages when set.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setShowAddFirmForm((current) => !current)}>
+              <Plus className="h-4 w-4" />
+              Add outperform goal
+            </Button>
+          </div>
+
+          {showAddFirmForm ? (
+            <GoalEditorCard
+              title="New firm Outperform goal"
+              draft={newFirmDraft}
+              endYearOptions={endYearOptions}
+              showCommissionThreshold={false}
+              onDraftChange={setNewFirmDraft}
+              actions={
+                <Button variant="pink" size="sm" onClick={handleAddFirmGoal} disabled={isSaving}>
+                  Save firm goal
+                </Button>
+              }
+            />
+          ) : null}
+
+          {displayedFirmGoals.length === 0 ? (
+            <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+              No firm Outperform goal{yearFilter === "all" ? "" : ` for ${yearFilter}`} yet.
+            </p>
+          ) : (
+            displayedFirmGoals.map((goal) => {
+              const draft = getDraft(goal);
+              const title = yearFilter === "all" ? `Firm Outperform · ${goal.year}` : "Firm Outperform";
+              return (
+                <GoalEditorCard
+                  key={goal.id}
+                  title={title}
+                  draft={draft}
+                  endYearOptions={endYearOptions}
+                  showCommissionThreshold={false}
+                  onDraftChange={(next) => updateDraft(goal.id, next)}
+                  actions={
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleSaveFirmGoal(goal)}
+                        disabled={isSaving || deletingGoalId != null}
+                      >
+                        <Save className="h-4 w-4" />
+                        Save
+                      </Button>
+                      {canDeleteGoals ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleDeleteGoal(goal)}
+                          disabled={isSaving || deletingGoalId === goal.id}
+                          aria-label="Delete firm Outperform goal"
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  }
+                />
+              );
+            })
+          )}
+        </section>
+
+        <section className="space-y-4 border-t pt-6">
+          <h3 className="text-base font-semibold text-navy-950">Attorney Goals</h3>
 
         {showAddForm ? (
           <div className="space-y-3">
@@ -421,8 +561,10 @@ export function AttorneyGoalsManager({
           </div>
         )}
 
+        </section>
+
         <p className="text-xs text-muted-foreground">
-          Saved total{yearFilter === "all" ? "" : ` for ${yearFilter}`}:{" "}
+          Saved attorney totals{yearFilter === "all" ? "" : ` for ${yearFilter}`}:{" "}
           <Badge variant="outline">
             {formatCurrency(displayedGoals.reduce((sum, goal) => sum + goal.annualGrossGoal, 0))} gross disbursements
           </Badge>
@@ -441,12 +583,14 @@ function GoalEditorCard({
   endYearOptions,
   onDraftChange,
   actions,
+  showCommissionThreshold = true,
 }: {
   title: string;
   draft: GoalDraft;
   endYearOptions: number[];
   onDraftChange: (draft: GoalDraft) => void;
   actions: ReactNode;
+  showCommissionThreshold?: boolean;
 }) {
   const period = getPeriodFromDraft(draft);
   const periodLabel = formatGoalPeriodLabel(period.commissionYear, period.startMonth, period.monthCount);
@@ -502,7 +646,7 @@ function GoalEditorCard({
       </div>
 
       <div className="space-y-6 px-5 py-5">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className={`grid gap-3 sm:grid-cols-2 ${showCommissionThreshold ? "xl:grid-cols-4" : "xl:grid-cols-3"}`}>
           <Field label="Ends in month">
             <Select
               value={draft.endMonth}
@@ -539,15 +683,17 @@ function GoalEditorCard({
               ))}
             </Select>
           </Field>
-          <Field label="Commission threshold">
-            <GoalAmountInput
-              value={draft.commissionThreshold}
-              onChange={(value) => onDraftChange({ ...draft, commissionThreshold: value })}
-            />
-            <span className="mt-1 block text-[11px] leading-tight text-muted-foreground">
-              RJL fees disbursed before commissions start
-            </span>
-          </Field>
+          {showCommissionThreshold ? (
+            <Field label="Commission threshold">
+              <GoalAmountInput
+                value={draft.commissionThreshold}
+                onChange={(value) => onDraftChange({ ...draft, commissionThreshold: value })}
+              />
+              <span className="mt-1 block text-[11px] leading-tight text-muted-foreground">
+                RJL fees disbursed before commissions start
+              </span>
+            </Field>
+          ) : null}
         </div>
 
         <div className="grid gap-6 xl:grid-cols-2">

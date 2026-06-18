@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
+import { FIRM_OUTPERFORM_GOAL_ATTORNEY_ID, FIRM_OUTPERFORM_GOAL_ATTORNEY_NAME } from "@/lib/firm-goals";
 import { upsertAttorneyGoal, type AttorneyGoalInput } from "@/lib/supabase/services";
 
 export async function POST(request: Request) {
@@ -11,13 +12,18 @@ export async function POST(request: Request) {
     }
 
     const input = (await request.json()) as AttorneyGoalInput;
-    if (!input.attorneyName?.trim() || !input.year) {
+    const goalScope = input.goalScope === "firm" ? "firm" : "attorney";
+    if (!input.year) {
+      return NextResponse.json({ error: "Commission year is required." }, { status: 400 });
+    }
+    if (goalScope === "attorney" && !input.attorneyName?.trim()) {
       return NextResponse.json({ error: "Attorney and year are required." }, { status: 400 });
     }
 
     const goal = await upsertAttorneyGoal({
-      attorneyId: input.attorneyId,
-      attorneyName: input.attorneyName.trim(),
+      goalScope,
+      attorneyId: goalScope === "firm" ? FIRM_OUTPERFORM_GOAL_ATTORNEY_ID : input.attorneyId,
+      attorneyName: goalScope === "firm" ? FIRM_OUTPERFORM_GOAL_ATTORNEY_NAME : input.attorneyName.trim(),
       year: Number(input.year),
       annualGrossGoal: Number(input.annualGrossGoal ?? 0),
       annualRjlFeesGoal: Number(input.annualRjlFeesGoal ?? 0),
