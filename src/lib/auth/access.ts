@@ -1,4 +1,5 @@
 import { getAttorneyDisbursementVisibility } from "@/lib/disbursements";
+import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import { FIRM_OUTPERFORM_GOAL_ATTORNEY_ID } from "@/lib/firm-goals";
 import { type SessionUser } from "@/lib/auth/types";
 import { type AppUser, type AttorneyGoal, type CaseRecord, type UserRole } from "@/lib/types";
@@ -55,8 +56,10 @@ function isRecordHiddenFromAttorney(record: CaseRecord, attorneyId: string, goal
 }
 
 export function getCasePipelineFilter(record: CaseRecord, goals: AttorneyGoal[]): CasePipelineFilter {
+  const derivedStatus = deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result);
+  if (derivedStatus === "Active") return "Active";
   if (isRecordHistoricalForViewer(record, goals)) return "Historical";
-  return record.shared.status;
+  return derivedStatus;
 }
 
 export function isActivePipelineCase(record: CaseRecord, goals: AttorneyGoal[]) {

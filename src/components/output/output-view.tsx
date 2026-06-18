@@ -165,6 +165,22 @@ export function OutputView({
     return results.firmOutperformGoal ? "Outperform goal" : "gross disbursements goal";
   }, [firmCalendarGoalMode, isFirmScope, periodMode, results.firmOutperformGoal]);
 
+  const rjlFeesGoalDetailSuffix = useMemo(() => {
+    if (periodMode === "calendar") {
+      if (isFirmScope) {
+        if (firmCalendarGoalMode === "combined") {
+          return "RJL fees goal (attorneys + Outperform for this calendar year)";
+        }
+        if (firmCalendarGoalMode === "outperform") {
+          return "Outperform RJL fees goal (calendar year portion)";
+        }
+        return "RJL fees goal (sum of attorney targets in this calendar year)";
+      }
+      return "RJL fees goal (sum of monthly targets in this calendar year)";
+    }
+    return results.firmOutperformGoal ? "Outperform RJL fees goal" : "RJL fees disbursed goal";
+  }, [firmCalendarGoalMode, isFirmScope, periodMode, results.firmOutperformGoal]);
+
   const selectedScopeLabel = useMemo(() => {
     if (scope.kind === "attorney") {
       return attorneys.find((user) => user.id === scope.attorneyId)?.name ?? "Attorney";
@@ -224,8 +240,13 @@ export function OutputView({
         </CardContent>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <SummaryCard label="Target (top-down)" value={formatCurrency(results.annualGrossGoal)} detail={`${periodLabel} ${goalDetailSuffix}`} />
+        <SummaryCard
+          label="RJL Fees Target (top-down)"
+          value={formatCurrency(results.annualRjlFeesGoal)}
+          detail={`${periodLabel} ${rjlFeesGoalDetailSuffix}`}
+        />
         <SummaryCard
           label="Plan (bottom-up)"
           value={formatCurrency(results.planGross)}

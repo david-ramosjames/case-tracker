@@ -5,6 +5,7 @@ import {
   isDateInCalendarYear,
   isDateInCommissionYear,
 } from "@/lib/commission-year";
+import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import { type CaseDisbursement, type CaseRecord, type DisbursedStatus, type TrackerEntry } from "@/lib/types";
 
 export function disbursementWeight(expectedCount: number) {
@@ -419,10 +420,14 @@ export function isRecordFullyDisbursed(tracker: Pick<TrackerEntry, "disbursement
 
 /** Attorney visibility when a case can have multiple partial disbursements. */
 export function getAttorneyDisbursementVisibility(
-  tracker: Pick<TrackerEntry, "disbursements" | "expectedDisbursementCount" | "result">,
+  tracker: Pick<TrackerEntry, "caseStage" | "disbursements" | "expectedDisbursementCount" | "result">,
   startMonth: number,
   refDate = new Date(),
 ) {
+  if (deriveCaseStatusFromTracker(tracker.caseStage, tracker.result) === "Active") {
+    return { hidden: false, historical: false };
+  }
+
   const completed = getCompletedDisbursements(tracker);
 
   if (completed.length === 0) {
