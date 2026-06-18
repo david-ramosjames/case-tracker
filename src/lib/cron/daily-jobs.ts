@@ -85,10 +85,13 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
             settlementsUpdated: 0,
             stagesAutoSettled: 0,
             skippedNoTracker: 0,
+            skippedFinancialLocked: 0,
+            sheetCasesFound: 0,
+            details: [],
           },
         }
       : await runDailyJobStep("settlementSync", syncSettlementsFromGoogleSheetIfConfigured);
-    if (settlementSyncResult.error) errors.push(settlementSyncResult.error);
+    if ("error" in settlementSyncResult && settlementSyncResult.error) errors.push(settlementSyncResult.error);
 
     const stageWorkflowResult = await runDailyJobStep("stageWorkflow", () =>
       runDailyStageWorkflow({ forcePulse: force }),
@@ -117,7 +120,10 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
           settlementsUpdated: 0,
           stagesAutoSettled: 0,
           skippedNoTracker: 0,
-          error: settlementSyncResult.error?.error,
+          skippedFinancialLocked: 0,
+          sheetCasesFound: 0,
+          details: [],
+          error: "error" in settlementSyncResult ? settlementSyncResult.error?.error : undefined,
         } as const),
       stageWorkflow: stageWorkflowResult.data ?? { error: stageWorkflowResult.error?.error },
       missingFields:

@@ -5,15 +5,12 @@ import {
   getGoogleSheetsSettlementConfig,
   isGoogleSheetsSettlementSyncConfigured,
 } from "@/lib/slack/config";
-import { syncSettlementsFromSheet, type SettlementSheetCasePayload } from "@/lib/supabase/services";
+import { syncSettlementsFromSheet, type SettlementSheetCasePayload, type SettlementSheetSyncResult as SettlementSheetSyncCoreResult } from "@/lib/supabase/services";
 
-export type SettlementSheetSyncResult = {
+export type { SettlementSheetSyncCaseDetail, SettlementSheetSyncPartyDetail } from "@/lib/supabase/services";
+
+export type SettlementSheetSyncResult = SettlementSheetSyncCoreResult & {
   configured: boolean;
-  casesProcessed: number;
-  disbursementsSynced: number;
-  settlementsUpdated: number;
-  stagesAutoSettled: number;
-  skippedNoTracker: number;
   sheetRowsFound?: number;
   caseNumber?: string;
 };
@@ -172,6 +169,9 @@ export async function syncSettlementsFromGoogleSheetIfConfigured(): Promise<Sett
       settlementsUpdated: 0,
       stagesAutoSettled: 0,
       skippedNoTracker: 0,
+      skippedFinancialLocked: 0,
+      sheetCasesFound: 0,
+      details: [],
     };
   }
   return { configured: true, ...(await syncSettlementsFromGoogleSheet()) };
@@ -226,6 +226,9 @@ export async function syncSettlementsFromGoogleSheetForCaseNumber(
       settlementsUpdated: 0,
       stagesAutoSettled: 0,
       skippedNoTracker: 0,
+      skippedFinancialLocked: 0,
+      sheetCasesFound: 0,
+      details: [],
       sheetRowsFound: 0,
       caseNumber: targetCaseNumber,
     };
