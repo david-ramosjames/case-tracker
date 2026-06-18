@@ -39,7 +39,7 @@ import {
   normalizeGoalScope,
 } from "@/lib/firm-goals";
 import { deriveFeePercentFromSettlement } from "@/lib/fee-percent";
-import { deriveCaseStatusFromTracker, applyOpenSettledTrackerFallback } from "@/lib/case-status";
+import { deriveCaseStatusFromTracker, applyOpenSettledTrackerFallback, isCaseFullyDisbursed } from "@/lib/case-status";
 import { pickNextScheduledEvents } from "@/lib/docketflow/case-events";
 import {
   type ActivityLogEntry,
@@ -337,6 +337,18 @@ export async function updateTrackerEntry(
   };
   const requestedResult = input.result;
   const previousStage = existingTracker?.caseStage;
+  const leavingSettled = previousStage === "Settled" && nextStage !== "Settled";
+  const resultToPersist =
+    requestedResult ??
+    (leavingSettled && existingTracker && isCaseFullyDisbursed(existingTracker.result)
+      ? {
+          ...existingTracker.result,
+          disbursedStatus: "No" as const,
+          disburseDate: null,
+          checkDisbursedAt: null,
+          resultQuarter: null,
+        }
+      : undefined);
   let updateQuery = client.from("case_tracker_entries").update(payload);
   if (hasPersistedTrackerEntry(existingTracker)) {
     updateQuery = updateQuery.eq("id", existingTracker!.id);
@@ -349,8 +361,8 @@ export async function updateTrackerEntry(
 
   if (error) throw error;
   if (data) {
-    const resultRow = requestedResult
-      ? await upsertResultRow(caseId, toString(data.id, ""), requestedResult, data as TrackerEntryRow)
+    const resultRow = resultToPersist
+      ? await upsertResultRow(caseId, toString(data.id, ""), resultToPersist, data as TrackerEntryRow)
       : null;
 
     if (input.manualDisbursements) {

@@ -363,16 +363,21 @@ export function applyDerivedSettlementResult<
       : null;
 
   if (aggregated) {
+    const rollUpCaseClosure = tracker.caseStage === "Settled";
     return applyDerivedResultFields({
       ...withWorkflow,
       settlementAmount: aggregated.settlementAmount ?? withWorkflow.settlementAmount,
       attorneyFees: aggregated.attorneyFees ?? withWorkflow.attorneyFees,
       feePercent: aggregated.feePercent ?? withWorkflow.feePercent,
-      settlementDate: aggregated.settlementDate,
-      disburseDate: aggregated.disburseDate,
-      disbursedStatus: aggregated.disbursedStatus,
-      checkDisbursedAt: aggregated.checkDisbursedAt,
-      resultQuarter: aggregated.resultQuarter,
+      settlementDate: aggregated.settlementDate ?? withWorkflow.settlementDate,
+      ...(rollUpCaseClosure
+        ? {
+            disburseDate: aggregated.disburseDate,
+            disbursedStatus: aggregated.disbursedStatus,
+            checkDisbursedAt: aggregated.checkDisbursedAt,
+            resultQuarter: aggregated.resultQuarter,
+          }
+        : {}),
     });
   }
 
