@@ -128,7 +128,7 @@ export function GoalsView({
                     <CardDescription>
                       {item.goal.year} commission year · {commissionPeriod} · starts {startMonthLabel}
                       {" · "}
-                      Actuals count disbursements in each attorney's commission year only.
+                      Actuals count disbursements in the commission year for each attorney only.
                     </CardDescription>
                   </div>
                   <Badge variant={item.pace === "ahead" ? "success" : "warning"}>
