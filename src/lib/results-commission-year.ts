@@ -16,7 +16,7 @@ import {
 } from "@/lib/results-period";
 import { type AttorneyGoal, type CaseRecord } from "@/lib/types";
 
-/** Whether a case belongs on the Results tab (calendar year or commission year + open undisbursed). */
+/** Whether a case belongs on the Results tab (workflow in progress — not fully disbursed and closed). */
 export function isResultsTabCase(record: CaseRecord, goals: AttorneyGoal[] = []) {
   return recordQualifiesForResultsTab(record, goals);
 }
@@ -45,10 +45,6 @@ export function formatAttorneyCommissionYearLabel(goal: AttorneyGoal | null) {
   return formatCommissionYearPeriod(goal.year, goal.commissionYearStartMonth, goal.commissionMonthCount ?? 12);
 }
 
-export function formatResultsPeriodSummary(goals: AttorneyGoal[], refDate = new Date()) {
-  const calendarYear = refDate.getFullYear();
-  return `${calendarYear} calendar year or each attorney's current commission year`;
-}
 
 /** Goal actuals — disburse date in commission year only. */
 export function getCommissionYearDisbursedAmounts(record: CaseRecord, goal: AttorneyGoal) {

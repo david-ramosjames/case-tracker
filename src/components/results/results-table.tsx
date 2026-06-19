@@ -25,11 +25,11 @@ import {
   getTargetPeriodOptions,
 } from "@/lib/case-options";
 import {
-  formatResultsPeriodSummary,
   getCommissionYearResultAmounts,
   isResultsTabCase,
 } from "@/lib/results-commission-year";
 import { getCaseTotalAmounts, recordHasMultipleDisbursementParties } from "@/lib/results-period";
+import { ResultsTabRules } from "@/components/results/results-tab-rules";
 import {
   type AppUser,
   type AttorneyGoal,
@@ -130,7 +130,6 @@ export function ResultsTable({
   }, [initialDisbursed]);
 
   const attorneys = users.filter((user) => user.role === "attorney");
-  const periodSummary = useMemo(() => formatResultsPeriodSummary(goals), [goals]);
   const quarters = Array.from(new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.result.resultQuarter).filter(Boolean)]));
 
   const activeFilterCount = [
@@ -438,9 +437,11 @@ export function ResultsTable({
         </div>
         {saveMessage ? <p className="mt-3 text-sm font-medium text-pink-600">{saveMessage}</p> : null}
         <p className="mt-3 text-xs text-muted-foreground">
-          Changes save automatically when you update a field. A green checkmark in Actions confirms the server accepted the update.
-          Settlement Amount and RJL Attorney Fees include disbursements in {periodSummary}, plus expected amounts for open undisbursed settlements. Case total hints show the full case across all periods.
+          Changes save automatically. A green checkmark in Actions confirms the server accepted the update.
         </p>
+        <div className="mt-3">
+          <ResultsTabRules compact />
+        </div>
 
         <div className="mt-4 rounded-lg border bg-white">
           <div className="border-b bg-muted/40 px-4 py-2">

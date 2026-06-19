@@ -5,7 +5,9 @@ import {
   isDateInCalendarYear,
   isDateInCommissionYear,
 } from "@/lib/commission-year";
+import { deriveCaseStatusFromTracker, isCaseFullyDisbursed } from "@/lib/case-status";
 import {
+  areAllDisbursementPartiesDisbursed,
   getCaseAttorneyFees,
   getDisbursementAttorneyFees,
   getDisbursementSettlementAmount,
@@ -15,6 +17,20 @@ import { getAttorneyOnlyGoals } from "@/lib/firm-goals";
 import { type AttorneyGoal, type CaseDisbursement, type CaseRecord } from "@/lib/types";
 
 export type ResultsPartyPeriodStatus = "disbursed_in_period" | "open_undisbursed" | "prior_period_excluded";
+
+/** Plain-language rules shown on the Results page. */
+export const RESULTS_TAB_VISIBILITY_RULES = [
+  "Work still to do: release, closing, check, reductions, or disbursement.",
+  "Open settlements waiting to disburse — any settlement date.",
+  "Multi-party cases stay until every party has disbursed.",
+  "Fully disbursed and closed cases are hidden here; they still count on Output and Goals.",
+] as const;
+
+export const RESULTS_TAB_AMOUNT_RULES = [
+  "Gross Settlement $ and RJL Fees = disbursed this period plus expected open amounts.",
+  "Period = current calendar year or the attorney commission year (either qualifies).",
+  "Case total hints show the full case across all parties and years.",
+] as const;
 
 export type ResultsPeriodContext = {
   calendarYear: number;
@@ -248,17 +264,48 @@ export function getCaseTotalAmounts(record: CaseRecord) {
   return { settlementAmount, attorneyFees };
 }
 
+function hasResultsSettlementOrDisbursementActivity(record: CaseRecord) {
+  const { tracker } = record;
+  const result = tracker.result;
+
+  if (tracker.disbursements.length > 0) return true;
+  if (result.settlementDate || result.disburseDate) return true;
+  if ((result.settlementAmount ?? 0) > 0 || (result.attorneyFees ?? 0) > 0) return true;
+
+  return false;
+}
+
+/** Fully disbursed and closed — no remaining Results workflow. */
+export function isResultsWorkflowComplete(record: CaseRecord) {
+  const { tracker } = record;
+  const status = deriveCaseStatusFromTracker(tracker.caseStage, tracker.result);
+  if (status !== "Closed") return false;
+
+  if (tracker.disbursements.length > 0) {
+    return areAllDisbursementPartiesDisbursed(tracker);
+  }
+
+  return isCaseFullyDisbursed(tracker.result);
+}
+
 export function recordQualifiesForResultsTab(record: CaseRecord, goals: AttorneyGoal[], refDate = new Date()) {
+  if (!hasResultsSettlementOrDisbursementActivity(record)) return false;
+  if (isResultsWorkflowComplete(record)) return false;
+
   const context = resolveResultsPeriodContext(record, goals, refDate);
 
   for (const slice of listPartySlices(record)) {
-    const status = getPartyResultsPeriodStatus(slice, record, context);
-    if (status === "disbursed_in_period" || status === "open_undisbursed") {
+    if (getPartyResultsPeriodStatus(slice, record, context) === "open_undisbursed") {
       return true;
     }
   }
 
-  return false;
+  const { tracker } = record;
+  if (tracker.disbursements.length > 0) {
+    return tracker.disbursements.some((party) => !isPartyDisbursed(party));
+  }
+
+  return !isCaseFullyDisbursed(tracker.result);
 }
 
 export function getOutputDisbursedAmounts(

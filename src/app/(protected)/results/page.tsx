@@ -1,4 +1,5 @@
 import { PageHeader } from "@/components/layout/page-header";
+import { ResultsTabRules } from "@/components/results/results-tab-rules";
 import { ResultsTable } from "@/components/results/results-table";
 import { DISBURSED_STATUS_OPTIONS } from "@/lib/case-options";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
@@ -27,8 +28,9 @@ export default async function ResultsPage({
       <PageHeader
         eyebrow="Results"
         title="Settlement and disbursement tracker"
-        description="Disbursements in the current calendar year or each attorney's commission year, plus open undisbursed settlements. Gross Settlement $ and RJL Fees combine disbursed-in-period and expected open amounts; case totals show the full case value."
+        description="Open settlements and in-progress disbursements only. Track release, closing, check, reductions, and disbursement until every party is fully disbursed."
       />
+      <ResultsTabRules />
       <ResultsTable
         records={resultsRecords}
         goals={goals}
