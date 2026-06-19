@@ -29,7 +29,6 @@ import {
   isResultsTabCase,
 } from "@/lib/results-commission-year";
 import { getCaseTotalAmounts, recordHasMultipleDisbursementParties } from "@/lib/results-period";
-import { ResultsTabRules } from "@/components/results/results-tab-rules";
 import {
   type AppUser,
   type AttorneyGoal,
@@ -439,9 +438,6 @@ export function ResultsTable({
         <p className="mt-3 text-xs text-muted-foreground">
           Changes save automatically. A green checkmark in Actions confirms the server accepted the update.
         </p>
-        <div className="mt-3">
-          <ResultsTabRules compact />
-        </div>
 
         <div className="mt-4 rounded-lg border bg-white">
           <div className="border-b bg-muted/40 px-4 py-2">
