@@ -20,20 +20,16 @@ import {
   type CommissionYearQuarter,
 } from "@/lib/commission-year";
 import {
-  getWeightedDisbursedFeesInCalendarYear,
-  getWeightedDisbursedFeesInCommissionYear,
   getWeightedDisbursedFeesInCommissionQuarter,
-  getWeightedFeesSettledInCalendarYear,
-  getWeightedFeesSettledInCommissionYear,
-  getWeightedGrossDisbursedInCalendarYear,
-  getWeightedGrossDisbursedInCommissionYear,
-  getWeightedGrossSettledInCalendarYear,
-  getWeightedGrossSettledInCommissionYear,
   getWeightedSettlementInCommissionQuarter,
-  recordHasDisbursementInCalendarYear,
   recordHasDisbursementInCommissionYear,
 } from "@/lib/disbursements";
-import { getCommissionYearDisbursedAmounts } from "@/lib/results-commission-year";
+import {
+  getCommissionYearDisbursedAmounts,
+  getOutputDisbursedAmounts,
+  getOutputSettledAmounts,
+  resolveOutputPeriodContextForRecord,
+} from "@/lib/results-commission-year";
 import {
   type AttorneyGoal,
   type CaseStage,
@@ -461,7 +457,7 @@ function sumOutputActuals(
   periodMode: OutputPeriodMode,
   periodYear: number,
   goalsByAttorney: Map<string, AttorneyGoal>,
-  firmGoal: AttorneyGoal | null,
+  attorneyGoals: AttorneyGoal[],
 ) {
   let grossSettled = 0;
   let grossDisbursed = 0;
@@ -469,24 +465,27 @@ function sumOutputActuals(
   let feesDisbursed = 0;
   let completedDisbursements = 0;
 
-  for (const record of records) {
-    if (periodMode === "calendar") {
-      grossSettled += getWeightedGrossSettledInCalendarYear(record, periodYear);
-      grossDisbursed += getWeightedGrossDisbursedInCalendarYear(record, periodYear);
-      feesSettled += getWeightedFeesSettledInCalendarYear(record, periodYear);
-      feesDisbursed += getWeightedDisbursedFeesInCalendarYear(record, periodYear);
-      if (recordHasDisbursementInCalendarYear(record, periodYear)) completedDisbursements += 1;
-      continue;
-    }
+  const outputMode = periodMode === "calendar" ? "calendar" : "commission";
 
-    const attorneyGoal = goalsByAttorney.get(record.shared.attorneyId);
-    const commissionYear = attorneyGoal?.year ?? firmGoal?.year ?? periodYear;
-    const startMonth = attorneyGoal?.commissionYearStartMonth ?? firmGoal?.commissionYearStartMonth ?? 1;
-    grossSettled += getWeightedGrossSettledInCommissionYear(record, commissionYear, startMonth);
-    grossDisbursed += getWeightedGrossDisbursedInCommissionYear(record, commissionYear, startMonth);
-    feesSettled += getWeightedFeesSettledInCommissionYear(record, commissionYear, startMonth);
-    feesDisbursed += getWeightedDisbursedFeesInCommissionYear(record, commissionYear, startMonth);
-    if (recordHasDisbursementInCommissionYear(record, commissionYear, startMonth)) completedDisbursements += 1;
+  for (const record of records) {
+    const context = resolveOutputPeriodContextForRecord(
+      record,
+      outputMode,
+      periodYear,
+      goalsByAttorney,
+      attorneyGoals,
+    );
+    const disbursed = getOutputDisbursedAmounts(record, context);
+    const settled = getOutputSettledAmounts(record, context);
+
+    grossDisbursed += disbursed.settlementAmount;
+    feesDisbursed += disbursed.attorneyFees;
+    grossSettled += settled.settlementAmount;
+    feesSettled += settled.attorneyFees;
+
+    if (disbursed.settlementAmount > 0 || disbursed.attorneyFees > 0) {
+      completedDisbursements += 1;
+    }
   }
 
   return { grossSettled, grossDisbursed, feesSettled, feesDisbursed, completedDisbursements };
@@ -576,7 +575,7 @@ export function getFirmOutputMetrics(
     periodMode,
     periodMode === "calendar" ? calendarYear : commissionGoalYear ?? firmOutperformGoal?.year ?? calendarYear,
     goalsByAttorney,
-    firmOutperformGoal,
+    getAttorneyOnlyGoals(allGoals),
   );
 
   const planRecords = records.filter((record) => {

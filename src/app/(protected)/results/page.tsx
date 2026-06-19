@@ -27,7 +27,7 @@ export default async function ResultsPage({
       <PageHeader
         eyebrow="Results"
         title="Settlement and disbursement tracker"
-        description="Open settlements and disbursement cases. Track release, closing, check deposited, disbursed, result quarter, and timing. Settlement and RJL fee columns show each attorney's current commission year only — multi-client cases count per-party dates."
+        description="Disbursements in the current calendar year or each attorney's commission year, plus open undisbursed settlements. Gross Settlement $ and RJL Fees combine disbursed-in-period and expected open amounts; case totals show the full case value."
       />
       <ResultsTable
         records={resultsRecords}

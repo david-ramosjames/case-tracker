@@ -7,13 +7,13 @@ import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { type ViewerContext } from "@/lib/auth/access";
 import { getCaseCompletionScore } from "@/lib/calculations";
 import { compareCaseNumbers } from "@/lib/csv/parse";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { HeaderFilter, HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getCurrentCommissionYearGoals } from "@/lib/calculations";
 import {
   applyDerivedSettlementResult,
   coerceReductionsStatus,
@@ -25,11 +25,11 @@ import {
   getTargetPeriodOptions,
 } from "@/lib/case-options";
 import {
-  formatAttorneyCommissionYearLabel,
+  formatResultsPeriodSummary,
   getCommissionYearResultAmounts,
   isResultsTabCase,
-  resolveAttorneyCommissionYearGoal,
 } from "@/lib/results-commission-year";
+import { getCaseTotalAmounts, recordHasMultipleDisbursementParties } from "@/lib/results-period";
 import {
   type AppUser,
   type AttorneyGoal,
@@ -43,7 +43,7 @@ import {
   type SettlementResult,
   type TrackerEntry,
 } from "@/lib/types";
-import { cn, formatCurrency, getCalculatedAttorneyFees } from "@/lib/utils";
+import { cn, formatCurrency } from "@/lib/utils";
 import { useEffect, useMemo, useRef, useState, type RefObject, type UIEvent } from "react";
 
 type SortKey = "completion" | "caseNumber" | "clientName" | "settlementDate" | "settlementAmount" | "attorneyFees";
@@ -130,20 +130,7 @@ export function ResultsTable({
   }, [initialDisbursed]);
 
   const attorneys = users.filter((user) => user.role === "attorney");
-  const commissionYearGoals = useMemo(
-    () => getCurrentCommissionYearGoals(goals, attorneys.map((user) => user.id)),
-    [attorneys, goals],
-  );
-  const commissionYearSummary = useMemo(() => {
-    if (viewer.isAttorney && viewer.contactId) {
-      const goal = commissionYearGoals.find((item) => item.attorneyId === viewer.contactId) ?? null;
-      return formatAttorneyCommissionYearLabel(goal);
-    }
-    if (commissionYearGoals.length === 1) {
-      return formatAttorneyCommissionYearLabel(commissionYearGoals[0] ?? null);
-    }
-    return "each attorney's current commission year";
-  }, [commissionYearGoals, viewer.contactId, viewer.isAttorney]);
+  const periodSummary = useMemo(() => formatResultsPeriodSummary(goals), [goals]);
   const quarters = Array.from(new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.result.resultQuarter).filter(Boolean)]));
 
   const activeFilterCount = [
@@ -207,18 +194,14 @@ export function ResultsTable({
         }
 
         if (sortKey === "settlementAmount") {
-          const goal = resolveAttorneyCommissionYearGoal(a, goals);
-          const bGoal = resolveAttorneyCommissionYearGoal(b, goals);
-          const aValue = getCommissionYearResultAmounts(a, goal).settlementAmount;
-          const bValue = getCommissionYearResultAmounts(b, bGoal).settlementAmount;
+          const aValue = getCommissionYearResultAmounts(a, goals).settlementAmount;
+          const bValue = getCommissionYearResultAmounts(b, goals).settlementAmount;
           const cmp = aValue - bValue;
           return cmp !== 0 ? dir * cmp : tieBreak();
         }
 
-        const aGoal = resolveAttorneyCommissionYearGoal(a, goals);
-        const bGoal = resolveAttorneyCommissionYearGoal(b, goals);
-        const aFees = getCommissionYearResultAmounts(a, aGoal).attorneyFees;
-        const bFees = getCommissionYearResultAmounts(b, bGoal).attorneyFees;
+        const aFees = getCommissionYearResultAmounts(a, goals).attorneyFees;
+        const bFees = getCommissionYearResultAmounts(b, goals).attorneyFees;
         const cmp = aFees - bFees;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
@@ -456,7 +439,7 @@ export function ResultsTable({
         {saveMessage ? <p className="mt-3 text-sm font-medium text-pink-600">{saveMessage}</p> : null}
         <p className="mt-3 text-xs text-muted-foreground">
           Changes save automatically when you update a field. A green checkmark in Actions confirms the server accepted the update.
-          Settlement Amount and RJL Attorney Fees show only amounts dated in {commissionYearSummary}; multi-client cases count each party by its own settlement or disburse date.
+          Settlement Amount and RJL Attorney Fees include disbursements in {periodSummary}, plus expected amounts for open undisbursed settlements. Case total hints show the full case across all periods.
         </p>
 
         <div className="mt-4 rounded-lg border bg-white">
@@ -497,7 +480,7 @@ export function ResultsTable({
                 <TableHead className="w-36">Paralegal</TableHead>
                 <SortableHead label="Settlement Date" sortKey="settlementDate" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-48" />
                 <SortableHead
-                  label="Settlement Amount (CY)"
+                  label="Gross Settlement $"
                   sortKey="settlementAmount"
                   active={sortKey}
                   direction={sortDirection}
@@ -506,7 +489,7 @@ export function ResultsTable({
                 />
                 <TableHead className="w-24">Fee Percent</TableHead>
                 <SortableHead
-                  label="RJL Fees (CY)"
+                  label="RJL Fees"
                   sortKey="attorneyFees"
                   active={sortKey}
                   direction={sortDirection}
@@ -588,16 +571,14 @@ export function ResultsTable({
                 const result = record.tracker.result;
                 const saveStatus = rowSaveStatus[record.shared.id];
                 const saveError = rowSaveErrors[record.shared.id];
-                const commissionGoal = resolveAttorneyCommissionYearGoal(record, goals);
-                const commissionAmounts = getCommissionYearResultAmounts(record, commissionGoal);
-                const caseTotalSettlement = result.settlementAmount ?? 0;
-                const caseTotalFees =
-                  result.attorneyFees ??
-                  getCalculatedAttorneyFees(result.settlementAmount, result.feePercent) ??
-                  0;
+                const commissionAmounts = getCommissionYearResultAmounts(record, goals);
+                const caseTotals = getCaseTotalAmounts(record);
+                const caseTotalSettlement = caseTotals.settlementAmount;
+                const caseTotalFees = caseTotals.attorneyFees;
                 const showCaseTotalHint =
                   commissionAmounts.settlementAmount !== caseTotalSettlement ||
                   commissionAmounts.attorneyFees !== caseTotalFees;
+                const isMultiDisbursement = recordHasMultipleDisbursementParties(record);
 
                 return (
                   <TableRow key={record.shared.id}>
@@ -607,7 +588,16 @@ export function ResultsTable({
                     <TableCell className="sticky left-28 z-10 w-28 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
                       <CaseNumberLink caseId={record.shared.id} caseNumber={record.shared.caseNumber} openInNewTab />
                     </TableCell>
-                    <TableCell className="sticky left-56 z-10 w-44 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.shared.clientName}</TableCell>
+                    <TableCell className="sticky left-56 z-10 w-44 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span>{record.shared.clientName}</span>
+                        {isMultiDisbursement ? (
+                          <Badge variant="outline" className="text-[10px]" title="Multiple disbursement parties — open case detail for per-party breakdown">
+                            Multi
+                          </Badge>
+                        ) : null}
+                      </div>
+                    </TableCell>
                     <TableCell className="sticky left-[25rem] z-10 w-40 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.attorney.name}</TableCell>
                     <TableCell className="w-36">{record.paralegal.name}</TableCell>
                     <TableCell className="w-48">

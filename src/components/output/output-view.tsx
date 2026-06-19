@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { SlidersHorizontal } from "lucide-react";
+import { Download, SlidersHorizontal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Select } from "@/components/ui/select";
@@ -15,6 +16,7 @@ import {
 } from "@/lib/calculations";
 import { formatCommissionYearPeriod } from "@/lib/commission-year";
 import { getAttorneyOnlyGoals } from "@/lib/firm-goals";
+import { buildOutputAuditCsv, buildOutputAuditRows, downloadOutputAuditCsv } from "@/lib/results-period";
 import { getGoalYearOptions } from "@/lib/case-options";
 import { type AppUser, type AttorneyGoal, type CaseRecord } from "@/lib/types";
 import { formatCurrency, percent } from "@/lib/utils";
@@ -146,8 +148,36 @@ export function OutputView({
 
   const periodDescription =
     periodMode === "calendar"
-      ? `${periodYear} calendar year — settled and disbursed amounts use settlement/disburse dates in that year.`
-      : `${periodLabel} commission year — amounts use this attorney's commission period.`;
+      ? `${periodYear} calendar year — Disbursed uses disburse dates in that year. Settled includes disbursed amounts plus open undisbursed settlements.`
+      : `${periodLabel} commission year — Disbursed uses disburse dates in that period. Settled includes disbursed amounts plus open undisbursed settlements.`;
+
+  const goalsByAttorney = useMemo(() => {
+    const map = new Map<string, AttorneyGoal>();
+    for (const attorneyId of attorneyIds) {
+      const goal =
+        (periodMode === "commission"
+          ? attorneyOnlyGoals.find((item) => item.attorneyId === attorneyId && item.year === periodYear)
+          : undefined) ??
+        attorneyOnlyGoals
+          .filter((item) => item.attorneyId === attorneyId)
+          .sort((left, right) => right.year - left.year)[0];
+      if (goal) map.set(attorneyId, goal);
+    }
+    return map;
+  }, [attorneyIds, attorneyOnlyGoals, periodMode, periodYear]);
+
+  function handleDownloadAuditCsv() {
+    const rows = buildOutputAuditRows(filteredRecords, {
+      mode: periodMode,
+      periodYear,
+      periodLabel,
+      goalsByAttorney,
+      attorneyGoals: attorneyOnlyGoals,
+    });
+    const csv = buildOutputAuditCsv(rows);
+    const scopeSlug = selectedScopeLabel.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
+    downloadOutputAuditCsv(csv, `output-audit-${scopeSlug}-${periodMode}-${periodYear}.csv`);
+  }
 
   const goalDetailSuffix = useMemo(() => {
     if (periodMode === "calendar") {
@@ -202,6 +232,10 @@ export function OutputView({
             <p className="text-sm text-muted-foreground lg:ml-auto">
               Showing {filteredRecords.length} of {records.length} cases · {selectedScopeLabel}
             </p>
+            <Button type="button" variant="outline" size="sm" onClick={handleDownloadAuditCsv}>
+              <Download className="mr-2 h-4 w-4" />
+              Download audit CSV
+            </Button>
           </div>
           <div className={`mt-3 grid gap-3 ${selectedAttorneyId ? "sm:grid-cols-2 lg:grid-cols-3 lg:max-w-4xl" : "sm:grid-cols-2 lg:max-w-2xl"}`}>
             <Select value={scopeValue} onChange={(event) => setScopeValue(event.target.value)} aria-label="View">
@@ -256,17 +290,17 @@ export function OutputView({
               : "Forecast gross disbursements from active cases in this commission year"
           }
         />
-        <SummaryCard label="Gross Settled" value={formatCurrency(results.grossSettled)} detail="Settlement amounts signed in period" />
-        <SummaryCard label="Gross Disbursed" value={formatCurrency(results.grossDisbursed)} detail="Settlement dollars disbursed in period" />
-        <SummaryCard label="RJL Fees Settled" value={formatCurrency(results.feesSettled)} detail="Attorney fees on cases settled in period" />
-        <SummaryCard label="RJL Fees Disbursed" value={formatCurrency(results.feesDisbursed)} detail="Attorney fees disbursed in period" />
+        <SummaryCard label="Gross Settlement $" value={formatCurrency(results.grossSettled)} detail="Disbursed in period plus open undisbursed settlements" />
+        <SummaryCard label="Gross Disbursed" value={formatCurrency(results.grossDisbursed)} detail="Gross settlement dollars disbursed in period" />
+        <SummaryCard label="RJL Fees (Settled)" value={formatCurrency(results.feesSettled)} detail="Fees on disbursed + open undisbursed settlements" />
+        <SummaryCard label="RJL Fees Disbursed" value={formatCurrency(results.feesDisbursed)} detail="Net RJL attorney fees disbursed in period" />
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Results vs Goals</CardTitle>
           <CardDescription>
-            {periodDescription} Gross disbursements and RJL fees tracked vs top-down goals for {selectedScopeLabel}.
+            {periodDescription} Disbursed columns drive goal progress for {selectedScopeLabel}.
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -286,7 +320,7 @@ export function OutputView({
             </TableHeader>
             <TableBody>
               <ResultsRow
-                label="Gross Disbursements"
+                label="Gross Settlement $"
                 settled={results.grossSettled}
                 disbursed={results.grossDisbursed}
                 fullYearGoal={results.annualGrossGoal}
