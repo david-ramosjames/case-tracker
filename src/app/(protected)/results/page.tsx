@@ -28,7 +28,7 @@ export default async function ResultsPage({
       <PageHeader
         eyebrow="Results"
         title="Settlement and disbursement tracker"
-        description="Open settlements and in-progress disbursements only. Track release, closing, check, reductions, and disbursement until every party is fully disbursed."
+        description="Settlements and disbursements in the current calendar year or each attorney commission year, plus open undisbursed settlements. Track release, closing, check, reductions, and disbursement workflow."
       />
       <ResultsTabRules />
       <ResultsTable

@@ -16,7 +16,7 @@ import {
 } from "@/lib/results-period";
 import { type AttorneyGoal, type CaseRecord } from "@/lib/types";
 
-/** Whether a case belongs on the Results tab (workflow in progress — not fully disbursed and closed). */
+/** Whether a case belongs on the Results tab (disbursed in period or open undisbursed). */
 export function isResultsTabCase(record: CaseRecord, goals: AttorneyGoal[] = []) {
   return recordQualifiesForResultsTab(record, goals);
 }

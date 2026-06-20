@@ -5,9 +5,7 @@ import {
   isDateInCalendarYear,
   isDateInCommissionYear,
 } from "@/lib/commission-year";
-import { deriveCaseStatusFromTracker, isCaseFullyDisbursed } from "@/lib/case-status";
 import {
-  areAllDisbursementPartiesDisbursed,
   getCaseAttorneyFees,
   getDisbursementAttorneyFees,
   getDisbursementSettlementAmount,
@@ -20,10 +18,10 @@ export type ResultsPartyPeriodStatus = "disbursed_in_period" | "open_undisbursed
 
 /** Plain-language rules shown on the Results page. */
 export const RESULTS_TAB_VISIBILITY_RULES = [
-  "Work still to do: release, closing, check, reductions, or disbursement.",
+  "Disbursement in the current calendar year or the attorney commission year.",
   "Open settlements waiting to disburse — any settlement date.",
-  "Multi-party cases stay until every party has disbursed.",
-  "Fully disbursed and closed cases are hidden here; they still count on Output and Goals.",
+  "Multi-party cases show until every party has disbursed or is open.",
+  "Fully disbursed and closed cases stay visible when disbursed in period.",
 ] as const;
 
 export const RESULTS_TAB_AMOUNT_RULES = [
@@ -275,37 +273,19 @@ function hasResultsSettlementOrDisbursementActivity(record: CaseRecord) {
   return false;
 }
 
-/** Fully disbursed and closed — no remaining Results workflow. */
-export function isResultsWorkflowComplete(record: CaseRecord) {
-  const { tracker } = record;
-  const status = deriveCaseStatusFromTracker(tracker.caseStage, tracker.result);
-  if (status !== "Closed") return false;
-
-  if (tracker.disbursements.length > 0) {
-    return areAllDisbursementPartiesDisbursed(tracker);
-  }
-
-  return isCaseFullyDisbursed(tracker.result);
-}
-
 export function recordQualifiesForResultsTab(record: CaseRecord, goals: AttorneyGoal[], refDate = new Date()) {
   if (!hasResultsSettlementOrDisbursementActivity(record)) return false;
-  if (isResultsWorkflowComplete(record)) return false;
 
   const context = resolveResultsPeriodContext(record, goals, refDate);
 
   for (const slice of listPartySlices(record)) {
-    if (getPartyResultsPeriodStatus(slice, record, context) === "open_undisbursed") {
+    const status = getPartyResultsPeriodStatus(slice, record, context);
+    if (status === "disbursed_in_period" || status === "open_undisbursed") {
       return true;
     }
   }
 
-  const { tracker } = record;
-  if (tracker.disbursements.length > 0) {
-    return tracker.disbursements.some((party) => !isPartyDisbursed(party));
-  }
-
-  return !isCaseFullyDisbursed(tracker.result);
+  return false;
 }
 
 export function getOutputDisbursedAmounts(
