@@ -4,6 +4,7 @@ import Link from "next/link";
 import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Eye, Loader2 } from "lucide-react";
 import { CaseCompletionCell } from "@/components/cases/case-completion-cell";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
+import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import { type ViewerContext } from "@/lib/auth/access";
 import { getCaseCompletionScore } from "@/lib/calculations";
 import { compareCaseNumbers } from "@/lib/csv/parse";
@@ -34,6 +35,7 @@ import {
   type AttorneyGoal,
   type CaseRecord,
   type CaseTrackerSettings,
+  type CaseStatus,
   type CheckStatus,
   type ClosingStatus,
   type DisbursedStatus,
@@ -110,6 +112,7 @@ export function ResultsTable({
     [records],
   );
   const [search, setSearch] = useState("");
+  const [caseStatus, setCaseStatus] = useState<"all" | CaseStatus>("all");
   const [attorneyIds, setAttorneyIds] = useState<string[]>([]);
   const [release, setRelease] = useState("all");
   const [closing, setClosing] = useState("all");
@@ -122,7 +125,7 @@ export function ResultsTable({
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
-  const [scrollWidth, setScrollWidth] = useState(2300);
+  const [scrollWidth, setScrollWidth] = useState(2380);
 
   useEffect(() => {
     setDisbursed(initialDisbursed);
@@ -132,6 +135,7 @@ export function ResultsTable({
   const quarters = Array.from(new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.result.resultQuarter).filter(Boolean)]));
 
   const activeFilterCount = [
+    caseStatus !== "all",
     viewer.canViewAllCases && attorneyIds.length > 0,
     release,
     closing,
@@ -153,6 +157,8 @@ export function ResultsTable({
           record.shared.clientName.toLowerCase().includes(normalizedSearch);
 
         if (!matchesSearch) return false;
+        const status = deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result);
+        if (caseStatus !== "all" && status !== caseStatus) return false;
         if (attorneyIds.length > 0 && !attorneyIds.includes(record.shared.attorneyId)) return false;
         const pinRow = isRowPinnedBySaveFeedback(record.shared.id, rowSaveStatus);
         if (release !== "all" && result.releaseStatus !== release && !pinRow) return false;
@@ -203,7 +209,7 @@ export function ResultsTable({
         const cmp = aFees - bFees;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [attorneyIds, check, closing, disbursed, goals, quarter, reductions, release, rowSaveStatus, search, settings, sortDirection, sortKey, workingRecords]);
+  }, [attorneyIds, caseStatus, check, closing, disbursed, goals, quarter, reductions, release, rowSaveStatus, search, settings, sortDirection, sortKey, workingRecords]);
 
   useEffect(() => {
     recordsRef.current = workingRecords;
@@ -230,7 +236,7 @@ export function ResultsTable({
 
   useEffect(() => {
     function updateScrollWidth() {
-      setScrollWidth(tableRef.current?.scrollWidth ?? 2300);
+      setScrollWidth(tableRef.current?.scrollWidth ?? 2380);
     }
 
     updateScrollWidth();
@@ -245,6 +251,7 @@ export function ResultsTable({
   }
 
   function clearFilters() {
+    setCaseStatus("all");
     setAttorneyIds([]);
     setRelease("all");
     setClosing("all");
@@ -456,13 +463,25 @@ export function ResultsTable({
               className="max-h-[calc(100vh-23rem)] min-h-[28rem] overflow-auto"
               onScroll={(event) => syncScroll(event, topScrollRef)}
             >
-          <Table ref={tableRef} className="min-w-[2300px] table-fixed">
+          <Table ref={tableRef} className="min-w-[2380px] table-fixed">
             <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
               <TableRow>
                 <SortableHead label="% Complete" sortKey="completion" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-0 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
-                <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-28 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
-                <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-56 z-40 w-44 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
-                <TableHead className="sticky left-[25rem] z-40 w-40 bg-slate-50 align-top shadow-[1px_0_0_0_hsl(var(--border))]">
+                <TableHead className="sticky left-28 z-40 w-24 bg-slate-50 align-top shadow-[1px_0_0_0_hsl(var(--border))]">
+                  <HeaderFilter
+                    label="Status"
+                    value={caseStatus}
+                    onChange={(value) => setCaseStatus(value as "all" | CaseStatus)}
+                    options={[
+                      { value: "all", label: "All" },
+                      { value: "Active", label: "Open" },
+                      { value: "Closed", label: "Closed" },
+                    ]}
+                  />
+                </TableHead>
+                <SortableHead label="Case #" sortKey="caseNumber" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-[13rem] z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
+                <SortableHead label="Client" sortKey="clientName" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-[20rem] z-40 w-44 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
+                <TableHead className="sticky left-[31rem] z-40 w-40 bg-slate-50 align-top shadow-[1px_0_0_0_hsl(var(--border))]">
                   {viewer.canViewAllCases ? (
                     <HeaderMultiFilter
                       label="Attorney"
@@ -582,10 +601,13 @@ export function ResultsTable({
                     <TableCell className="sticky left-0 z-10 w-28 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
                       <CaseCompletionCell record={record} settings={settings} />
                     </TableCell>
-                    <TableCell className="sticky left-28 z-10 w-28 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
+                    <TableCell className="sticky left-28 z-10 w-24 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
+                      <ResultCaseStatusBadge record={record} />
+                    </TableCell>
+                    <TableCell className="sticky left-[13rem] z-10 w-28 bg-white shadow-[1px_0_0_0_hsl(var(--border))]">
                       <CaseNumberLink caseId={record.shared.id} caseNumber={record.shared.caseNumber} openInNewTab />
                     </TableCell>
-                    <TableCell className="sticky left-56 z-10 w-44 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">
+                    <TableCell className="sticky left-[20rem] z-10 w-44 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <span>{record.shared.clientName}</span>
                         {isMultiDisbursement ? (
@@ -595,7 +617,7 @@ export function ResultsTable({
                         ) : null}
                       </div>
                     </TableCell>
-                    <TableCell className="sticky left-[25rem] z-10 w-40 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.attorney.name}</TableCell>
+                    <TableCell className="sticky left-[31rem] z-10 w-40 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.attorney.name}</TableCell>
                     <TableCell className="w-36">{record.paralegal.name}</TableCell>
                     <TableCell className="w-48">
                       <Input className="h-9 w-full text-xs" type="date" value={toDateInput(result.settlementDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, settlementDate: fromDateInput(event.target.value) }))} />
@@ -711,6 +733,12 @@ export function ResultsTable({
       </CardContent>
     </Card>
   );
+}
+
+function ResultCaseStatusBadge({ record }: { record: Pick<CaseRecord, "tracker"> }) {
+  const status = deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result);
+  const label = status === "Active" ? "Open" : "Closed";
+  return <Badge variant={status === "Active" ? "success" : "secondary"}>{label}</Badge>;
 }
 
 function SortableHead({
