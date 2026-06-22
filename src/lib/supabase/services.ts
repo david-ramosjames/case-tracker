@@ -33,6 +33,7 @@ import {
   deriveResultQuarterFromDisburseDate,
   normalizeCaseType,
   normalizePreferredLanguage,
+  toDocketFlowPreferredLanguage,
 } from "@/lib/case-options";
 import {
   FIRM_OUTPERFORM_GOAL_ATTORNEY_ID,
@@ -1110,7 +1111,7 @@ export async function updateSharedCaseFields(
     payload.date_of_incident = input.dateOfIncident ? toDateOnly(input.dateOfIncident) : null;
   }
   if (input.preferredLanguage !== undefined && linkedCaseId) {
-    payload.preferred_language = input.preferredLanguage;
+    payload.preferred_language = toDocketFlowPreferredLanguage(input.preferredLanguage);
   }
 
   if (Object.keys(payload).length > 0 && linkedCaseId) {

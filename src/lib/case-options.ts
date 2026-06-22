@@ -23,13 +23,25 @@ export type ClientPreferredLanguage = "en" | "es";
 export const CLIENT_PREFERRED_LANGUAGE_OPTIONS = [
   { value: "en" as const, label: "English" },
   { value: "es" as const, label: "Spanish" },
-];
+] as const;
+
+/** DocketFlow cases.preferred_language check constraint values. */
+export const DOCKETFLOW_PREFERRED_LANGUAGE_BY_CODE: Record<ClientPreferredLanguage, string> = {
+  en: "English",
+  es: "Spanish",
+};
 
 /** Normalize DocketFlow cases.preferred_language to en | es. */
 export function normalizePreferredLanguage(value: string | null | undefined): ClientPreferredLanguage {
   const normalized = value?.trim().toLowerCase() ?? "";
+  if (!normalized) return "en";
   if (normalized === "es" || normalized === "spanish" || normalized.startsWith("span")) return "es";
   return "en";
+}
+
+/** Map tracker language code to the value DocketFlow stores on cases.preferred_language. */
+export function toDocketFlowPreferredLanguage(value: ClientPreferredLanguage) {
+  return DOCKETFLOW_PREFERRED_LANGUAGE_BY_CODE[value];
 }
 
 export const CASE_STATUS_OPTIONS = ["Active", "Closed"] satisfies CaseStatus[];
