@@ -24,9 +24,13 @@ export function deriveFeePercentFromSettlement(input: {
   return attorneyFees / netFirmShare / settlementAmount;
 }
 
+/** Gross fee rate by stage; referral split is applied to get net RJL share of settlement/minimum. */
+const PRE_LIT_GROSS_FEE_RATE = 1 / 3;
+const LIT_GROSS_FEE_RATE = 0.4;
+
 export function deriveForecastFeePercent(input: { caseStage: CaseStage; referralFee: number | null }) {
-  if (input.caseStage === "Lit") return 0.4;
-  return (1 / 3) * (1 - referralFeeToDecimal(input.referralFee));
+  const grossRate = input.caseStage === "Lit" ? LIT_GROSS_FEE_RATE : PRE_LIT_GROSS_FEE_RATE;
+  return grossRate * (1 - referralFeeToDecimal(input.referralFee));
 }
 
 /** @deprecated Use deriveForecastFeePercent for active cases. */
