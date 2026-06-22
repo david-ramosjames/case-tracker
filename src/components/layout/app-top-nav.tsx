@@ -10,6 +10,7 @@ import {
   HelpCircle,
   LayoutDashboard,
   LogOut,
+  MessageSquare,
   Settings,
   Sparkles,
   Target,
@@ -26,6 +27,7 @@ const navItems = [
   { href: "/results", label: "Results", icon: CircleDollarSign },
   { href: "/output", label: "Output", icon: BarChart3 },
   { href: "/goals", label: "Goals", icon: Target },
+  { href: "/client-sms", label: "Client SMS", icon: MessageSquare, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings, adminOnly: true },
   { href: "/faq", label: "FAQ", icon: HelpCircle, adminOnly: true },
 ];

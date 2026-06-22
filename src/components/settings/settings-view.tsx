@@ -8,7 +8,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AttorneyGoalsManager } from "@/components/settings/attorney-goals-manager";
 import { AttorneyScoreExplainer } from "@/components/attorney-score/attorney-score";
 import { BackfillImportCard } from "@/components/settings/backfill-import-card";
-import { SettlementFinancialBackfillCard } from "@/components/settings/settlement-financial-backfill-card";
 import { DailyJobsCard } from "@/components/settings/daily-jobs-card";
 import { SettlementSyncCard } from "@/components/settings/settlement-sync-card";
 import { SlackSyncCard } from "@/components/settings/slack-sync-card";
@@ -33,8 +32,6 @@ export function SettingsView({
             <Link href="/faq">Product FAQ</Link>
           </Button>
         </div>
-
-        <SettlementFinancialBackfillCard />
 
         <BackfillImportCard />
 

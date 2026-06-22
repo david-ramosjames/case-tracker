@@ -18,6 +18,20 @@ import { normalizeTargetQuarter } from "@/lib/target-quarter";
 export { EXPECTED_DISBURSEMENT_QUARTER_LABEL } from "@/lib/case-labels";
 export { normalizeTargetQuarter } from "@/lib/target-quarter";
 
+export type ClientPreferredLanguage = "en" | "es";
+
+export const CLIENT_PREFERRED_LANGUAGE_OPTIONS = [
+  { value: "en" as const, label: "English" },
+  { value: "es" as const, label: "Spanish" },
+];
+
+/** Normalize DocketFlow cases.preferred_language to en | es. */
+export function normalizePreferredLanguage(value: string | null | undefined): ClientPreferredLanguage {
+  const normalized = value?.trim().toLowerCase() ?? "";
+  if (normalized === "es" || normalized === "spanish" || normalized.startsWith("span")) return "es";
+  return "en";
+}
+
 export const CASE_STATUS_OPTIONS = ["Active", "Closed"] satisfies CaseStatus[];
 
 export const CASE_TYPE_OPTIONS = [

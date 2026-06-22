@@ -66,6 +66,7 @@ export type SharedCase = {
   caseType: string;
   dateSigned: string;
   dateOfIncident: string | null;
+  preferredLanguage: "en" | "es";
   createdAt: string;
   updatedAt: string;
 };
@@ -182,6 +183,8 @@ export type TrackerEntry = {
   settledAmount: number | null;
   disbursedAmount: number | null;
   actualFeeValue: number | null;
+  clientPhone: string | null;
+  quoContactId: string | null;
   updatedAt: string;
 };
 
@@ -336,6 +339,7 @@ export type TrackerUpdateInput = Partial<
     | "forecastNotes"
     | "expectedDisbursementCount"
     | "multipleDisbursementsEnabled"
+    | "clientPhone"
   >
 >;
 

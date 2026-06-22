@@ -8,6 +8,7 @@ import {
   handleFieldReminderReaction,
   handleFieldReminderReply,
 } from "@/lib/slack/field-confirmation";
+import { handleSmsApprovalReaction, handleSmsApprovalReply } from "@/lib/sms/approval";
 import {
   handleStageConfirmationReaction,
   handleStageConfirmationReply,
@@ -138,6 +139,11 @@ export async function POST(request: Request) {
 
   if (isReactionAdded(event)) {
     try {
+      const smsResult = await handleSmsApprovalReaction(event.item.channel, event.item.ts, event.reaction);
+      if (smsResult.handled) {
+        return NextResponse.json({ ok: true });
+      }
+
       const fieldResult = await handleFieldReminderReaction(event.item.ts, event.reaction, "Slack reaction");
       if (fieldResult.handled) {
         await postSlackMessage({
@@ -167,6 +173,11 @@ export async function POST(request: Request) {
   }
 
   try {
+    const smsResult = await handleSmsApprovalReply(event.channel, event.thread_ts, event.text);
+    if (smsResult.handled) {
+      return NextResponse.json({ ok: true });
+    }
+
     const fieldResult = await handleFieldReminderReply(event.thread_ts, event.text, "Slack thread");
     if (fieldResult.handled) {
       if (fieldResult.action === "invalid") {

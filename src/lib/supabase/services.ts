@@ -32,6 +32,7 @@ import {
   deriveCaseSizeFromMinimumValue,
   deriveResultQuarterFromDisburseDate,
   normalizeCaseType,
+  normalizePreferredLanguage,
 } from "@/lib/case-options";
 import {
   FIRM_OUTPERFORM_GOAL_ATTORNEY_ID,
@@ -79,6 +80,7 @@ type DocketFlowCaseRow = {
   status: string | null;
   case_type: string | null;
   date_of_incident: string | null;
+  preferred_language: string | null;
   assigned_contact_ids: string[] | null;
   created_at: string | number | null;
   updated_at: string | number | null;
@@ -141,7 +143,7 @@ export async function getCases(): Promise<CaseRecord[]> {
   ] = await Promise.all([
     sharedClient
       .from("cases")
-      .select("id,case_number,client_name,name,status,case_type,date_of_incident,assigned_contact_ids,created_at,updated_at")
+      .select("id,case_number,client_name,name,status,case_type,date_of_incident,preferred_language,assigned_contact_ids,created_at,updated_at")
       .order("created_at", { ascending: false }),
     trackerClient.from("case_tracker_entries").select("*").order("created_at", { ascending: false }),
     trackerClient.from("case_tracker_results").select("*"),
@@ -1063,13 +1065,24 @@ export async function resetSettlementFinancialBackfill(): Promise<SettlementFina
 
 export async function updateSharedCaseFields(
   caseId: string,
-  input: { status?: CaseStatus; caseType?: string; dateSigned?: string; dateOfIncident?: string | null },
+  input: {
+    status?: CaseStatus;
+    caseType?: string;
+    dateSigned?: string;
+    dateOfIncident?: string | null;
+    preferredLanguage?: "en" | "es";
+  },
   options?: { explicitStatus?: CaseStatus },
 ) {
   const sharedClient = await createSharedDataClient();
   const trackerClient = await createTrackerClient();
 
-  const payload: { status?: string; case_type?: string | null; date_of_incident?: string | null } = {};
+  const payload: {
+    status?: string;
+    case_type?: string | null;
+    date_of_incident?: string | null;
+    preferred_language?: string;
+  } = {};
 
   const record = await getCaseById(caseId);
   const linkedCaseId = record && isLinkedDocketFlowCase(record) ? record.shared.id : null;
@@ -1095,6 +1108,9 @@ export async function updateSharedCaseFields(
   }
   if (input.dateOfIncident !== undefined) {
     payload.date_of_incident = input.dateOfIncident ? toDateOnly(input.dateOfIncident) : null;
+  }
+  if (input.preferredLanguage !== undefined && linkedCaseId) {
+    payload.preferred_language = input.preferredLanguage;
   }
 
   if (Object.keys(payload).length > 0 && linkedCaseId) {
@@ -2668,6 +2684,7 @@ function rowToCaseRecord(
       dateOfIncident: normalizeOptionalDate(
         caseRow?.date_of_incident ?? toStringOrNull(trackerRow.date_of_incident_override),
       ),
+      preferredLanguage: normalizePreferredLanguage(caseRow?.preferred_language),
       createdAt: normalizeDate(caseRow?.created_at),
       updatedAt: normalizeDate(caseRow?.updated_at),
     },
@@ -2796,6 +2813,8 @@ function rowToTrackerEntry(
     settledAmount: toNumber(resultRow?.settlement_amount),
     disbursedAmount: resultRow?.check_disbursed_at ? toNumber(resultRow?.settlement_amount) : null,
     actualFeeValue: toNumber(resultRow?.attorney_fees),
+    clientPhone: toStringOrNull(row.client_phone),
+    quoContactId: toStringOrNull(row.quo_contact_id),
     updatedAt: toString(row.updated_at, new Date().toISOString()),
   };
   const result = applyDerivedSettlementResult(entry.result, entry);
@@ -2899,6 +2918,13 @@ async function runSlackTrackerSideEffects(
   const after: CaseRecord = { ...before, tracker: afterTracker };
   await notifySlackCaseStageUpdated(after, previousStage);
   await notifySlackTrackerSaved(after, patch);
+
+  try {
+    const { queueSmsApprovalsForStageChange } = await import("@/lib/sms/workflow");
+    await queueSmsApprovalsForStageChange(before, after, previousStage as CaseRecord["tracker"]["caseStage"] | undefined);
+  } catch (error) {
+    console.error("SMS automation queue failed", error);
+  }
 }
 
 function trackerUpdateToRow(input: TrackerUpdateInput, markReviewed = true) {
@@ -2935,6 +2961,7 @@ function trackerUpdateToRow(input: TrackerUpdateInput, markReviewed = true) {
   if (input.expectedDisbursementCount !== undefined) {
     row.expected_disbursement_count = Math.max(1, Math.trunc(input.expectedDisbursementCount));
   }
+  if (input.clientPhone !== undefined) row.client_phone = input.clientPhone;
   if (markReviewed) row.last_reviewed_at = new Date().toISOString();
 
   return row;

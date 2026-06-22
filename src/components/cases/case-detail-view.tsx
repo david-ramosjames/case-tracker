@@ -358,6 +358,7 @@ export function CaseDetailView({
       shared: {
         caseType: shared.caseType,
         dateOfIncident: shared.dateOfIncident,
+        preferredLanguage: shared.preferredLanguage,
       },
       tracker: {
         caseStage: nextTracker.caseStage,
@@ -383,6 +384,7 @@ export function CaseDetailView({
         forecastNotes: nextTracker.forecastNotes,
         multipleDisbursementsEnabled: nextTracker.multipleDisbursementsEnabled,
         expectedDisbursementCount: nextTracker.expectedDisbursementCount,
+        clientPhone: nextTracker.clientPhone,
         result: nextTracker.result,
         manualDisbursements: manualDisbursementsForSave(nextTracker.disbursements),
         disbursementOverrides: disbursementOverridesForSave(nextTracker.disbursements),
@@ -835,6 +837,8 @@ export function CaseDetailView({
                       <p className="mt-1 text-xs text-muted-foreground">Calculated from minimum value.</p>
                     </div>
                     <Info label="Policy Source" value={tracker.policyInfoSource ?? "Not set"} />
+                    <Info label="Client phone" value={tracker.clientPhone ?? "Not set — sync from Quo or edit"} />
+                    <Info label="Preferred language" value={shared.preferredLanguage === "es" ? "Spanish" : "English"} />
                     <Info label="Projected firm fee" value={formatCurrency(getProjectedFeeValue(record))} />
                   </div>
                 </div>
@@ -884,6 +888,24 @@ export function CaseDetailView({
                             {type}
                           </option>
                         ))}
+                      </Select>
+                    </Field>
+                    <Field label="Client phone (SMS)">
+                      <Input
+                        value={tracker.clientPhone ?? ""}
+                        placeholder="+15125551234"
+                        onChange={(event) => updateField("clientPhone", event.target.value.trim() || null)}
+                      />
+                    </Field>
+                    <Field label="Preferred language">
+                      <Select
+                        value={shared.preferredLanguage}
+                        onChange={(event) =>
+                          updateShared("preferredLanguage", event.target.value as typeof shared.preferredLanguage)
+                        }
+                      >
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
                       </Select>
                     </Field>
                     <Field label="Stage">
