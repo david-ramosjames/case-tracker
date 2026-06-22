@@ -5,12 +5,14 @@ import { sendSlackFieldReminders } from "@/lib/slack/field-reminder-notify";
 import { sendSlackMissingFieldNotices } from "@/lib/slack/missing-field-notify";
 import { processDailyPulseRecap } from "@/lib/slack/stage-confirmation";
 import { promoteOnboardingToTreatment, runDailyStageWorkflow } from "@/lib/slack/stage-workflow";
+import { syncQuoPhonesToTrackerIfConfigured } from "@/lib/sms/workflow";
 import { getCases } from "@/lib/supabase/services";
 import { errorMessage } from "@/lib/utils";
 
 export type DailyJobStep =
   | "sheetSync"
   | "settlementSync"
+  | "quoPhoneSync"
   | "treatmentPromotion"
   | "dailyPulse"
   | "missingFields"
@@ -98,6 +100,9 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
       : await runDailyJobStep("settlementSync", syncSettlementsFromGoogleSheetIfConfigured);
     if ("error" in settlementSyncResult && settlementSyncResult.error) errors.push(settlementSyncResult.error);
 
+    const quoPhoneSyncResult = await runDailyJobStep("quoPhoneSync", syncQuoPhonesToTrackerIfConfigured);
+    if (quoPhoneSyncResult.error) errors.push(quoPhoneSyncResult.error);
+
     const stageWorkflowResult = await runDailyJobStep("stageWorkflow", () =>
       runDailyStageWorkflow({ forcePulse: force }),
     );
@@ -131,6 +136,17 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
           details: [],
           error: "error" in settlementSyncResult ? settlementSyncResult.error?.error : undefined,
         } as const),
+      quoPhoneSync:
+        quoPhoneSyncResult.data ??
+        ({
+          configured: false,
+          totalContacts: 0,
+          matched: 0,
+          updated: 0,
+          skipped: 0,
+          conversationLinks: 0,
+          error: quoPhoneSyncResult.error?.error,
+        } as const),
       stageWorkflow: stageWorkflowResult.data ?? { error: stageWorkflowResult.error?.error },
       missingFields:
         missingFieldsResult.data ??
@@ -157,6 +173,14 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
     const result = await runDailyJobStep("settlementSync", () =>
       syncSettlementsFromGoogleSheetIfConfigured({ dryRun }),
     );
+    if (result.error) {
+      return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
+    }
+    return { ok: true, step, dryRun, result: result.data };
+  }
+
+  if (step === "quoPhoneSync") {
+    const result = await runDailyJobStep("quoPhoneSync", syncQuoPhonesToTrackerIfConfigured);
     if (result.error) {
       return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
     }

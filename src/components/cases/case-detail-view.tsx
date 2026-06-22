@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, MessageSquarePlus, Pencil, RefreshCw, Save, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, MessageSquarePlus, Pencil, Phone, RefreshCw, Save, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,6 +48,8 @@ import { disbursementWeight } from "@/lib/disbursements";
 import { type SessionUser } from "@/lib/auth/types";
 import { STAGE_SLACK_LABELS } from "@/lib/slack/enum-replies";
 import { formatSlackChannelLabel, getSlackChannelArchiveUrl } from "@/lib/slack/links";
+import { getQuoClientSmsUrl } from "@/lib/quo/links";
+import { formatClientPhoneDisplay } from "@/lib/quo/phone";
 import {
   type ActivityLogEntry,
   type CaseDisbursement,
@@ -136,6 +138,11 @@ export function CaseDetailView({
   const quarterlyCheckInDue = needsQuarterlyCheckIn(record);
   const slackChannelUrl = slackChannel ? getSlackChannelArchiveUrl(slackChannel) : null;
   const slackChannelLabel = slackChannel ? formatSlackChannelLabel(slackChannel.slackChannelName) : null;
+  const clientPhoneDisplay = formatClientPhoneDisplay(tracker.clientPhone);
+  const quoSmsUrl = getQuoClientSmsUrl({
+    quoConversationId: tracker.quoConversationId,
+    quoContactId: tracker.quoContactId,
+  });
 
   function recalcEstimatedFee(next: TrackerEntry) {
     if (!next.minimumValue) return next.estimatedFeeValue;
@@ -659,6 +666,30 @@ export function CaseDetailView({
                     No Slack channel mapped — import Client Contact Status in Settings.
                   </p>
                 )}
+                <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-navy-950">
+                  <span className="text-muted-foreground">Client phone</span>
+                  {clientPhoneDisplay ? (
+                    quoSmsUrl ? (
+                      <a
+                        href={quoSmsUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 font-medium text-pink-600 hover:text-pink-500"
+                      >
+                        <Phone className="h-3.5 w-3.5" />
+                        {clientPhoneDisplay}
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 font-medium">
+                        <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                        {clientPhoneDisplay}
+                      </span>
+                    )
+                  ) : (
+                    <span className="text-muted-foreground">Not set — sync from Quo on Client SMS settings</span>
+                  )}
+                </p>
               </div>
               <div className="flex flex-wrap gap-2">
                 {isOrphanTracker ? <Badge variant="warning">Orphaned tracker row</Badge> : null}

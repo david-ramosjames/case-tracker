@@ -135,11 +135,13 @@ export function ClientSmsSettingsView() {
         totalContacts?: number;
         matched?: number;
         updated?: number;
+        skipped?: number;
+        conversationLinks?: number;
         error?: string;
       };
       if (!response.ok) throw new Error(body.error ?? "Sync failed.");
       setMessage(
-        `Synced Quo contacts: ${body.updated ?? 0} case(s) updated (${body.matched ?? 0} matched of ${body.totalContacts ?? 0} directory rows with case numbers).`,
+        `Synced Quo contacts: ${body.updated ?? 0} case(s) updated, ${body.skipped ?? 0} unchanged (${body.matched ?? 0} matched of ${body.totalContacts ?? 0} directory rows; ${body.conversationLinks ?? 0} inbox links).`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed.");
@@ -155,7 +157,8 @@ export function ClientSmsSettingsView() {
           <CardTitle>Quo contact sync</CardTitle>
           <CardDescription>
             Pull client phone numbers from the Quo directory. Names ending in a case number (e.g. &quot;Mara Hernandez 1570&quot; or
-            &quot;Kisha Williams 1277 &amp; 1280&quot;) are matched to tracker cases.
+            &quot;Kisha Williams 1277 &amp; 1280&quot;) are matched to tracker cases. Sync runs automatically each morning with the daily
+            cron (9 AM Central) when Quo is configured; use the button below after bulk Quo imports or when you need an immediate refresh.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">

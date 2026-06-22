@@ -1,4 +1,5 @@
 import { getQuoApiKey, getQuoFromPhone } from "@/lib/quo/config";
+import { normalizePhoneForComparison } from "@/lib/quo/phone";
 
 const QUO_API_BASE = "https://api.quo.com/v1";
 
@@ -26,6 +27,16 @@ type QuoListContactsResponse = {
 type QuoSendMessageResponse = {
   id?: string;
   data?: { id?: string };
+};
+
+type QuoConversationRow = {
+  id: string;
+  participants?: string[];
+};
+
+type QuoListConversationsResponse = {
+  data: QuoConversationRow[];
+  nextPageToken?: string | null;
 };
 
 function quoHeaders() {
@@ -85,6 +96,53 @@ export async function listAllQuoContacts(): Promise<QuoContact[]> {
   } while (pageToken);
 
   return contacts;
+}
+
+export async function listQuoConversationsForLine(): Promise<QuoConversationRow[]> {
+  const fromPhone = getQuoFromPhone();
+  const conversations: QuoConversationRow[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({ maxResults: "100", phoneNumbers: fromPhone });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const response = await fetch(`${QUO_API_BASE}/conversations?${params.toString()}`, {
+      headers: quoHeaders(),
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Quo list conversations failed (${response.status}): ${body}`);
+    }
+
+    const payload = (await response.json()) as QuoListConversationsResponse;
+    conversations.push(...(payload.data ?? []));
+    pageToken = payload.nextPageToken?.trim() || undefined;
+  } while (pageToken);
+
+  return conversations;
+}
+
+/** Map client participant phone (E.164) to Quo conversation id on the firm line. */
+export async function buildQuoConversationByParticipantPhone() {
+  const fromPhone = normalizePhoneForComparison(getQuoFromPhone());
+  const conversations = await listQuoConversationsForLine();
+  const byPhone = new Map<string, string>();
+
+  for (const conversation of conversations) {
+    const conversationId = conversation.id?.trim();
+    if (!conversationId) continue;
+
+    for (const participant of conversation.participants ?? []) {
+      const normalized = normalizePhoneForComparison(participant);
+      if (!normalized || normalized === fromPhone) continue;
+      if (!byPhone.has(normalized)) byPhone.set(normalized, conversationId);
+    }
+  }
+
+  return byPhone;
 }
 
 export async function sendQuoTextMessage(input: { to: string; content: string }) {

@@ -1,7 +1,9 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { buildQuoContactMatches } from "@/lib/quo/contact-sync";
+import { buildQuoConversationByParticipantPhone } from "@/lib/quo/client";
 import { isQuoEnabled } from "@/lib/quo/config";
+import { normalizePhoneForComparison } from "@/lib/quo/phone";
 import { sendQuoTextMessage } from "@/lib/quo/client";
 import { renderSmsMessage } from "@/lib/sms/message-template";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
@@ -185,11 +187,31 @@ export async function approveAndSendSmsPendingApproval(approvalId: string) {
   }
 }
 
+export async function syncQuoPhonesToTrackerIfConfigured() {
+  if (!isQuoEnabled()) {
+    return {
+      configured: false,
+      totalContacts: 0,
+      matched: 0,
+      updated: 0,
+      skipped: 0,
+      conversationLinks: 0,
+    };
+  }
+
+  const result = await syncQuoPhonesToTracker();
+  return { configured: true, ...result };
+}
+
 export async function syncQuoPhonesToTracker() {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required.");
 
-  const matches = await buildQuoContactMatches();
+  const [matches, conversationByPhone] = await Promise.all([
+    buildQuoContactMatches(),
+    buildQuoConversationByParticipantPhone(),
+  ]);
+
   const byCaseNumber = new Map<string, (typeof matches)[number]>();
   for (const match of matches) {
     const key = cleanCaseNumber(match.caseNumber);
@@ -199,25 +221,48 @@ export async function syncQuoPhonesToTracker() {
 
   const { data: trackerRows, error } = await admin
     .from("case_tracker_entries")
-    .select("id, case_number")
+    .select("id, case_number, client_phone, quo_contact_id, quo_conversation_id")
     .not("case_number", "is", null);
 
   if (error) throw new Error(error.message);
 
   let updated = 0;
   let matched = 0;
+  let skipped = 0;
+  let conversationLinks = 0;
 
   for (const row of trackerRows ?? []) {
     const caseNumber = cleanCaseNumber(String(row.case_number ?? ""));
     const match = byCaseNumber.get(caseNumber);
-    if (!match) continue;
-    matched += 1;
+
+    const nextPhone = match?.phone?.trim() || String(row.client_phone ?? "").trim() || null;
+    const nextContactId = match?.quoContactId?.trim() || String(row.quo_contact_id ?? "").trim() || null;
+    const nextConversationId = nextPhone
+      ? conversationByPhone.get(normalizePhoneForComparison(nextPhone)) ?? null
+      : null;
+
+    if (match) matched += 1;
+    if (nextConversationId) conversationLinks += 1;
+
+    const currentPhone = String(row.client_phone ?? "").trim() || null;
+    const currentContactId = String(row.quo_contact_id ?? "").trim() || null;
+    const currentConversationId = String(row.quo_conversation_id ?? "").trim() || null;
+
+    if (
+      currentPhone === nextPhone &&
+      currentContactId === nextContactId &&
+      currentConversationId === nextConversationId
+    ) {
+      skipped += 1;
+      continue;
+    }
 
     const { error: updateError } = await admin
       .from("case_tracker_entries")
       .update({
-        client_phone: match.phone,
-        quo_contact_id: match.quoContactId,
+        client_phone: nextPhone,
+        quo_contact_id: nextContactId,
+        quo_conversation_id: nextConversationId,
         updated_at: new Date().toISOString(),
       })
       .eq("id", row.id);
@@ -225,5 +270,5 @@ export async function syncQuoPhonesToTracker() {
     if (!updateError) updated += 1;
   }
 
-  return { totalContacts: matches.length, matched, updated };
+  return { totalContacts: matches.length, matched, updated, skipped, conversationLinks };
 }

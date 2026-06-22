@@ -8,6 +8,7 @@ import { errorMessage } from "@/lib/utils";
 const VALID_STEPS: DailyJobStep[] = [
   "sheetSync",
   "settlementSync",
+  "quoPhoneSync",
   "treatmentPromotion",
   "dailyPulse",
   "missingFields",
