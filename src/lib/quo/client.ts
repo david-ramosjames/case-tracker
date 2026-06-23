@@ -45,6 +45,7 @@ type QuoListPhoneNumbersResponse = {
 
 type QuoMessageRow = {
   conversationId?: string | null;
+  phoneNumberId?: string | null;
   createdAt?: string | null;
 };
 
@@ -56,6 +57,7 @@ type QuoConversationRow = {
   id: string;
   name?: string | null;
   participants?: string[];
+  phoneNumberId?: string | null;
   lastActivityAt?: string | null;
 };
 
@@ -67,6 +69,7 @@ type QuoListConversationsResponse = {
 export type QuoInboxMatch = {
   phone: string;
   conversationId: string;
+  phoneNumberId: string;
 };
 
 let cachedQuoPhoneNumberId: string | null = null;
@@ -197,6 +200,7 @@ export async function lookupQuoInboxByContactDisplayName(displayName: string): P
   if (!target) return null;
 
   const firmLine = normalizePhoneForComparison(getQuoFromPhone());
+  const defaultPhoneNumberId = await resolveQuoPhoneNumberId();
   const conversations = await listRecentQuoConversations();
 
   for (const conversation of conversations) {
@@ -208,15 +212,19 @@ export async function lookupQuoInboxByContactDisplayName(displayName: string): P
 
     const conversationLabel = normalizeContactLabel(conversation.name ?? "");
     if (conversationLabel && (conversationLabel === target || contactNamesSimilar(displayName, conversation.name ?? ""))) {
-      return { phone: participant, conversationId };
+      return {
+        phone: participant,
+        conversationId,
+        phoneNumberId: conversation.phoneNumberId?.trim() || defaultPhoneNumberId,
+      };
     }
   }
 
   return null;
 }
 
-/** Resolve inbox conversation id for one client phone via the messages API (most recent thread). */
-export async function lookupQuoConversationIdForClientPhone(clientPhone: string) {
+/** Resolve inbox thread for one client phone via the messages API (most recent activity). */
+export async function lookupQuoInboxForClientPhone(clientPhone: string): Promise<QuoInboxMatch | null> {
   const participant = normalizePhoneForComparison(clientPhone);
   if (!participant) return null;
 
@@ -243,7 +251,15 @@ export async function lookupQuoConversationIdForClientPhone(clientPhone: string)
     return rightTime - leftTime;
   });
 
-  return messages[0]?.conversationId?.trim() || null;
+  const message = messages[0];
+  const conversationId = message?.conversationId?.trim();
+  if (!conversationId) return null;
+
+  return {
+    phone: participant,
+    conversationId,
+    phoneNumberId: message.phoneNumberId?.trim() || phoneNumberId,
+  };
 }
 
 /** Resolve inbox thread for a matched Quo contact (phone profile, messages API, then inbox name scan). */
@@ -254,10 +270,8 @@ export async function lookupQuoInboxForContact(input: {
   const normalizedPhone = input.phone ? normalizePhoneForComparison(input.phone) : "";
 
   if (normalizedPhone) {
-    const conversationId = await lookupQuoConversationIdForClientPhone(normalizedPhone);
-    if (conversationId) {
-      return { phone: normalizedPhone, conversationId };
-    }
+    const inbox = await lookupQuoInboxForClientPhone(normalizedPhone);
+    if (inbox) return inbox;
   }
 
   return lookupQuoInboxByContactDisplayName(input.displayName);
@@ -265,13 +279,13 @@ export async function lookupQuoInboxForContact(input: {
 
 /** Look up inbox conversation ids for specific client phones (one API call per phone). */
 export async function buildQuoConversationByParticipantPhones(phones: string[]) {
-  const byPhone = new Map<string, string>();
+  const byPhone = new Map<string, QuoInboxMatch>();
   const unique = [...new Set(phones.map((phone) => normalizePhoneForComparison(phone)).filter(Boolean))];
 
   for (const phone of unique) {
     try {
-      const conversationId = await lookupQuoConversationIdForClientPhone(phone);
-      if (conversationId) byPhone.set(phone, conversationId);
+      const inbox = await lookupQuoInboxForClientPhone(phone);
+      if (inbox) byPhone.set(phone, inbox);
     } catch (error) {
       console.warn(`Quo conversation lookup failed for ${phone}`, error);
     }

@@ -141,6 +141,7 @@ export function CaseDetailView({
   const clientPhoneDisplay = formatClientPhoneDisplay(tracker.clientPhone);
   const quoSmsUrl = getQuoClientSmsUrl({
     quoConversationId: tracker.quoConversationId,
+    quoPhoneNumberId: tracker.quoPhoneNumberId,
   });
 
   function recalcEstimatedFee(next: TrackerEntry) {

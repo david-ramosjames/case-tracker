@@ -186,6 +186,7 @@ export type TrackerEntry = {
   clientPhone: string | null;
   quoContactId: string | null;
   quoConversationId: string | null;
+  quoPhoneNumberId: string | null;
   updatedAt: string;
 };
 

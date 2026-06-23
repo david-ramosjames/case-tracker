@@ -2817,6 +2817,7 @@ function rowToTrackerEntry(
     clientPhone: toStringOrNull(row.client_phone),
     quoContactId: toStringOrNull(row.quo_contact_id),
     quoConversationId: toStringOrNull(row.quo_conversation_id),
+    quoPhoneNumberId: toStringOrNull(row.quo_phone_number_id),
     updatedAt: toString(row.updated_at, new Date().toISOString()),
   };
   const result = applyDerivedSettlementResult(entry.result, entry);

@@ -212,7 +212,7 @@ export async function syncQuoPhonesToTracker() {
 
   const { data: trackerRows, error } = await admin
     .from("case_tracker_entries")
-    .select("id, case_number, client_name_snapshot, client_phone, quo_contact_id, quo_conversation_id")
+    .select("id, case_number, client_name_snapshot, client_phone, quo_contact_id, quo_conversation_id, quo_phone_number_id")
     .not("case_number", "is", null);
 
   if (error) throw new Error(error.message);
@@ -255,16 +255,18 @@ export async function syncQuoPhonesToTracker() {
     const currentPhone = String(row.client_phone ?? "").trim() || null;
     const currentContactId = String(row.quo_contact_id ?? "").trim() || null;
     const currentConversationId = String(row.quo_conversation_id ?? "").trim() || null;
+    const currentPhoneNumberId = String(row.quo_phone_number_id ?? "").trim() || null;
 
     let nextPhone = match?.phone?.trim() || currentPhone || null;
-    let nextContactId = match?.quoContactId ?? (currentContactId || null);
+    const nextContactId = match?.quoContactId ?? (currentContactId || null);
     let nextConversationId = currentConversationId;
+    let nextPhoneNumberId = currentPhoneNumberId;
 
     const contactChanged = Boolean(match && nextContactId !== currentContactId);
     const phoneChanged = Boolean(match?.phone?.trim()) && nextPhone !== currentPhone;
     const needsInboxLookup =
       Boolean(match) &&
-      (contactChanged || phoneChanged || !currentConversationId || !nextPhone);
+      (contactChanged || phoneChanged || !currentConversationId || !currentPhoneNumberId || !nextPhone);
 
     if (match && needsInboxLookup) {
       const inbox = await resolveInboxForMatch({
@@ -275,11 +277,14 @@ export async function syncQuoPhonesToTracker() {
       if (inbox) {
         nextPhone = inbox.phone;
         nextConversationId = inbox.conversationId;
+        nextPhoneNumberId = inbox.phoneNumberId;
       } else if (contactChanged || phoneChanged) {
         nextConversationId = null;
+        nextPhoneNumberId = null;
       }
     } else if (contactChanged) {
       nextConversationId = null;
+      nextPhoneNumberId = null;
     }
 
     if (match) matched += 1;
@@ -288,7 +293,8 @@ export async function syncQuoPhonesToTracker() {
     if (
       currentPhone === nextPhone &&
       currentContactId === nextContactId &&
-      currentConversationId === nextConversationId
+      currentConversationId === nextConversationId &&
+      currentPhoneNumberId === nextPhoneNumberId
     ) {
       skipped += 1;
       continue;
@@ -300,6 +306,7 @@ export async function syncQuoPhonesToTracker() {
         client_phone: nextPhone,
         quo_contact_id: nextContactId,
         quo_conversation_id: nextConversationId,
+        quo_phone_number_id: nextPhoneNumberId,
         updated_at: new Date().toISOString(),
       })
       .eq("id", row.id);
