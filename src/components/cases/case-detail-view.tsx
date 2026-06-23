@@ -141,7 +141,6 @@ export function CaseDetailView({
   const clientPhoneDisplay = formatClientPhoneDisplay(tracker.clientPhone);
   const quoSmsUrl = getQuoClientSmsUrl({
     quoConversationId: tracker.quoConversationId,
-    quoContactId: tracker.quoContactId,
   });
 
   function recalcEstimatedFee(next: TrackerEntry) {
@@ -679,6 +678,7 @@ export function CaseDetailView({
                         <Phone className="h-3.5 w-3.5" />
                         {clientPhoneDisplay}
                         <ExternalLink className="h-3.5 w-3.5" />
+                        <span className="sr-only">Open Quo inbox</span>
                       </a>
                     ) : (
                       <span className="inline-flex items-center gap-1 font-medium">

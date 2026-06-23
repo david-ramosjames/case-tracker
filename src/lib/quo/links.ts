@@ -16,10 +16,7 @@ export function getQuoConversationUrl(quoConversationId: string | null | undefin
   return `${getQuoAppBaseUrl()}/inbox/${id}`;
 }
 
-/** Prefer inbox thread when known; otherwise open the Quo contact record. */
-export function getQuoClientSmsUrl(input: {
-  quoConversationId?: string | null;
-  quoContactId?: string | null;
-}) {
-  return getQuoConversationUrl(input.quoConversationId) ?? getQuoContactUrl(input.quoContactId);
+/** Open the Quo inbox thread — only when a conversation id is known. */
+export function getQuoClientSmsUrl(input: { quoConversationId?: string | null }) {
+  return getQuoConversationUrl(input.quoConversationId);
 }

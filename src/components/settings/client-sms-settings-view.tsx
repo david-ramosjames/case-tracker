@@ -137,11 +137,13 @@ export function ClientSmsSettingsView() {
         updated?: number;
         skipped?: number;
         conversationLinks?: number;
+        conversationSyncWarning?: string | null;
         error?: string;
       };
       if (!response.ok) throw new Error(body.error ?? "Sync failed.");
+      const warning = body.conversationSyncWarning?.trim();
       setMessage(
-        `Synced Quo contacts: ${body.updated ?? 0} case(s) updated, ${body.skipped ?? 0} unchanged (${body.matched ?? 0} matched of ${body.totalContacts ?? 0} directory rows; ${body.conversationLinks ?? 0} inbox links).`,
+        `Synced Quo contacts: ${body.updated ?? 0} case(s) updated, ${body.skipped ?? 0} unchanged (${body.matched ?? 0} matched of ${body.totalContacts ?? 0} directory rows; ${body.conversationLinks ?? 0} inbox links).${warning ? ` Inbox links skipped: ${warning}` : ""}`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed.");

@@ -1,7 +1,7 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { buildQuoContactMatches } from "@/lib/quo/contact-sync";
-import { buildQuoConversationByParticipantPhone } from "@/lib/quo/client";
+import { buildQuoConversationByParticipantPhones } from "@/lib/quo/client";
 import { isQuoEnabled } from "@/lib/quo/config";
 import { normalizePhoneForComparison } from "@/lib/quo/phone";
 import { sendQuoTextMessage } from "@/lib/quo/client";
@@ -196,6 +196,7 @@ export async function syncQuoPhonesToTrackerIfConfigured() {
       updated: 0,
       skipped: 0,
       conversationLinks: 0,
+      conversationSyncWarning: null as string | null,
     };
   }
 
@@ -207,10 +208,7 @@ export async function syncQuoPhonesToTracker() {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required.");
 
-  const [matches, conversationByPhone] = await Promise.all([
-    buildQuoContactMatches(),
-    buildQuoConversationByParticipantPhone(),
-  ]);
+  const matches = await buildQuoContactMatches();
 
   const byCaseNumber = new Map<string, (typeof matches)[number]>();
   for (const match of matches) {
@@ -226,6 +224,41 @@ export async function syncQuoPhonesToTracker() {
 
   if (error) throw new Error(error.message);
 
+  const conversationByPhone = new Map<string, string>();
+  const phonesNeedingConversation = new Set<string>();
+
+  for (const row of trackerRows ?? []) {
+    const caseNumber = cleanCaseNumber(String(row.case_number ?? ""));
+    const match = byCaseNumber.get(caseNumber);
+    const nextPhone = match?.phone?.trim() || String(row.client_phone ?? "").trim() || null;
+    if (!nextPhone) continue;
+
+    const normalizedPhone = normalizePhoneForComparison(nextPhone);
+    const currentPhone = String(row.client_phone ?? "").trim() || null;
+    const currentConversationId = String(row.quo_conversation_id ?? "").trim() || null;
+
+    if (currentConversationId && currentPhone === nextPhone) {
+      conversationByPhone.set(normalizedPhone, currentConversationId);
+      continue;
+    }
+
+    phonesNeedingConversation.add(normalizedPhone);
+  }
+
+  let conversationSyncWarning: string | null = null;
+  if (phonesNeedingConversation.size > 0) {
+    try {
+      const lookedUp = await buildQuoConversationByParticipantPhones([...phonesNeedingConversation]);
+      for (const [phone, conversationId] of lookedUp) {
+        conversationByPhone.set(phone, conversationId);
+      }
+    } catch (error) {
+      conversationSyncWarning =
+        error instanceof Error ? error.message : "Quo inbox lookup failed; phones still synced.";
+      console.warn("Quo conversation sync skipped", conversationSyncWarning);
+    }
+  }
+
   let updated = 0;
   let matched = 0;
   let skipped = 0;
@@ -237,16 +270,17 @@ export async function syncQuoPhonesToTracker() {
 
     const nextPhone = match?.phone?.trim() || String(row.client_phone ?? "").trim() || null;
     const nextContactId = match?.quoContactId?.trim() || String(row.quo_contact_id ?? "").trim() || null;
-    const nextConversationId = nextPhone
-      ? conversationByPhone.get(normalizePhoneForComparison(nextPhone)) ?? null
-      : null;
-
-    if (match) matched += 1;
-    if (nextConversationId) conversationLinks += 1;
-
     const currentPhone = String(row.client_phone ?? "").trim() || null;
     const currentContactId = String(row.quo_contact_id ?? "").trim() || null;
     const currentConversationId = String(row.quo_conversation_id ?? "").trim() || null;
+    const lookedUpConversationId = nextPhone
+      ? conversationByPhone.get(normalizePhoneForComparison(nextPhone)) ?? null
+      : null;
+    const nextConversationId =
+      lookedUpConversationId ?? (currentPhone === nextPhone ? currentConversationId : null);
+
+    if (match) matched += 1;
+    if (nextConversationId) conversationLinks += 1;
 
     if (
       currentPhone === nextPhone &&
@@ -270,5 +304,5 @@ export async function syncQuoPhonesToTracker() {
     if (!updateError) updated += 1;
   }
 
-  return { totalContacts: matches.length, matched, updated, skipped, conversationLinks };
+  return { totalContacts: matches.length, matched, updated, skipped, conversationLinks, conversationSyncWarning };
 }
