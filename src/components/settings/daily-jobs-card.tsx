@@ -198,7 +198,8 @@ function formatJobPreviewSummary(step: DailyJobStep, body: Record<string, unknow
 
   if (step === "settlementSync" && result) {
     if (!result.configured) return "Preview: Google Sheets settlement sync is not configured.";
-    return `Preview: would sync ${result.disbursementsSynced ?? 0} disbursement row(s) across ${result.casesProcessed ?? 0} case(s), update ${result.settlementsUpdated ?? 0} settlement field(s), auto-settle ${result.stagesAutoSettled ?? 0} case(s). No changes saved.`;
+    const casesWouldChange = result.casesProcessed ?? 0;
+    return `Preview: would change ${casesWouldChange} case(s) (${result.settlementsUpdated ?? 0} settlement field update(s), ${result.stagesAutoSettled ?? 0} auto-settle(s)). No changes saved.`;
   }
 
   if (step === "treatmentPromotion" && result) {
@@ -304,13 +305,10 @@ function DailyJobPreviewPanel({
     }
     return (
       <PreviewTable
-        headers={["Case #", "Status", "Summary", "Disburse", "Disbursed"]}
+        headers={["Case #", "What would change"]}
         rows={details.map((item) => [
           item.caseNumber,
-          item.status,
-          item.summary,
-          item.disburseDate ? formatOptionalDate(item.disburseDate) : "—",
-          item.disbursedStatus ?? "—",
+          (item.changes?.length ? item.changes.join("; ") : item.summary) || "—",
         ])}
       />
     );

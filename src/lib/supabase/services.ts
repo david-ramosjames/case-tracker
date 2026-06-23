@@ -1225,6 +1225,8 @@ export type SettlementSheetSyncCaseDetail = {
   expectedPartyCount?: number;
   parties?: SettlementSheetSyncPartyDetail[];
   summary: string;
+  /** Dry-run only: field-level diffs vs current tracker data. */
+  changes?: string[];
 };
 
 export type SettlementSheetSyncResult = {
@@ -1643,47 +1645,119 @@ function buildSettlementSyncCaseSummary(input: {
   return parts.join("; ");
 }
 
-function settlementResultPayloadWouldChange(
+function formatSettlementFieldValue(
+  value: string | number | null | undefined,
+  kind: "date" | "money" | "text",
+): string {
+  if (value == null || value === "") return "—";
+  if (kind === "date") return toDateOnly(String(value)) ?? "—";
+  if (kind === "money") {
+    const amount = typeof value === "number" ? value : Number(value);
+    return Number.isFinite(amount) ? `$${amount.toLocaleString("en-US")}` : "—";
+  }
+  return String(value);
+}
+
+function pushSettlementFieldChange(
+  changes: string[],
+  label: string,
+  from: string | number | null | undefined,
+  to: string | number | null | undefined,
+  kind: "date" | "money" | "text",
+) {
+  const normalize = (value: string | number | null | undefined) => {
+    if (value == null || value === "") return null;
+    if (kind === "date") return toDateOnly(String(value));
+    if (kind === "money") {
+      const amount = typeof value === "number" ? value : Number(value);
+      return Number.isFinite(amount) ? amount : null;
+    }
+    return String(value);
+  };
+  const fromNorm = normalize(from);
+  const toNorm = normalize(to);
+  if (fromNorm !== toNorm) {
+    changes.push(
+      `${label}: ${formatSettlementFieldValue(fromNorm, kind)} → ${formatSettlementFieldValue(toNorm, kind)}`,
+    );
+  }
+}
+
+function collectSettlementResultChanges(
   existingResult: SettlementResult | null,
   resultPayload: {
     settlement_date: string | null;
     settlement_amount: number | null;
     attorney_fees: number | null;
-    fee_percent: number | null;
     disburse_date: string | null;
     disbursed_status: DisbursedStatus;
     result_quarter: string | null;
   },
-): boolean {
-  if (!existingResult) {
-    return (
-      resultPayload.settlement_date != null ||
-      resultPayload.settlement_amount != null ||
-      resultPayload.attorney_fees != null ||
-      resultPayload.disburse_date != null ||
-      resultPayload.disbursed_status === "Yes" ||
-      resultPayload.result_quarter != null
-    );
-  }
-
-  const normDate = (value: string | null | undefined) => (value ? toDateOnly(value) : null);
-  return (
-    normDate(resultPayload.settlement_date) !== normDate(existingResult.settlementDate) ||
-    normDate(resultPayload.disburse_date) !== normDate(existingResult.disburseDate) ||
-    resultPayload.disbursed_status !== existingResult.disbursedStatus ||
-    (resultPayload.settlement_amount ?? null) !== (existingResult.settlementAmount ?? null) ||
-    (resultPayload.attorney_fees ?? null) !== (existingResult.attorneyFees ?? null) ||
-    (resultPayload.result_quarter ?? null) !== (existingResult.resultQuarter ?? null) ||
-    (resultPayload.fee_percent ?? null) !== (existingResult.feePercent ?? null)
+): string[] {
+  const changes: string[] = [];
+  pushSettlementFieldChange(
+    changes,
+    "Settlement date",
+    existingResult?.settlementDate ?? null,
+    resultPayload.settlement_date,
+    "date",
   );
+  pushSettlementFieldChange(
+    changes,
+    "Disburse date",
+    existingResult?.disburseDate ?? null,
+    resultPayload.disburse_date,
+    "date",
+  );
+  pushSettlementFieldChange(
+    changes,
+    "Gross settlement",
+    existingResult?.settlementAmount ?? null,
+    resultPayload.settlement_amount,
+    "money",
+  );
+  pushSettlementFieldChange(
+    changes,
+    "Attorney fees",
+    existingResult?.attorneyFees ?? null,
+    resultPayload.attorney_fees,
+    "money",
+  );
+  pushSettlementFieldChange(
+    changes,
+    "Disbursed",
+    existingResult?.disbursedStatus ?? "No",
+    resultPayload.disbursed_status,
+    "text",
+  );
+  pushSettlementFieldChange(
+    changes,
+    "Result quarter",
+    existingResult?.resultQuarter ?? null,
+    resultPayload.result_quarter,
+    "text",
+  );
+  return changes;
 }
 
-async function sheetDisbursementsWouldChange(
+type SheetDisbursementRow = {
+  sheet_row_key: string | null;
+  disburse_date: string | null;
+  settlement_date: string | null;
+  settlement_amount: number | null;
+  attorney_fees: number | null;
+  pending_remaining: boolean | null;
+  weight: number | null;
+  label: string | null;
+};
+
+async function collectSheetDisbursementChanges(
   admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
   caseNumber: string,
   item: SettlementSheetCasePayload,
   weight: number,
-): Promise<boolean> {
+): Promise<string[]> {
+  const changes: string[] = [];
   const { data: existingRows, error } = await admin
     .from("case_tracker_disbursements")
     .select(
@@ -1694,34 +1768,76 @@ async function sheetDisbursementsWouldChange(
   if (error) throw new Error(error.message);
 
   const existingByKey = new Map(
-    (existingRows ?? []).map((row) => [toString(row.sheet_row_key, ""), row]),
+    (existingRows ?? []).map((row) => [toString(row.sheet_row_key, ""), row as SheetDisbursementRow]),
   );
   const incomingKeys = new Set(item.disbursements.map((disbursement) => disbursement.sheetRowKey));
 
-  if (existingByKey.size !== incomingKeys.size) return true;
-  for (const key of existingByKey.keys()) {
-    if (!incomingKeys.has(key)) return true;
+  for (const [key, existing] of existingByKey.entries()) {
+    if (!incomingKeys.has(key)) {
+      const label = existing.label?.trim() || "Party";
+      changes.push(`Remove sheet party: ${label}`);
+    }
   }
 
   for (const disbursement of item.disbursements) {
     const existing = existingByKey.get(disbursement.sheetRowKey);
-    if (!existing) return true;
+    const partyName = disbursement.partyLabel?.trim() || "Party";
+    if (!existing) {
+      changes.push(`Add sheet party: ${partyName}`);
+      continue;
+    }
+
     const disburseDate = disbursement.disburseDate ? toDateOnly(disbursement.disburseDate) : null;
     const settlementDate = disbursement.settlementDate ? toDateOnly(disbursement.settlementDate) : null;
-    if (
-      toStringOrNull(existing.disburse_date) !== disburseDate ||
-      toStringOrNull(existing.settlement_date) !== settlementDate ||
-      toNumber(existing.settlement_amount) !== disbursement.settlementAmount ||
-      toNumber(existing.attorney_fees) !== disbursement.attorneyFees ||
-      toBoolean(existing.pending_remaining, false) !== (disbursement.pendingRemaining ?? false) ||
-      toNumber(existing.weight) !== weight ||
-      toStringOrNull(existing.label) !== disbursement.partyLabel
-    ) {
-      return true;
+    pushSettlementFieldChange(
+      changes,
+      `${partyName} settlement date`,
+      existing.settlement_date,
+      settlementDate,
+      "date",
+    );
+    pushSettlementFieldChange(
+      changes,
+      `${partyName} disburse date`,
+      existing.disburse_date,
+      disburseDate,
+      "date",
+    );
+    pushSettlementFieldChange(
+      changes,
+      `${partyName} gross`,
+      existing.settlement_amount,
+      disbursement.settlementAmount,
+      "money",
+    );
+    pushSettlementFieldChange(
+      changes,
+      `${partyName} fees`,
+      existing.attorney_fees,
+      disbursement.attorneyFees,
+      "money",
+    );
+    const existingPending = toBoolean(existing.pending_remaining, false);
+    const incomingPending = disbursement.pendingRemaining ?? false;
+    if (existingPending !== incomingPending) {
+      changes.push(
+        `${partyName} pending: ${existingPending ? "yes" : "no"} → ${incomingPending ? "yes" : "no"}`,
+      );
+    }
+    const existingWeight = toNumber(existing.weight);
+    if (existingWeight != null && existingWeight !== weight) {
+      changes.push(`${partyName} weight: ${existingWeight} → ${weight}`);
+    }
+    const existingLabel = existing.label?.trim() || null;
+    const incomingLabel = disbursement.partyLabel?.trim() || null;
+    if (existingLabel !== incomingLabel) {
+      changes.push(
+        `${partyName} label: ${formatSettlementFieldValue(existingLabel, "text")} → ${formatSettlementFieldValue(incomingLabel, "text")}`,
+      );
     }
   }
 
-  return false;
+  return changes;
 }
 
 export type ClearSheetSettlementSyncResult = {
@@ -1940,8 +2056,6 @@ export async function syncSettlementsFromSheet(
         await upsertDisbursementBySheetRowKey(admin, payload);
         disbursementsSynced += 1;
       }
-    } else {
-      disbursementsSynced += item.disbursements.length;
     }
 
     let mappedDisbursements: CaseDisbursement[];
@@ -2067,13 +2181,10 @@ export async function syncSettlementsFromSheet(
       }
     }
 
-    casesProcessed += 1;
-    if (resolvedSettlementDate || resolvedDisburseDate) settlementsUpdated += 1;
-
     let stageAutoSettled = false;
     if (resolvedSettlementDate && item.fullSettlement) {
-      const currentStage = normalizeStage(toStringOrNull(trackerRow.case_stage));
-      if (currentStage !== "Settled") {
+      const stageBeforeSettle = normalizeStage(toStringOrNull(trackerRow.case_stage));
+      if (stageBeforeSettle !== "Settled") {
         stageAutoSettled = true;
         if (!dryRun) {
           const record = await getCaseById(linkedCaseId ?? trackerEntryId);
@@ -2086,16 +2197,14 @@ export async function syncSettlementsFromSheet(
             });
             stagesAutoSettled += 1;
           }
-        } else {
-          stagesAutoSettled += 1;
         }
       }
     }
 
     let stageRestored: CaseStage | null = null;
     if (!item.fullSettlement) {
-      const currentStage = normalizeStage(toStringOrNull(trackerRow.case_stage));
-      if (currentStage === "Settled") {
+      const stageBeforeRestore = normalizeStage(toStringOrNull(trackerRow.case_stage));
+      if (stageBeforeRestore === "Settled") {
         stageRestored = await lookupPriorCaseStageBeforeSettlement(admin, trackerEntryId);
         if (!dryRun && stageRestored) {
           const { error: stageError } = await admin
@@ -2103,8 +2212,6 @@ export async function syncSettlementsFromSheet(
             .update({ case_stage: toDatabaseStage(stageRestored) })
             .eq("id", trackerEntryId);
           if (stageError) throw new Error(stageError.message);
-          stagesRestored += 1;
-        } else if (dryRun && stageRestored) {
           stagesRestored += 1;
         }
       }
@@ -2119,17 +2226,56 @@ export async function syncSettlementsFromSheet(
     }
 
     const pendingPartyCount = item.disbursements.filter((row) => row.pendingRemaining).length;
+    const currentStage = normalizeStage(toStringOrNull(trackerRow.case_stage));
     const expectedCountWouldChange = totalSlots !== attorneyExpected || partyCount > totalSlots;
-    const wouldChange =
-      stageAutoSettled ||
-      Boolean(stageRestored) ||
-      expectedCountWouldChange ||
-      settlementResultPayloadWouldChange(existingResultModel, resultPayload) ||
-      (dryRun
-        ? await sheetDisbursementsWouldChange(admin, resolvedCaseNumber, item, weight)
-        : true);
+    const previewChanges: string[] = [];
+    if (dryRun) {
+      previewChanges.push(...collectSettlementResultChanges(existingResultModel, resultPayload));
+      previewChanges.push(...(await collectSheetDisbursementChanges(admin, resolvedCaseNumber, item, weight)));
+      if (expectedCountWouldChange) {
+        const newCount = Math.max(totalSlots, partyCount);
+        if (newCount !== attorneyExpected) {
+          previewChanges.push(`Party count: ${attorneyExpected} → ${newCount}`);
+        }
+      }
+      if (stageAutoSettled) {
+        previewChanges.push(`Stage: ${currentStage} → Settled`);
+      } else if (stageRestored) {
+        previewChanges.push(`Stage: Settled → ${stageRestored}`);
+      }
+    }
+    const wouldChange = dryRun ? previewChanges.length > 0 : true;
 
     if (!dryRun || wouldChange) {
+      if (!dryRun) {
+        casesProcessed += 1;
+        if (resolvedSettlementDate || resolvedDisburseDate) settlementsUpdated += 1;
+      } else {
+        casesProcessed += 1;
+        const resultFieldPrefixes = [
+          "Settlement date",
+          "Disburse date",
+          "Gross settlement",
+          "Attorney fees",
+          "Disbursed",
+          "Result quarter",
+        ];
+        if (previewChanges.some((change) => resultFieldPrefixes.some((prefix) => change.startsWith(prefix)))) {
+          settlementsUpdated += 1;
+        }
+        if (stageAutoSettled) stagesAutoSettled += 1;
+        if (stageRestored) stagesRestored += 1;
+        const partyChangePrefixes = ["Add sheet party", "Remove sheet party"];
+        if (
+          previewChanges.some(
+            (change) =>
+              partyChangePrefixes.some((prefix) => change.startsWith(prefix)) || change.includes(" disburse date"),
+          )
+        ) {
+          disbursementsSynced += item.disbursements.length;
+        }
+      }
+
       details.push({
         caseNumber: resolvedCaseNumber,
         status: "synced",
@@ -2146,17 +2292,21 @@ export async function syncSettlementsFromSheet(
         pendingPartyCount,
         expectedPartyCount: partyCount,
         parties: buildSettlementSyncPartyDetails(item),
-        summary: buildSettlementSyncCaseSummary({
-          partiesSynced: item.disbursements.length,
-          settlementDate: resultPayload.settlement_date,
-          disburseDate: resultPayload.disburse_date,
-          settlementAmount: totalSettlementAmount,
-          attorneyFees: totalAttorneyFees,
-          disbursedStatus: resolvedDisbursedStatus,
-          pendingPartyCount,
-          stageAutoSettled,
-          stageRestored: Boolean(stageRestored),
-        }),
+        changes: dryRun ? previewChanges : undefined,
+        summary:
+          dryRun && previewChanges.length > 0
+            ? previewChanges.join("; ")
+            : buildSettlementSyncCaseSummary({
+                partiesSynced: item.disbursements.length,
+                settlementDate: resultPayload.settlement_date,
+                disburseDate: resultPayload.disburse_date,
+                settlementAmount: totalSettlementAmount,
+                attorneyFees: totalAttorneyFees,
+                disbursedStatus: resolvedDisbursedStatus,
+                pendingPartyCount,
+                stageAutoSettled,
+                stageRestored: Boolean(stageRestored),
+              }),
       });
     }
   }
