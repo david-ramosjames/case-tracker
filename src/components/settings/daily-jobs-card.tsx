@@ -11,7 +11,8 @@ import {
   formatPulseFanOutResult,
   type PulseItemOutcome,
 } from "@/lib/slack/pulse-outcomes";
-import { type SettlementSheetSyncCaseDetail, filterSettlementSyncPreviewDetails } from "@/lib/google/settlements-sync";
+import { type SettlementSheetSyncCaseDetail } from "@/lib/google/settlements-sync";
+import { filterSettlementSyncPreviewDetails } from "@/lib/settlement-sync-preview";
 import { type SlackSheetSyncPreviewItem } from "@/lib/google/sheets-sync";
 import { type FieldReminderPreviewItem } from "@/lib/slack/field-reminder-notify";
 import { type MissingFieldPreviewItem } from "@/lib/slack/missing-field-notify";
