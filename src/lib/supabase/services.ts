@@ -346,12 +346,6 @@ export async function updateTrackerEntry(
   if (nextStage === "Lit" || existingTracker?.hasEverBeenLitigation || existingTracker?.caseStage === "Lit") {
     litigationPatch.has_ever_been_litigation = true;
   }
-  if (leavingSettled && options.actor?.userName !== SETTLEMENT_SHEET_SYNC_ACTOR) {
-    litigationPatch.sheet_auto_settle_suppressed = true;
-  }
-  if (nextStage === "Settled" && previousStage !== "Settled") {
-    litigationPatch.sheet_auto_settle_suppressed = false;
-  }
 
   const payload = {
     ...trackerUpdateToRow(inputWithExpectedLit, markReviewed),
@@ -1189,7 +1183,6 @@ type TrackerEntryLookupRow = {
   case_number: string | null;
   expected_disbursement_count: number | null;
   case_stage: string | null;
-  sheet_auto_settle_suppressed?: boolean | null;
 };
 
 export type SettlementSheetCasePayload = {
@@ -1387,59 +1380,6 @@ async function lookupPriorCaseStageBeforeSettlement(
   return null;
 }
 
-async function wasManuallyLeftSettledInHistory(
-  admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
-  trackerEntryId: string,
-): Promise<boolean> {
-  const [{ data: versions, error: versionError }, { data: activities, error: activityError }] = await Promise.all([
-    admin
-      .from("case_tracker_entry_versions")
-      .select("changed_at, changed_fields, old_values, new_values")
-      .eq("tracker_entry_id", trackerEntryId)
-      .order("changed_at", { ascending: false })
-      .limit(30),
-    admin
-      .from("case_tracker_activity")
-      .select("created_at, metadata")
-      .eq("tracker_entry_id", trackerEntryId)
-      .eq("action", "Tracker updated")
-      .order("created_at", { ascending: false })
-      .limit(30),
-  ]);
-  if (versionError) throw new Error(versionError.message);
-  if (activityError) throw new Error(activityError.message);
-
-  for (const row of versions ?? []) {
-    const changedFields = row.changed_fields as string[] | undefined;
-    if (!changedFields?.includes("case_stage")) continue;
-
-    const oldStage = normalizeStage(toStringOrNull(asObject(row.old_values).case_stage));
-    const newStage = normalizeStage(toStringOrNull(asObject(row.new_values).case_stage));
-    if (oldStage === newStage) continue;
-
-    if (oldStage !== "Settled" || newStage === "Settled") {
-      return false;
-    }
-
-    const changedAt = new Date(toString(row.changed_at, "")).getTime();
-    const hasUserStageActivity = (activities ?? []).some((activity) => {
-      const activityAt = new Date(toString(activity.created_at, "")).getTime();
-      if (Math.abs(activityAt - changedAt) > 15_000) return false;
-      const metadata = asObject(activity.metadata);
-      const fields = metadata.changedFields;
-      const changedStage =
-        Array.isArray(fields) &&
-        fields.some((field) => field === "Case stage" || field === "caseStage" || field === "case_stage");
-      const userName = toStringOrNull(metadata.user_name);
-      return changedStage && userName !== SETTLEMENT_SHEET_SYNC_ACTOR;
-    });
-
-    return hasUserStageActivity;
-  }
-
-  return false;
-}
-
 async function recomputeCaseResultFromDisbursements(
   admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
   input: { caseId: string; trackerEntryId: string; caseNumber: string },
@@ -1579,7 +1519,7 @@ async function syncManualDisbursements(
 }
 
 const TRACKER_ENTRY_LOOKUP_SELECT =
-  "id,case_id,case_number,expected_disbursement_count,case_stage,sheet_auto_settle_suppressed";
+  "id,case_id,case_number,expected_disbursement_count,case_stage";
 
 const SETTLEMENT_SHEET_SYNC_ACTOR = "Disbursing spreadsheet sync";
 
@@ -2388,10 +2328,7 @@ export async function syncSettlementsFromSheet(
       }
     } else if (resolvedSettlementDate) {
       const stageBeforeSettle = normalizeStage(toStringOrNull(trackerRow.case_stage));
-      const sheetAutoSettleSuppressed =
-        toBoolean(trackerRow.sheet_auto_settle_suppressed, false) ||
-        (await wasManuallyLeftSettledInHistory(admin, trackerEntryId));
-      if (stageBeforeSettle !== "Settled" && !sheetAutoSettleSuppressed) {
+      if (stageBeforeSettle !== "Settled") {
         stageAutoSettled = true;
         if (!dryRun) {
           const record = await getCaseById(linkedCaseId ?? trackerEntryId);
