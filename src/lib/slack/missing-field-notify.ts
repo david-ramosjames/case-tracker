@@ -28,8 +28,8 @@ function completenessFieldExampleLine(fieldId: CompletenessFieldId) {
       return "Referral fee: 33%";
     case "policyLimits":
       return "Policy limits: 100000";
-    case "sources":
-      return "Sources: Updated treatment status...";
+    case "policySource":
+      return "Policy source: 3p — State Farm dec page";
   }
 }
 

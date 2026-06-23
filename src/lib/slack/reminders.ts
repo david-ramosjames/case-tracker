@@ -5,7 +5,7 @@ import { QUARTERLY_REVIEW_DAYS } from "@/lib/slack/config";
 import { type CaseRecord, type CaseTrackerSettings, type SlackReminderReason } from "@/lib/types";
 import { daysSince } from "@/lib/utils";
 
-const SOURCES_LIT_FIELDS = ["sources", "injuries", "caseDescription"] as const;
+const SOURCES_LIT_FIELDS = ["injuries", "caseDescription"] as const;
 
 export function getSlackReminderReasons(
   record: CaseRecord,

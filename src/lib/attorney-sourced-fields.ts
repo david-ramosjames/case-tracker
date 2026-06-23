@@ -16,7 +16,7 @@ export type AttorneySourcedFieldId =
   | "minimumValue"
   | "referralFee"
   | "policyLimits"
-  | "sources"
+  | "policyInfoSource"
   | "injuries"
   | "caseDescription";
 
@@ -54,7 +54,12 @@ export const ATTORNEY_SOURCED_FIELDS: AttorneySourcedFieldMeta[] = [
     reviewKind: "validation_90d",
     validationFieldId: "policyLimits",
   },
-  { id: "sources", label: "Sources", shortLabel: "Sources", reviewKind: "none" },
+  {
+    id: "policyInfoSource",
+    label: "Policy Source",
+    shortLabel: "Policy Source",
+    reviewKind: "none",
+  },
   { id: "injuries", label: "Injuries", shortLabel: "Injuries", reviewKind: "none" },
   { id: "caseDescription", label: "Description", shortLabel: "Description", reviewKind: "none" },
 ];
@@ -78,8 +83,8 @@ function hasAttorneyFieldValue(record: CaseRecord, fieldId: AttorneySourcedField
       return tracker.referralFee != null;
     case "policyLimits":
       return tracker.policyLimits != null && tracker.policyLimits > 0;
-    case "sources":
-      return Boolean(tracker.sources?.trim());
+    case "policyInfoSource":
+      return Boolean(tracker.policyInfoSource?.trim());
     case "injuries":
       return Boolean(tracker.injuries?.trim());
     case "caseDescription":

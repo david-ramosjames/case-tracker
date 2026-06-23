@@ -54,7 +54,7 @@ import { normalizeTargetQuarter } from "@/lib/target-quarter";
 export { deriveFeePercentFromSettlement, deriveForecastFeePercent, deriveResultFeePercent, referralFeeToDecimal, resolveSettledFeePercent, wasEverInLitigation } from "@/lib/fee-percent";
 
 const QUARTERLY_CHECK_IN_FIELDS = ["targetResolutionQuarter", "minimumValue"] as const;
-const SOURCES_LIT_FIELDS = ["sources", "injuries", "caseDescription"] as const;
+const SOURCES_LIT_FIELDS = ["injuries", "caseDescription"] as const;
 
 export function sourcesLitNeedsReview(record: CaseRecord) {
   if (!caseRequiresOngoingUpdates(record)) return false;
@@ -157,7 +157,6 @@ export function getCaseCompletionChecks(record: CaseRecord): CompletionCheck[] {
     { id: "referral", complete: Boolean(tracker.referralFeeArrangement?.trim()) },
     { id: "balance-cta", complete: Boolean(tracker.balanceCtaInfo?.trim()) },
     { id: "injuries", complete: Boolean(tracker.injuries?.trim()) },
-    { id: "sources", complete: Boolean(tracker.sources?.trim()) },
     { id: "description", complete: Boolean(tracker.caseDescription?.trim()) },
     { id: "confidence", complete: Boolean(tracker.confidenceLevel) },
   ];

@@ -1045,9 +1045,9 @@ export function CaseDetailView({
           <CardHeader>
             <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
               <div>
-                <CardTitle>Sources and Litigation Detail</CardTitle>
+                <CardTitle>Injuries and Litigation Detail</CardTitle>
                 <CardDescription>
-                  Your input — sources, injuries, and description must be confirmed or updated at least every 90 days.
+                  Your input — injuries and description must be confirmed or updated at least every 90 days.
                 </CardDescription>
               </div>
               <Button variant={isSourcesEditing ? "pink" : "outline"} size="sm" onClick={() => setIsSourcesEditing((current) => !current)}>
@@ -1059,16 +1059,12 @@ export function CaseDetailView({
           <CardContent className="grid gap-4 md:grid-cols-2">
             {!isSourcesEditing ? (
               <>
-                <AttorneyLongInfo fieldId="sources" record={record} value={tracker.sources} />
                 <AttorneyLongInfo fieldId="injuries" record={record} value={tracker.injuries} />
                 <AttorneyLongInfo className="md:col-span-2" fieldId="caseDescription" record={record} value={tracker.caseDescription} />
                 <LongInfo className="md:col-span-2" label="Status notes" value={tracker.statusNotes} />
               </>
             ) : (
               <>
-                <AttorneyField fieldId="sources" record={record}>
-                  <Textarea value={tracker.sources} onChange={(event) => updateField("sources", event.target.value)} />
-                </AttorneyField>
                 <AttorneyField fieldId="injuries" record={record}>
                   <Textarea value={tracker.injuries} onChange={(event) => updateField("injuries", event.target.value)} />
                 </AttorneyField>

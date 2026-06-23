@@ -15,7 +15,7 @@ export const COMPLETENESS_FIELDS = [
   { id: "minimumValue", label: "Minimum value" },
   { id: "referralFee", label: "Referral fee" },
   { id: "policyLimits", label: "Policy limits" },
-  { id: "sources", label: "Sources" },
+  { id: "policySource", label: "Policy Source" },
 ] as const;
 
 export type CompletenessFieldId = (typeof COMPLETENESS_FIELDS)[number]["id"];
@@ -69,8 +69,8 @@ export function hasCompletenessField(record: CaseRecord, fieldId: CompletenessFi
       return tracker.referralFee != null;
     case "policyLimits":
       return tracker.policyLimits != null && tracker.policyLimits > 0;
-    case "sources":
-      return Boolean(tracker.sources?.trim());
+    case "policySource":
+      return Boolean(tracker.policyInfoSource?.trim());
     default:
       return false;
   }

@@ -176,13 +176,13 @@ function AttorneyFieldInput({
           onValueChange={(value) => onUpdateField("policyLimits", value)}
         />
       );
-    case "sources":
+    case "policyInfoSource":
       return (
-        <Textarea
-          className="min-h-[72px] text-sm"
-          value={tracker.sources}
-          placeholder="Policy, medical, liability sources..."
-          onChange={(event) => onUpdateField("sources", event.target.value)}
+        <Input
+          className="h-9 text-sm"
+          value={tracker.policyInfoSource ?? ""}
+          placeholder="Declarations page, carrier email, adjuster call..."
+          onChange={(event) => onUpdateField("policyInfoSource", event.target.value || null)}
         />
       );
     case "injuries":
