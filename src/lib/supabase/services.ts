@@ -1643,6 +1643,87 @@ function buildSettlementSyncCaseSummary(input: {
   return parts.join("; ");
 }
 
+function settlementResultPayloadWouldChange(
+  existingResult: SettlementResult | null,
+  resultPayload: {
+    settlement_date: string | null;
+    settlement_amount: number | null;
+    attorney_fees: number | null;
+    fee_percent: number | null;
+    disburse_date: string | null;
+    disbursed_status: DisbursedStatus;
+    result_quarter: string | null;
+  },
+): boolean {
+  if (!existingResult) {
+    return (
+      resultPayload.settlement_date != null ||
+      resultPayload.settlement_amount != null ||
+      resultPayload.attorney_fees != null ||
+      resultPayload.disburse_date != null ||
+      resultPayload.disbursed_status === "Yes" ||
+      resultPayload.result_quarter != null
+    );
+  }
+
+  const normDate = (value: string | null | undefined) => (value ? toDateOnly(value) : null);
+  return (
+    normDate(resultPayload.settlement_date) !== normDate(existingResult.settlementDate) ||
+    normDate(resultPayload.disburse_date) !== normDate(existingResult.disburseDate) ||
+    resultPayload.disbursed_status !== existingResult.disbursedStatus ||
+    (resultPayload.settlement_amount ?? null) !== (existingResult.settlementAmount ?? null) ||
+    (resultPayload.attorney_fees ?? null) !== (existingResult.attorneyFees ?? null) ||
+    (resultPayload.result_quarter ?? null) !== (existingResult.resultQuarter ?? null) ||
+    (resultPayload.fee_percent ?? null) !== (existingResult.feePercent ?? null)
+  );
+}
+
+async function sheetDisbursementsWouldChange(
+  admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
+  caseNumber: string,
+  item: SettlementSheetCasePayload,
+  weight: number,
+): Promise<boolean> {
+  const { data: existingRows, error } = await admin
+    .from("case_tracker_disbursements")
+    .select(
+      "sheet_row_key, disburse_date, settlement_date, settlement_amount, attorney_fees, pending_remaining, weight, label",
+    )
+    .eq("case_number", caseNumber)
+    .not("sheet_row_key", "is", null);
+  if (error) throw new Error(error.message);
+
+  const existingByKey = new Map(
+    (existingRows ?? []).map((row) => [toString(row.sheet_row_key, ""), row]),
+  );
+  const incomingKeys = new Set(item.disbursements.map((disbursement) => disbursement.sheetRowKey));
+
+  if (existingByKey.size !== incomingKeys.size) return true;
+  for (const key of existingByKey.keys()) {
+    if (!incomingKeys.has(key)) return true;
+  }
+
+  for (const disbursement of item.disbursements) {
+    const existing = existingByKey.get(disbursement.sheetRowKey);
+    if (!existing) return true;
+    const disburseDate = disbursement.disburseDate ? toDateOnly(disbursement.disburseDate) : null;
+    const settlementDate = disbursement.settlementDate ? toDateOnly(disbursement.settlementDate) : null;
+    if (
+      toStringOrNull(existing.disburse_date) !== disburseDate ||
+      toStringOrNull(existing.settlement_date) !== settlementDate ||
+      toNumber(existing.settlement_amount) !== disbursement.settlementAmount ||
+      toNumber(existing.attorney_fees) !== disbursement.attorneyFees ||
+      toBoolean(existing.pending_remaining, false) !== (disbursement.pendingRemaining ?? false) ||
+      toNumber(existing.weight) !== weight ||
+      toStringOrNull(existing.label) !== disbursement.partyLabel
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export type ClearSheetSettlementSyncResult = {
   cleared: boolean;
   sheetDisbursementsRemoved: number;
@@ -1780,13 +1861,15 @@ export async function syncSettlementsFromSheet(
     const trackerRow = await resolveTrackerEntryForSheetSync(admin, item, caseNumber);
     if (!trackerRow) {
       skippedNoTracker += 1;
-      details.push({
-        caseNumber,
-        status: "skipped_no_tracker",
-        sheetRowCount: item.sheetRowCount,
-        parties: buildSettlementSyncPartyDetails(item),
-        summary: "No matching tracker row — case must exist in the app first.",
-      });
+      if (!dryRun) {
+        details.push({
+          caseNumber,
+          status: "skipped_no_tracker",
+          sheetRowCount: item.sheetRowCount,
+          parties: buildSettlementSyncPartyDetails(item),
+          summary: "No matching tracker row — case must exist in the app first.",
+        });
+      }
       continue;
     }
 
@@ -1806,13 +1889,15 @@ export async function syncSettlementsFromSheet(
 
     if (existingResultForLock?.financial_backfill_locked) {
       skippedFinancialLocked += 1;
-      details.push({
-        caseNumber: resolvedCaseNumber,
-        status: "skipped_financial_locked",
-        sheetRowCount: item.sheetRowCount,
-        parties: buildSettlementSyncPartyDetails(item),
-        summary: "Skipped — financial CSV backfill is locked for this case.",
-      });
+      if (!dryRun) {
+        details.push({
+          caseNumber: resolvedCaseNumber,
+          status: "skipped_financial_locked",
+          sheetRowCount: item.sheetRowCount,
+          parties: buildSettlementSyncPartyDetails(item),
+          summary: "Skipped — financial CSV backfill is locked for this case.",
+        });
+      }
       continue;
     }
 
@@ -2034,34 +2119,46 @@ export async function syncSettlementsFromSheet(
     }
 
     const pendingPartyCount = item.disbursements.filter((row) => row.pendingRemaining).length;
-    details.push({
-      caseNumber: resolvedCaseNumber,
-      status: "synced",
-      sheetRowCount: item.sheetRowCount,
-      partiesSynced: item.disbursements.length,
-      settlementDate: resultPayload.settlement_date,
-      disburseDate: resultPayload.disburse_date,
-      settlementAmount: totalSettlementAmount,
-      attorneyFees: totalAttorneyFees,
-      disbursedStatus: resolvedDisbursedStatus,
-      resultQuarter: resolvedResultQuarter,
-      stageAutoSettled,
-      stageRestored,
-      pendingPartyCount,
-      expectedPartyCount: partyCount,
-      parties: buildSettlementSyncPartyDetails(item),
-      summary: buildSettlementSyncCaseSummary({
+    const expectedCountWouldChange = totalSlots !== attorneyExpected || partyCount > totalSlots;
+    const wouldChange =
+      stageAutoSettled ||
+      Boolean(stageRestored) ||
+      expectedCountWouldChange ||
+      settlementResultPayloadWouldChange(existingResultModel, resultPayload) ||
+      (dryRun
+        ? await sheetDisbursementsWouldChange(admin, resolvedCaseNumber, item, weight)
+        : true);
+
+    if (!dryRun || wouldChange) {
+      details.push({
+        caseNumber: resolvedCaseNumber,
+        status: "synced",
+        sheetRowCount: item.sheetRowCount,
         partiesSynced: item.disbursements.length,
         settlementDate: resultPayload.settlement_date,
         disburseDate: resultPayload.disburse_date,
         settlementAmount: totalSettlementAmount,
         attorneyFees: totalAttorneyFees,
         disbursedStatus: resolvedDisbursedStatus,
-        pendingPartyCount,
+        resultQuarter: resolvedResultQuarter,
         stageAutoSettled,
-        stageRestored: Boolean(stageRestored),
-      }),
-    });
+        stageRestored,
+        pendingPartyCount,
+        expectedPartyCount: partyCount,
+        parties: buildSettlementSyncPartyDetails(item),
+        summary: buildSettlementSyncCaseSummary({
+          partiesSynced: item.disbursements.length,
+          settlementDate: resultPayload.settlement_date,
+          disburseDate: resultPayload.disburse_date,
+          settlementAmount: totalSettlementAmount,
+          attorneyFees: totalAttorneyFees,
+          disbursedStatus: resolvedDisbursedStatus,
+          pendingPartyCount,
+          stageAutoSettled,
+          stageRestored: Boolean(stageRestored),
+        }),
+      });
+    }
   }
 
   return {

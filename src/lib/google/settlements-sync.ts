@@ -9,10 +9,17 @@ import {
   clearSheetSettlementSyncForCase,
   syncSettlementsFromSheet,
   type SettlementSheetCasePayload,
+  type SettlementSheetSyncCaseDetail,
   type SettlementSheetSyncResult as SettlementSheetSyncCoreResult,
 } from "@/lib/supabase/services";
 
 export type { SettlementSheetSyncCaseDetail, SettlementSheetSyncPartyDetail } from "@/lib/supabase/services";
+
+export function filterSettlementSyncPreviewDetails(
+  details: SettlementSheetSyncCaseDetail[],
+): SettlementSheetSyncCaseDetail[] {
+  return details.filter((detail) => detail.status === "synced");
+}
 
 export type SettlementSheetSyncResult = SettlementSheetSyncCoreResult & {
   configured: boolean;

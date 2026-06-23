@@ -11,7 +11,7 @@ import {
   formatPulseFanOutResult,
   type PulseItemOutcome,
 } from "@/lib/slack/pulse-outcomes";
-import { type SettlementSheetSyncCaseDetail } from "@/lib/google/settlements-sync";
+import { type SettlementSheetSyncCaseDetail, filterSettlementSyncPreviewDetails } from "@/lib/google/settlements-sync";
 import { type SlackSheetSyncPreviewItem } from "@/lib/google/sheets-sync";
 import { type FieldReminderPreviewItem } from "@/lib/slack/field-reminder-notify";
 import { type MissingFieldPreviewItem } from "@/lib/slack/missing-field-notify";
@@ -295,8 +295,12 @@ function DailyJobPreviewPanel({
   }
 
   if (step === "settlementSync") {
-    const details = (result.details as SettlementSheetSyncCaseDetail[] | undefined) ?? [];
-    if (details.length === 0) return <p className="mt-2 text-sm text-muted-foreground">No settlement sheet rows matched.</p>;
+    const details = filterSettlementSyncPreviewDetails(
+      (result.details as SettlementSheetSyncCaseDetail[] | undefined) ?? [],
+    );
+    if (details.length === 0) {
+      return <p className="mt-2 text-sm text-muted-foreground">No settlement changes detected.</p>;
+    }
     return (
       <PreviewTable
         headers={["Case #", "Status", "Summary", "Disburse", "Disbursed"]}
