@@ -2281,7 +2281,8 @@ export async function syncSettlementsFromSheet(
       (resolvedDisburseDate ? deriveResultQuarterFromDisburseDate(resolvedDisburseDate) : null);
 
     // Column G = Full Settlement. When not Y, keep partial financials but do not close the case.
-    if (!item.fullSettlement) {
+    const openCaseFromSheet = !item.fullSettlement;
+    if (openCaseFromSheet) {
       resolvedDisburseDate = null;
       resolvedDisbursedStatus = "No";
       resolvedCheckDisbursedAt = null;
@@ -2299,6 +2300,16 @@ export async function syncSettlementsFromSheet(
       check_disbursed_at: resolvedCheckDisbursedAt,
       disbursed_status: resolvedDisbursedStatus,
       result_quarter: resolvedResultQuarter,
+      ...(openCaseFromSheet
+        ? {
+            release_status: "No" as const,
+            closing_status: "No" as const,
+            check_status: "No" as const,
+            release_signed_at: null,
+            closing_signed_at: null,
+            check_deposited_at: null,
+          }
+        : {}),
     };
 
     if (!dryRun) {
