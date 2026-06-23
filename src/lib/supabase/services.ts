@@ -1645,15 +1645,44 @@ function buildSettlementSyncCaseSummary(input: {
   return parts.join("; ");
 }
 
+function normalizePartyLabel(label: string | null | undefined) {
+  return (label ?? "").trim().toLowerCase();
+}
+
+function settlementMoneyEqual(
+  left: number | null | undefined,
+  right: number | null | undefined,
+): boolean {
+  if (left == null && right == null) return true;
+  if (left == null || right == null) return false;
+  return Math.round(left * 100) === Math.round(right * 100);
+}
+
+function settlementWeightsEqual(
+  left: number | null | undefined,
+  right: number | null | undefined,
+): boolean {
+  if (left == null && right == null) return true;
+  if (left == null || right == null) return false;
+  return Math.abs(left - right) < 1e-6;
+}
+
 function formatSettlementFieldValue(
   value: string | number | null | undefined,
-  kind: "date" | "money" | "text",
+  kind: "date" | "money" | "text" | "weight",
 ): string {
   if (value == null || value === "") return "—";
   if (kind === "date") return toDateOnly(String(value)) ?? "—";
   if (kind === "money") {
     const amount = typeof value === "number" ? value : Number(value);
-    return Number.isFinite(amount) ? `$${amount.toLocaleString("en-US")}` : "—";
+    if (!Number.isFinite(amount)) return "—";
+    return `$${amount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  }
+  if (kind === "weight") {
+    const amount = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(amount)) return "—";
+    const rounded = Math.round(amount * 1_000_000) / 1_000_000;
+    return String(rounded).replace(/(\.\d*?[1-9])0+$/u, "$1").replace(/\.0+$/u, "");
   }
   return String(value);
 }
@@ -1663,12 +1692,16 @@ function pushSettlementFieldChange(
   label: string,
   from: string | number | null | undefined,
   to: string | number | null | undefined,
-  kind: "date" | "money" | "text",
+  kind: "date" | "money" | "text" | "weight",
 ) {
   const normalize = (value: string | number | null | undefined) => {
     if (value == null || value === "") return null;
     if (kind === "date") return toDateOnly(String(value));
     if (kind === "money") {
+      const amount = typeof value === "number" ? value : Number(value);
+      return Number.isFinite(amount) ? Math.round(amount * 100) / 100 : null;
+    }
+    if (kind === "weight") {
       const amount = typeof value === "number" ? value : Number(value);
       return Number.isFinite(amount) ? amount : null;
     }
@@ -1676,11 +1709,65 @@ function pushSettlementFieldChange(
   };
   const fromNorm = normalize(from);
   const toNorm = normalize(to);
-  if (fromNorm !== toNorm) {
+  const isEqual =
+    kind === "money"
+      ? settlementMoneyEqual(fromNorm as number | null, toNorm as number | null)
+      : kind === "weight"
+        ? settlementWeightsEqual(fromNorm as number | null, toNorm as number | null)
+        : fromNorm === toNorm;
+  if (!isEqual) {
     changes.push(
       `${label}: ${formatSettlementFieldValue(fromNorm, kind)} → ${formatSettlementFieldValue(toNorm, kind)}`,
     );
   }
+}
+
+function collectPartyDisbursementChanges(
+  existing: SheetDisbursementRow,
+  disbursement: SettlementSheetCasePayload["disbursements"][number],
+  weight: number,
+): string[] {
+  const changes: string[] = [];
+  const partyName = disbursement.partyLabel?.trim() || existing.label?.trim() || "Party";
+  const disburseDate = disbursement.disburseDate ? toDateOnly(disbursement.disburseDate) : null;
+  const settlementDate = disbursement.settlementDate ? toDateOnly(disbursement.settlementDate) : null;
+
+  pushSettlementFieldChange(changes, `${partyName} settlement date`, existing.settlement_date, settlementDate, "date");
+  pushSettlementFieldChange(changes, `${partyName} disburse date`, existing.disburse_date, disburseDate, "date");
+  pushSettlementFieldChange(
+    changes,
+    `${partyName} gross`,
+    existing.settlement_amount,
+    disbursement.settlementAmount,
+    "money",
+  );
+  pushSettlementFieldChange(
+    changes,
+    `${partyName} fees`,
+    existing.attorney_fees,
+    disbursement.attorneyFees,
+    "money",
+  );
+
+  const existingPending = toBoolean(existing.pending_remaining, false);
+  const incomingPending = disbursement.pendingRemaining ?? false;
+  if (existingPending !== incomingPending) {
+    changes.push(
+      `${partyName} pending: ${existingPending ? "yes" : "no"} → ${incomingPending ? "yes" : "no"}`,
+    );
+  }
+
+  pushSettlementFieldChange(changes, `${partyName} weight`, existing.weight, weight, "weight");
+
+  const existingLabel = existing.label?.trim() || null;
+  const incomingLabel = disbursement.partyLabel?.trim() || null;
+  if (existingLabel !== incomingLabel) {
+    changes.push(
+      `${partyName} label: ${formatSettlementFieldValue(existingLabel, "text")} → ${formatSettlementFieldValue(incomingLabel, "text")}`,
+    );
+  }
+
+  return changes;
 }
 
 function collectSettlementResultChanges(
@@ -1770,71 +1857,48 @@ async function collectSheetDisbursementChanges(
   const existingByKey = new Map(
     (existingRows ?? []).map((row) => [toString(row.sheet_row_key, ""), row as SheetDisbursementRow]),
   );
-  const incomingKeys = new Set(item.disbursements.map((disbursement) => disbursement.sheetRowKey));
+  const unmatchedExisting = new Map(existingByKey);
+  const unmatchedIncoming = [...item.disbursements];
+  const pairs: Array<{
+    existing: SheetDisbursementRow;
+    incoming: SettlementSheetCasePayload["disbursements"][number];
+  }> = [];
 
-  for (const [key, existing] of existingByKey.entries()) {
-    if (!incomingKeys.has(key)) {
-      const label = existing.label?.trim() || "Party";
-      changes.push(`Remove sheet party: ${label}`);
+  for (let index = unmatchedIncoming.length - 1; index >= 0; index -= 1) {
+    const incoming = unmatchedIncoming[index];
+    const existing = existingByKey.get(incoming.sheetRowKey);
+    if (!existing) continue;
+    pairs.push({ existing, incoming });
+    unmatchedIncoming.splice(index, 1);
+    unmatchedExisting.delete(incoming.sheetRowKey);
+  }
+
+  for (let index = unmatchedIncoming.length - 1; index >= 0; index -= 1) {
+    const incoming = unmatchedIncoming[index];
+    const label = normalizePartyLabel(incoming.partyLabel);
+    if (!label) continue;
+
+    for (const [key, existing] of unmatchedExisting.entries()) {
+      if (normalizePartyLabel(existing.label) !== label) continue;
+      pairs.push({ existing, incoming });
+      unmatchedIncoming.splice(index, 1);
+      unmatchedExisting.delete(key);
+      break;
     }
   }
 
-  for (const disbursement of item.disbursements) {
-    const existing = existingByKey.get(disbursement.sheetRowKey);
-    const partyName = disbursement.partyLabel?.trim() || "Party";
-    if (!existing) {
-      changes.push(`Add sheet party: ${partyName}`);
-      continue;
-    }
+  for (const existing of unmatchedExisting.values()) {
+    const label = existing.label?.trim() || "Party";
+    changes.push(`Remove sheet party: ${label}`);
+  }
 
-    const disburseDate = disbursement.disburseDate ? toDateOnly(disbursement.disburseDate) : null;
-    const settlementDate = disbursement.settlementDate ? toDateOnly(disbursement.settlementDate) : null;
-    pushSettlementFieldChange(
-      changes,
-      `${partyName} settlement date`,
-      existing.settlement_date,
-      settlementDate,
-      "date",
-    );
-    pushSettlementFieldChange(
-      changes,
-      `${partyName} disburse date`,
-      existing.disburse_date,
-      disburseDate,
-      "date",
-    );
-    pushSettlementFieldChange(
-      changes,
-      `${partyName} gross`,
-      existing.settlement_amount,
-      disbursement.settlementAmount,
-      "money",
-    );
-    pushSettlementFieldChange(
-      changes,
-      `${partyName} fees`,
-      existing.attorney_fees,
-      disbursement.attorneyFees,
-      "money",
-    );
-    const existingPending = toBoolean(existing.pending_remaining, false);
-    const incomingPending = disbursement.pendingRemaining ?? false;
-    if (existingPending !== incomingPending) {
-      changes.push(
-        `${partyName} pending: ${existingPending ? "yes" : "no"} → ${incomingPending ? "yes" : "no"}`,
-      );
-    }
-    const existingWeight = toNumber(existing.weight);
-    if (existingWeight != null && existingWeight !== weight) {
-      changes.push(`${partyName} weight: ${existingWeight} → ${weight}`);
-    }
-    const existingLabel = existing.label?.trim() || null;
-    const incomingLabel = disbursement.partyLabel?.trim() || null;
-    if (existingLabel !== incomingLabel) {
-      changes.push(
-        `${partyName} label: ${formatSettlementFieldValue(existingLabel, "text")} → ${formatSettlementFieldValue(incomingLabel, "text")}`,
-      );
-    }
+  for (const incoming of unmatchedIncoming) {
+    const partyName = incoming.partyLabel?.trim() || "Party";
+    changes.push(`Add sheet party: ${partyName}`);
+  }
+
+  for (const pair of pairs) {
+    changes.push(...collectPartyDisbursementChanges(pair.existing, pair.incoming, weight));
   }
 
   return changes;
