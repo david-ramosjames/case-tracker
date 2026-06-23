@@ -1,9 +1,8 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
 import { cleanCaseNumber } from "@/lib/csv/parse";
-import { buildQuoContactMatches } from "@/lib/quo/contact-sync";
-import { buildQuoConversationByParticipantPhones } from "@/lib/quo/client";
+import { buildQuoContactMatches, groupQuoContactMatchesByCaseNumber, pickBestQuoContactMatch } from "@/lib/quo/contact-sync";
+import { lookupQuoInboxForContact, type QuoInboxMatch } from "@/lib/quo/client";
 import { isQuoEnabled } from "@/lib/quo/config";
-import { normalizePhoneForComparison } from "@/lib/quo/phone";
 import { sendQuoTextMessage } from "@/lib/quo/client";
 import { renderSmsMessage } from "@/lib/sms/message-template";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
@@ -209,53 +208,38 @@ export async function syncQuoPhonesToTracker() {
   if (!admin) throw new Error("Service role required.");
 
   const matches = await buildQuoContactMatches();
-
-  const byCaseNumber = new Map<string, (typeof matches)[number]>();
-  for (const match of matches) {
-    const key = cleanCaseNumber(match.caseNumber);
-    if (!key) continue;
-    if (!byCaseNumber.has(key)) byCaseNumber.set(key, match);
-  }
+  const groupedMatches = groupQuoContactMatchesByCaseNumber(matches);
 
   const { data: trackerRows, error } = await admin
     .from("case_tracker_entries")
-    .select("id, case_number, client_phone, quo_contact_id, quo_conversation_id")
+    .select("id, case_number, client_name_snapshot, client_phone, quo_contact_id, quo_conversation_id")
     .not("case_number", "is", null);
 
   if (error) throw new Error(error.message);
 
-  const conversationByPhone = new Map<string, string>();
-  const phonesNeedingConversation = new Set<string>();
-
-  for (const row of trackerRows ?? []) {
-    const caseNumber = cleanCaseNumber(String(row.case_number ?? ""));
-    const match = byCaseNumber.get(caseNumber);
-    const nextPhone = match?.phone?.trim() || String(row.client_phone ?? "").trim() || null;
-    if (!nextPhone) continue;
-
-    const normalizedPhone = normalizePhoneForComparison(nextPhone);
-    const currentPhone = String(row.client_phone ?? "").trim() || null;
-    const currentConversationId = String(row.quo_conversation_id ?? "").trim() || null;
-
-    if (currentConversationId && currentPhone === nextPhone) {
-      conversationByPhone.set(normalizedPhone, currentConversationId);
-      continue;
-    }
-
-    phonesNeedingConversation.add(normalizedPhone);
-  }
-
+  const inboxCache = new Map<string, QuoInboxMatch | null>();
   let conversationSyncWarning: string | null = null;
-  if (phonesNeedingConversation.size > 0) {
+
+  async function resolveInboxForMatch(input: {
+    quoContactId: string;
+    displayName: string;
+    phone?: string | null;
+  }) {
+    const cacheKey = `${input.quoContactId}|${input.displayName}|${input.phone ?? ""}`;
+    if (inboxCache.has(cacheKey)) return inboxCache.get(cacheKey) ?? null;
+
     try {
-      const lookedUp = await buildQuoConversationByParticipantPhones([...phonesNeedingConversation]);
-      for (const [phone, conversationId] of lookedUp) {
-        conversationByPhone.set(phone, conversationId);
-      }
+      const inbox = await lookupQuoInboxForContact(input);
+      inboxCache.set(cacheKey, inbox ?? null);
+      return inbox ?? null;
     } catch (error) {
-      conversationSyncWarning =
-        error instanceof Error ? error.message : "Quo inbox lookup failed; phones still synced.";
-      console.warn("Quo conversation sync skipped", conversationSyncWarning);
+      if (!conversationSyncWarning) {
+        conversationSyncWarning =
+          error instanceof Error ? error.message : "Quo inbox lookup failed; phones still synced.";
+      }
+      console.warn("Quo inbox lookup failed", error);
+      inboxCache.set(cacheKey, null);
+      return null;
     }
   }
 
@@ -266,18 +250,37 @@ export async function syncQuoPhonesToTracker() {
 
   for (const row of trackerRows ?? []) {
     const caseNumber = cleanCaseNumber(String(row.case_number ?? ""));
-    const match = byCaseNumber.get(caseNumber);
+    const match = pickBestQuoContactMatch(groupedMatches.get(caseNumber) ?? [], row.client_name_snapshot);
 
-    const nextPhone = match?.phone?.trim() || String(row.client_phone ?? "").trim() || null;
-    const nextContactId = match?.quoContactId?.trim() || String(row.quo_contact_id ?? "").trim() || null;
     const currentPhone = String(row.client_phone ?? "").trim() || null;
     const currentContactId = String(row.quo_contact_id ?? "").trim() || null;
     const currentConversationId = String(row.quo_conversation_id ?? "").trim() || null;
-    const lookedUpConversationId = nextPhone
-      ? conversationByPhone.get(normalizePhoneForComparison(nextPhone)) ?? null
-      : null;
-    const nextConversationId =
-      lookedUpConversationId ?? (currentPhone === nextPhone ? currentConversationId : null);
+
+    let nextPhone = match?.phone?.trim() || currentPhone || null;
+    let nextContactId = match?.quoContactId ?? (currentContactId || null);
+    let nextConversationId = currentConversationId;
+
+    const contactChanged = Boolean(match && nextContactId !== currentContactId);
+    const phoneChanged = Boolean(match?.phone?.trim()) && nextPhone !== currentPhone;
+    const needsInboxLookup =
+      Boolean(match) &&
+      (contactChanged || phoneChanged || !currentConversationId || !nextPhone);
+
+    if (match && needsInboxLookup) {
+      const inbox = await resolveInboxForMatch({
+        quoContactId: match.quoContactId,
+        displayName: match.displayName,
+        phone: nextPhone,
+      });
+      if (inbox) {
+        nextPhone = inbox.phone;
+        nextConversationId = inbox.conversationId;
+      } else if (contactChanged || phoneChanged) {
+        nextConversationId = null;
+      }
+    } else if (contactChanged) {
+      nextConversationId = null;
+    }
 
     if (match) matched += 1;
     if (nextConversationId) conversationLinks += 1;
