@@ -1655,7 +1655,9 @@ function settlementMoneyEqual(
 ): boolean {
   if (left == null && right == null) return true;
   if (left == null || right == null) return false;
-  return Math.round(left * 100) === Math.round(right * 100);
+  if (Math.round(left * 100) === Math.round(right * 100)) return true;
+  // Tracker often stores whole dollars; sheet fee math can add cents (e.g. $10,018 vs $10,018.33).
+  return Math.round(left) === Math.round(right);
 }
 
 function settlementWeightsEqual(
@@ -1843,20 +1845,21 @@ async function collectSheetDisbursementChanges(
   caseNumber: string,
   item: SettlementSheetCasePayload,
   weight: number,
+  existingResult: SettlementResult | null,
 ): Promise<string[]> {
   const changes: string[] = [];
-  const { data: existingRows, error } = await admin
+  const { data: allRows, error } = await admin
     .from("case_tracker_disbursements")
     .select(
       "sheet_row_key, disburse_date, settlement_date, settlement_amount, attorney_fees, pending_remaining, weight, label",
     )
-    .eq("case_number", caseNumber)
-    .not("sheet_row_key", "is", null);
+    .eq("case_number", caseNumber);
   if (error) throw new Error(error.message);
 
-  const existingByKey = new Map(
-    (existingRows ?? []).map((row) => [toString(row.sheet_row_key, ""), row as SheetDisbursementRow]),
-  );
+  const sheetRows = (allRows ?? []).filter((row) => row.sheet_row_key) as SheetDisbursementRow[];
+  const manualRows = (allRows ?? []).filter((row) => !row.sheet_row_key) as SheetDisbursementRow[];
+
+  const existingByKey = new Map(sheetRows.map((row) => [toString(row.sheet_row_key, ""), row]));
   const unmatchedExisting = new Map(existingByKey);
   const unmatchedIncoming = [...item.disbursements];
   const pairs: Array<{
@@ -1887,6 +1890,34 @@ async function collectSheetDisbursementChanges(
     }
   }
 
+  if (item.disbursements.length === 1 && unmatchedIncoming.length === 1) {
+    const incoming = unmatchedIncoming[0];
+    let fallbackExisting: SheetDisbursementRow | null = null;
+
+    if (unmatchedExisting.size === 1) {
+      fallbackExisting = [...unmatchedExisting.values()][0];
+    } else if (unmatchedExisting.size === 0 && manualRows.length === 1) {
+      fallbackExisting = manualRows[0];
+    } else if (unmatchedExisting.size === 0 && manualRows.length === 0 && existingResult) {
+      fallbackExisting = {
+        sheet_row_key: null,
+        disburse_date: existingResult.disburseDate,
+        settlement_date: existingResult.settlementDate,
+        settlement_amount: existingResult.settlementAmount,
+        attorney_fees: existingResult.attorneyFees,
+        pending_remaining: existingResult.disbursedStatus !== "Yes",
+        weight: disbursementWeight(1),
+        label: incoming.partyLabel,
+      };
+    }
+
+    if (fallbackExisting) {
+      pairs.push({ existing: fallbackExisting, incoming });
+      unmatchedIncoming.length = 0;
+      unmatchedExisting.clear();
+    }
+  }
+
   for (const existing of unmatchedExisting.values()) {
     const label = existing.label?.trim() || "Party";
     changes.push(`Remove sheet party: ${label}`);
@@ -1902,6 +1933,24 @@ async function collectSheetDisbursementChanges(
   }
 
   return changes;
+}
+
+function previewChangeUpdatesSettlement(change: string) {
+  const resultFields = [
+    "Settlement date",
+    "Disburse date",
+    "Gross settlement",
+    "Attorney fees",
+    "Disbursed",
+    "Result quarter",
+  ];
+  if (resultFields.some((prefix) => change.startsWith(prefix))) return true;
+  return (
+    change.includes(" settlement date:") ||
+    change.includes(" disburse date:") ||
+    change.includes(" gross:") ||
+    change.includes(" fees:")
+  );
 }
 
 export type ClearSheetSettlementSyncResult = {
@@ -2294,8 +2343,18 @@ export async function syncSettlementsFromSheet(
     const expectedCountWouldChange = totalSlots !== attorneyExpected || partyCount > totalSlots;
     const previewChanges: string[] = [];
     if (dryRun) {
-      previewChanges.push(...collectSettlementResultChanges(existingResultModel, resultPayload));
-      previewChanges.push(...(await collectSheetDisbursementChanges(admin, resolvedCaseNumber, item, weight)));
+      if (item.disbursements.length !== 1) {
+        previewChanges.push(...collectSettlementResultChanges(existingResultModel, resultPayload));
+      }
+      previewChanges.push(
+        ...(await collectSheetDisbursementChanges(
+          admin,
+          resolvedCaseNumber,
+          item,
+          weight,
+          existingResultModel,
+        )),
+      );
       if (expectedCountWouldChange) {
         const newCount = Math.max(totalSlots, partyCount);
         if (newCount !== attorneyExpected) {
@@ -2316,15 +2375,7 @@ export async function syncSettlementsFromSheet(
         if (resolvedSettlementDate || resolvedDisburseDate) settlementsUpdated += 1;
       } else {
         casesProcessed += 1;
-        const resultFieldPrefixes = [
-          "Settlement date",
-          "Disburse date",
-          "Gross settlement",
-          "Attorney fees",
-          "Disbursed",
-          "Result quarter",
-        ];
-        if (previewChanges.some((change) => resultFieldPrefixes.some((prefix) => change.startsWith(prefix)))) {
+        if (previewChanges.some(previewChangeUpdatesSettlement)) {
           settlementsUpdated += 1;
         }
         if (stageAutoSettled) stagesAutoSettled += 1;
