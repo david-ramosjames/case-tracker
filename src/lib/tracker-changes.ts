@@ -1,4 +1,10 @@
-import { type SettlementResult, type TrackerEntry, type TrackerUpdateInput } from "@/lib/types";
+import {
+  type DisbursementPartyOverrideInput,
+  type ManualDisbursementInput,
+  type SettlementResult,
+  type TrackerEntry,
+  type TrackerUpdateInput,
+} from "@/lib/types";
 
 const TRACKER_FIELD_LABELS: Record<string, string> = {
   caseStage: "Case stage",
@@ -23,6 +29,11 @@ const TRACKER_FIELD_LABELS: Record<string, string> = {
   forecastNotes: "Forecast notes",
   lastQuarterlyCheckInAt: "Last quarterly check-in",
   lastSourcesLitUpdatedAt: "Sources & litigation updated",
+  multipleDisbursementsEnabled: "Multiple disbursements",
+  expectedDisbursementCount: "Expected disbursement count",
+  clientPhone: "Client phone",
+  gvNotes: "GV notes",
+  lrjNotes: "LRJ notes",
 };
 
 const RESULT_FIELD_LABELS: Record<keyof SettlementResult, string> = {
@@ -96,6 +107,59 @@ export function describeTrackerChanges(
   }
 
   return labels;
+}
+
+/** Build a PATCH payload with only fields that differ from the last server snapshot. */
+export function buildTrackerChangeInput(
+  next: TrackerEntry,
+  baseline: TrackerEntry,
+  extras?: {
+    manualDisbursements?: ManualDisbursementInput[];
+    disbursementOverrides?: DisbursementPartyOverrideInput[];
+  },
+): TrackerUpdateInput & {
+  result?: SettlementResult;
+  manualDisbursements?: ManualDisbursementInput[];
+  disbursementOverrides?: DisbursementPartyOverrideInput[];
+} {
+  const input: TrackerUpdateInput & {
+    result?: SettlementResult;
+    manualDisbursements?: ManualDisbursementInput[];
+    disbursementOverrides?: DisbursementPartyOverrideInput[];
+  } = {};
+
+  for (const key of Object.keys(TRACKER_FIELD_LABELS)) {
+    const field = key as keyof TrackerUpdateInput;
+    const nextValue = next[field];
+    const baselineValue = baseline[field];
+    if (!valuesEqual(nextValue, baselineValue)) {
+      (input as Record<string, unknown>)[field] = nextValue;
+    }
+  }
+
+  let resultChanged = false;
+  const resultPatch: Record<string, unknown> = {};
+  for (const key of Object.keys(RESULT_FIELD_LABELS)) {
+    const field = key as keyof SettlementResult;
+    const nextValue = next.result[field];
+    const baselineValue = baseline.result[field];
+    if (!valuesEqual(nextValue, baselineValue)) {
+      resultPatch[field] = nextValue;
+      resultChanged = true;
+    }
+  }
+  if (resultChanged) {
+    input.result = { ...next.result };
+  }
+
+  if (extras?.manualDisbursements) {
+    input.manualDisbursements = extras.manualDisbursements;
+  }
+  if (extras?.disbursementOverrides) {
+    input.disbursementOverrides = extras.disbursementOverrides;
+  }
+
+  return input;
 }
 
 export function buildTrackerActivityDescription(changedFields: string[], markReviewed: boolean) {

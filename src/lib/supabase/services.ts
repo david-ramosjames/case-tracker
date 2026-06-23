@@ -319,18 +319,38 @@ export async function updateTrackerEntry(
     now,
   );
 
-  const nextStage = input.caseStage ?? existingTracker?.caseStage ?? "Onboarding";
+  const stageInChangeInput = changeInput.caseStage !== undefined;
+  const expectedLitInChangeInput = changeInput.expectedLitigation !== undefined;
+  const nextStage = stageInChangeInput
+    ? (input.caseStage ?? existingTracker?.caseStage ?? "Onboarding")
+    : (existingTracker?.caseStage ?? "Onboarding");
+  const previousStage = existingTracker?.caseStage;
+  const leavingSettled = previousStage === "Settled" && nextStage !== "Settled";
   const nextExpectedLitigation =
-    input.expectedLitigation !== undefined ? input.expectedLitigation : (existingTracker?.expectedLitigation ?? null);
-  const coercedExpectedLitigation = coerceExpectedLitigationForStage(nextStage, nextExpectedLitigation);
+    expectedLitInChangeInput || stageInChangeInput
+      ? input.expectedLitigation !== undefined
+        ? input.expectedLitigation
+        : (existingTracker?.expectedLitigation ?? null)
+      : (existingTracker?.expectedLitigation ?? null);
+  const coercedExpectedLitigation = stageInChangeInput
+    ? coerceExpectedLitigationForStage(nextStage, nextExpectedLitigation)
+    : nextExpectedLitigation;
   const inputWithExpectedLit =
-    nextStage === "Lit" || coercedExpectedLitigation !== nextExpectedLitigation
+    stageInChangeInput && (nextStage === "Lit" || coercedExpectedLitigation !== nextExpectedLitigation)
       ? { ...inputWithSourcesLit, expectedLitigation: coercedExpectedLitigation }
-      : inputWithSourcesLit;
+      : stageInChangeInput || expectedLitInChangeInput
+        ? { ...inputWithSourcesLit, expectedLitigation: coercedExpectedLitigation }
+        : { ...inputWithSourcesLit, caseStage: undefined, expectedLitigation: undefined };
 
   const litigationPatch: Record<string, unknown> = {};
   if (nextStage === "Lit" || existingTracker?.hasEverBeenLitigation || existingTracker?.caseStage === "Lit") {
     litigationPatch.has_ever_been_litigation = true;
+  }
+  if (leavingSettled && options.actor?.userName !== SETTLEMENT_SHEET_SYNC_ACTOR) {
+    litigationPatch.sheet_auto_settle_suppressed = true;
+  }
+  if (nextStage === "Settled" && previousStage !== "Settled") {
+    litigationPatch.sheet_auto_settle_suppressed = false;
   }
 
   const payload = {
@@ -339,8 +359,6 @@ export async function updateTrackerEntry(
     ...litigationPatch,
   };
   const requestedResult = input.result;
-  const previousStage = existingTracker?.caseStage;
-  const leavingSettled = previousStage === "Settled" && nextStage !== "Settled";
   const resultToPersist =
     requestedResult ??
     (leavingSettled && existingTracker && isCaseFullyDisbursed(existingTracker.result)
@@ -1171,6 +1189,7 @@ type TrackerEntryLookupRow = {
   case_number: string | null;
   expected_disbursement_count: number | null;
   case_stage: string | null;
+  sheet_auto_settle_suppressed?: boolean | null;
 };
 
 export type SettlementSheetCasePayload = {
@@ -1179,6 +1198,8 @@ export type SettlementSheetCasePayload = {
   settlementDate: string | null;
   /** Column G on the disbursing sheet — Y means full settlement (stage can move to Settled). */
   fullSettlement: boolean;
+  /** Some sheet rows Y and others N for the same case — sync treats as not full settlement. */
+  fullSettlementMismatch?: boolean;
   totalSettlementAmount: number | null;
   totalAttorneyFees: number | null;
   latestDisburseDate: string | null;
@@ -1366,6 +1387,59 @@ async function lookupPriorCaseStageBeforeSettlement(
   return null;
 }
 
+async function wasManuallyLeftSettledInHistory(
+  admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
+  trackerEntryId: string,
+): Promise<boolean> {
+  const [{ data: versions, error: versionError }, { data: activities, error: activityError }] = await Promise.all([
+    admin
+      .from("case_tracker_entry_versions")
+      .select("changed_at, changed_fields, old_values, new_values")
+      .eq("tracker_entry_id", trackerEntryId)
+      .order("changed_at", { ascending: false })
+      .limit(30),
+    admin
+      .from("case_tracker_activity")
+      .select("created_at, metadata")
+      .eq("tracker_entry_id", trackerEntryId)
+      .eq("action", "Tracker updated")
+      .order("created_at", { ascending: false })
+      .limit(30),
+  ]);
+  if (versionError) throw new Error(versionError.message);
+  if (activityError) throw new Error(activityError.message);
+
+  for (const row of versions ?? []) {
+    const changedFields = row.changed_fields as string[] | undefined;
+    if (!changedFields?.includes("case_stage")) continue;
+
+    const oldStage = normalizeStage(toStringOrNull(asObject(row.old_values).case_stage));
+    const newStage = normalizeStage(toStringOrNull(asObject(row.new_values).case_stage));
+    if (oldStage === newStage) continue;
+
+    if (oldStage !== "Settled" || newStage === "Settled") {
+      return false;
+    }
+
+    const changedAt = new Date(toString(row.changed_at, "")).getTime();
+    const hasUserStageActivity = (activities ?? []).some((activity) => {
+      const activityAt = new Date(toString(activity.created_at, "")).getTime();
+      if (Math.abs(activityAt - changedAt) > 15_000) return false;
+      const metadata = asObject(activity.metadata);
+      const fields = metadata.changedFields;
+      const changedStage =
+        Array.isArray(fields) &&
+        fields.some((field) => field === "Case stage" || field === "caseStage" || field === "case_stage");
+      const userName = toStringOrNull(metadata.user_name);
+      return changedStage && userName !== SETTLEMENT_SHEET_SYNC_ACTOR;
+    });
+
+    return hasUserStageActivity;
+  }
+
+  return false;
+}
+
 async function recomputeCaseResultFromDisbursements(
   admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
   input: { caseId: string; trackerEntryId: string; caseNumber: string },
@@ -1504,7 +1578,10 @@ async function syncManualDisbursements(
   }
 }
 
-const TRACKER_ENTRY_LOOKUP_SELECT = "id,case_id,case_number,expected_disbursement_count,case_stage";
+const TRACKER_ENTRY_LOOKUP_SELECT =
+  "id,case_id,case_number,expected_disbursement_count,case_stage,sheet_auto_settle_suppressed";
+
+const SETTLEMENT_SHEET_SYNC_ACTOR = "Disbursing spreadsheet sync";
 
 async function backfillTrackerCaseNumber(
   admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
@@ -2295,25 +2372,6 @@ export async function syncSettlementsFromSheet(
     }
 
     let stageAutoSettled = false;
-    if (resolvedSettlementDate && item.fullSettlement) {
-      const stageBeforeSettle = normalizeStage(toStringOrNull(trackerRow.case_stage));
-      if (stageBeforeSettle !== "Settled") {
-        stageAutoSettled = true;
-        if (!dryRun) {
-          const record = await getCaseById(linkedCaseId ?? trackerEntryId);
-          if (record) {
-            const patch = buildStagePatchFromConfirmation(record, "Settled");
-            await updateTrackerEntry(linkedCaseId ?? trackerEntryId, patch, {
-              actor: { userName: "Disbursing spreadsheet sync" },
-              markReviewed: true,
-              changeInput: patch,
-            });
-            stagesAutoSettled += 1;
-          }
-        }
-      }
-    }
-
     let stageRestored: CaseStage | null = null;
     if (!item.fullSettlement) {
       const stageBeforeRestore = normalizeStage(toStringOrNull(trackerRow.case_stage));
@@ -2326,6 +2384,26 @@ export async function syncSettlementsFromSheet(
             .eq("id", trackerEntryId);
           if (stageError) throw new Error(stageError.message);
           stagesRestored += 1;
+        }
+      }
+    } else if (resolvedSettlementDate) {
+      const stageBeforeSettle = normalizeStage(toStringOrNull(trackerRow.case_stage));
+      const sheetAutoSettleSuppressed =
+        toBoolean(trackerRow.sheet_auto_settle_suppressed, false) ||
+        (await wasManuallyLeftSettledInHistory(admin, trackerEntryId));
+      if (stageBeforeSettle !== "Settled" && !sheetAutoSettleSuppressed) {
+        stageAutoSettled = true;
+        if (!dryRun) {
+          const record = await getCaseById(linkedCaseId ?? trackerEntryId);
+          if (record) {
+            const patch = buildStagePatchFromConfirmation(record, "Settled");
+            await updateTrackerEntry(linkedCaseId ?? trackerEntryId, patch, {
+              actor: { userName: SETTLEMENT_SHEET_SYNC_ACTOR },
+              markReviewed: true,
+              changeInput: patch,
+            });
+            stagesAutoSettled += 1;
+          }
         }
       }
     }
@@ -2365,6 +2443,10 @@ export async function syncSettlementsFromSheet(
         previewChanges.push(`Stage: ${currentStage} → Settled`);
       } else if (stageRestored) {
         previewChanges.push(`Stage: Settled → ${stageRestored}`);
+      } else if (item.fullSettlementMismatch) {
+        previewChanges.push(
+          "Mixed Full Settlement (column G) across sheet rows — treated as N; will not auto-settle",
+        );
       }
     }
     const wouldChange = dryRun ? previewChanges.length > 0 : true;

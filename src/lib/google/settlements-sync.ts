@@ -138,7 +138,10 @@ export function buildSettlementCasePayloads(parsed: ParsedSettlementRow[]): Sett
 function buildSettlementCasePayload(caseNumber: string, caseRows: ParsedSettlementRow[]): SettlementSheetCasePayload {
   const sheetRowCount = caseRows.length;
   const settlementDate = caseRows.map((row) => row.settlementDate).find(Boolean) ?? null;
-  const fullSettlement = caseRows.some((row) => row.fullSettlement);
+  // Column G is case-level: every sheet row must be Y. One N (or stale duplicate row) blocks auto-settle.
+  const fullSettlement = caseRows.length > 0 && caseRows.every((row) => row.fullSettlement);
+  const hasFullSettlementYes = caseRows.some((row) => row.fullSettlement);
+  const hasFullSettlementNo = caseRows.some((row) => !row.fullSettlement);
   const disbursements = caseRows.map((row) => ({
     sheetRowKey: row.sheetRowKey,
     partyLabel: row.partyLabel,
@@ -159,6 +162,7 @@ function buildSettlementCasePayload(caseNumber: string, caseRows: ParsedSettleme
     sheetRowCount,
     settlementDate,
     fullSettlement,
+    fullSettlementMismatch: hasFullSettlementYes && hasFullSettlementNo,
     totalSettlementAmount: sumMoney(caseRows.map((row) => row.settlementAmount)),
     totalAttorneyFees: sumMoney(caseRows.map((row) => row.attorneyFees)),
     latestDisburseDate,

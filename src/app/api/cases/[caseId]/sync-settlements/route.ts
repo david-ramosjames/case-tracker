@@ -20,9 +20,12 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ca
     });
     if (result.sheetRowsFound === 0) {
       if (result.clearedSheetData) {
+        const refreshed = await getCaseById(caseId);
         return NextResponse.json({
           message: `No rows on the disbursing sheet for case ${result.caseNumber}. Cleared stale sheet settlement data.`,
           ...result,
+          tracker: refreshed?.tracker ?? null,
+          sharedStatus: refreshed ? refreshed.shared.status : null,
         });
       }
       if (result.financialLocked) {
@@ -62,7 +65,12 @@ export async function POST(_request: Request, { params }: { params: Promise<{ ca
       );
     }
 
-    return NextResponse.json(result);
+    const refreshed = await getCaseById(caseId);
+    return NextResponse.json({
+      ...result,
+      tracker: refreshed?.tracker ?? null,
+      sharedStatus: refreshed ? refreshed.shared.status : null,
+    });
   } catch (error) {
     console.error("Case settlement sheet sync failed", error);
     const message = error instanceof Error ? error.message : "Settlement sheet sync failed.";

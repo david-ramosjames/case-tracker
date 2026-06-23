@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CheckCircle2, ChevronDown, ChevronRight, ExternalLink, MessageSquarePlus, Pencil, Phone, RefreshCw, Save, ShieldAlert, Sparkles, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +48,7 @@ import { disbursementWeight } from "@/lib/disbursements";
 import { type SessionUser } from "@/lib/auth/types";
 import { STAGE_SLACK_LABELS } from "@/lib/slack/enum-replies";
 import { formatSlackChannelLabel, getSlackChannelArchiveUrl } from "@/lib/slack/links";
+import { buildTrackerChangeInput } from "@/lib/tracker-changes";
 import { getQuoClientSmsUrl } from "@/lib/quo/links";
 import { formatClientPhoneDisplay } from "@/lib/quo/phone";
 import {
@@ -55,6 +56,7 @@ import {
   type CaseDisbursement,
   type CaseRecord,
   type CaseSlackChannel,
+  type CaseStatus,
   type CaseTrackerSettings,
   type DocketFlowScheduledEvent,
   type CheckStatus,
@@ -113,11 +115,31 @@ export function CaseDetailView({
   const [isSyncingSheet, setIsSyncingSheet] = useState(false);
   const [sheetSyncMessage, setSheetSyncMessage] = useState<string | null>(null);
   const router = useRouter();
+  const serverTrackerRef = useRef(initialRecord.tracker);
 
   useEffect(() => {
     setShared(initialRecord.shared);
     setTracker(initialRecord.tracker);
+    serverTrackerRef.current = initialRecord.tracker;
   }, [initialRecord]);
+
+  function applyServerTracker(savedTracker: TrackerEntry, sharedStatus?: CaseStatus | null) {
+    serverTrackerRef.current = savedTracker;
+    setTracker((current) => ({
+      ...current,
+      ...savedTracker,
+      result: savedTracker.result ?? current.result,
+      detectedStageSignals: current.detectedStageSignals,
+    }));
+    if (sharedStatus) {
+      setShared((current) => ({ ...current, status: sharedStatus }));
+    } else {
+      setShared((current) => ({
+        ...current,
+        status: deriveCaseStatusFromTracker(savedTracker.caseStage, savedTracker.result),
+      }));
+    }
+  }
 
   useEffect(() => {
     if (tracker.caseStage === "Settled") {
@@ -195,8 +217,14 @@ export function CaseDetailView({
         sheetDisbursementsRemoved?: number;
         stageRestored?: string | null;
         details?: Array<{ stageRestored?: string | null; disbursedStatus?: string }>;
+        tracker?: TrackerEntry | null;
+        sharedStatus?: CaseStatus | null;
       };
       if (!response.ok) throw new Error(body.error ?? "Unable to import from disbursing sheet.");
+
+      if (body.tracker) {
+        applyServerTracker(body.tracker, body.sharedStatus ?? null);
+      }
 
       if (body.clearedSheetData) {
         const parts = [
@@ -361,41 +389,18 @@ export function CaseDetailView({
   }
 
   async function persistTracker(nextTracker: TrackerEntry, options?: { markReviewed?: boolean }) {
+    const changeInput = buildTrackerChangeInput(nextTracker, serverTrackerRef.current, {
+      manualDisbursements: manualDisbursementsForSave(nextTracker.disbursements),
+      disbursementOverrides: disbursementOverridesForSave(nextTracker.disbursements),
+    });
     const payload = {
       shared: {
         caseType: shared.caseType,
         dateOfIncident: shared.dateOfIncident,
         preferredLanguage: shared.preferredLanguage,
       },
-      tracker: {
-        caseStage: nextTracker.caseStage,
-        estimatedSettlementValue: nextTracker.estimatedSettlementValue,
-        estimatedFeeValue: nextTracker.estimatedFeeValue,
-        targetResolutionQuarter: nextTracker.targetResolutionQuarter,
-        confidenceLevel: nextTracker.confidenceLevel,
-        sourceOfEstimate: nextTracker.sourceOfEstimate,
-        liability: nextTracker.liability,
-        caseSize: nextTracker.caseSize,
-        minimumValue: nextTracker.minimumValue,
-        referralFee: nextTracker.referralFee,
-        referralFeeArrangement: nextTracker.referralFeeArrangement,
-        balanceCtaInfo: nextTracker.balanceCtaInfo,
-        policyLimits: nextTracker.policyLimits,
-        policyInfoSource: nextTracker.policyInfoSource,
-        expectedLitigation: nextTracker.expectedLitigation,
-        sources: nextTracker.sources,
-        injuries: nextTracker.injuries,
-        caseDescription: nextTracker.caseDescription,
-        statusNotes: nextTracker.statusNotes,
-        lastQuarterlyCheckInAt: nextTracker.lastQuarterlyCheckInAt,
-        forecastNotes: nextTracker.forecastNotes,
-        multipleDisbursementsEnabled: nextTracker.multipleDisbursementsEnabled,
-        expectedDisbursementCount: nextTracker.expectedDisbursementCount,
-        clientPhone: nextTracker.clientPhone,
-        result: nextTracker.result,
-        manualDisbursements: manualDisbursementsForSave(nextTracker.disbursements),
-        disbursementOverrides: disbursementOverridesForSave(nextTracker.disbursements),
-      },
+      tracker: changeInput,
+      changeInput,
       actor: {
         userId: sessionUser.id,
         userName: sessionUser.name,
@@ -426,6 +431,7 @@ export function CaseDetailView({
     setErrorMessage(null);
     try {
       const { tracker: savedTracker, activity: savedActivity } = await persistTracker(nextTracker, { markReviewed });
+      serverTrackerRef.current = savedTracker;
       setTracker((current) => ({
         ...current,
         ...savedTracker,
@@ -466,6 +472,7 @@ export function CaseDetailView({
     setErrorMessage(null);
     try {
       const { tracker: savedTracker, activity: savedActivity } = await persistTracker(nextTracker);
+      serverTrackerRef.current = savedTracker;
       setTracker((current) => ({ ...current, ...savedTracker, detectedStageSignals: current.detectedStageSignals }));
       if (savedActivity) {
         setActivity((current) => [savedActivity, ...current]);
