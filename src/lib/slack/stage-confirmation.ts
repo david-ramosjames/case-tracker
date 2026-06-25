@@ -21,7 +21,7 @@ import {
   isStageConfirmationReaction,
   parseStageConfirmationText,
 } from "@/lib/slack/stage-confirmation-parse";
-import { buildStagePatchFromConfirmation, shouldSkipPulseSuggestion } from "@/lib/stage-triggers";
+import { buildStagePatchFromConfirmation, isPulseStageOwnedByDisbursingSheet, shouldSkipPulseSuggestion } from "@/lib/stage-triggers";
 import { getCaseById, updateTrackerEntry } from "@/lib/supabase/services";
 import { findCaseByStageUpdateThread } from "@/lib/slack/channels";
 import { getStageSlackOptions } from "@/lib/slack/enum-replies";
@@ -289,6 +289,7 @@ async function fanOutPulseItem(
   options?: { dryRun?: boolean },
 ): Promise<PulseFanOutResult> {
   if (isIgnoredPulseChannelRef(item.channelRef)) return "skipped_ignored_channel";
+  if (isPulseStageOwnedByDisbursingSheet(item)) return "skipped_sheet_sync_owned";
 
   if (!match) return "skipped_no_match";
 
@@ -296,6 +297,7 @@ async function fanOutPulseItem(
   if (!resolvedRecord) return "skipped_no_case";
 
   const skipReason = shouldSkipPulseSuggestion(resolvedRecord, item);
+  if (skipReason === "sheet_sync_owned") return "skipped_sheet_sync_owned";
   if (skipReason === "inactive_tracker") return "skipped_inactive_tracker";
   if (skipReason === "already_at_stage") return "skipped_already_at_stage";
   if (skipReason === "already_applied") return "skipped_already_applied";

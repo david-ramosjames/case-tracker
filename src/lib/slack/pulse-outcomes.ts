@@ -14,7 +14,8 @@ export type PulseFanOutResult =
   | "skipped_handled"
   | "skipped_already_posted"
   | "skipped_post_failed"
-  | "skipped_no_channel";
+  | "skipped_no_channel"
+  | "skipped_sheet_sync_owned";
 
 export type PulseItemOutcome = {
   channelRef: string;

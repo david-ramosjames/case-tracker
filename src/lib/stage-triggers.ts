@@ -65,10 +65,22 @@ export function normalizePulseStageLabel(raw: string): CaseStage {
   return parsePulseStageLabel(raw) ?? "Onboarding";
 }
 
+/** Settled / Disbursed pulse lines are applied by the RJL Cases Disbursing sheet sync — skip fan-out. */
+export function isPulseStageOwnedByDisbursingSheet(item: {
+  suggestedStage: CaseStage;
+  pulseSignal?: PulseSignal | null;
+}) {
+  return item.suggestedStage === "Settled" || item.pulseSignal === "disbursed";
+}
+
 export function shouldSkipPulseSuggestion(
   record: CaseRecord,
   item: { suggestedStage: CaseStage; pulseSignal?: PulseSignal | null },
 ) {
+  if (isPulseStageOwnedByDisbursingSheet(item)) {
+    return "sheet_sync_owned";
+  }
+
   if (item.pulseSignal === "disbursed") {
     if (record.tracker.caseStage === "Settled" && record.tracker.result.disbursedStatus === "Yes") {
       return "already_applied";
