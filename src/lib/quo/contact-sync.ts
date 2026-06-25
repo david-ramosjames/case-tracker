@@ -52,8 +52,25 @@ export function pickBestQuoContactMatch(
   candidates: QuoContactSyncMatch[],
   clientName?: string | null,
 ): QuoContactSyncMatch | null {
-  if (candidates.length === 0) return null;
-  return [...candidates].sort((left, right) => scoreQuoContactMatch(right, clientName) - scoreQuoContactMatch(left, clientName))[0];
+  const ordered = listQuoContactMatchesForCase(candidates, clientName);
+  return ordered[0] ?? null;
+}
+
+/** All unique Quo contacts for a case, best match first. */
+export function listQuoContactMatchesForCase(
+  candidates: QuoContactSyncMatch[],
+  clientName?: string | null,
+): QuoContactSyncMatch[] {
+  const byId = new Map<string, QuoContactSyncMatch>();
+  for (const match of candidates) {
+    const existing = byId.get(match.quoContactId);
+    if (!existing || scoreQuoContactMatch(match, clientName) > scoreQuoContactMatch(existing, clientName)) {
+      byId.set(match.quoContactId, match);
+    }
+  }
+  return [...byId.values()].sort(
+    (left, right) => scoreQuoContactMatch(right, clientName) - scoreQuoContactMatch(left, clientName),
+  );
 }
 
 export async function buildQuoContactMatches(): Promise<QuoContactSyncMatch[]> {

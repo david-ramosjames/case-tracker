@@ -8,8 +8,12 @@ export type SmsAutomation = {
   name: string;
   enabled: boolean;
   fromStage: CaseStage | "any";
-  toStage: CaseStage;
+  fromStages: CaseStage[];
+  toStage: CaseStage | "any";
+  excludedToStages: CaseStage[];
   caseTypes: string[];
+  delayDaysAfterSigning: number | null;
+  attorneyContactIds: string[];
   messageEn: string;
   messageEs: string;
   youtubeUrlEn: string | null;
@@ -26,6 +30,8 @@ export type SmsPendingApproval = {
   caseNumber: string;
   clientName: string | null;
   phone: string;
+  quoContactId: string | null;
+  quoContactName: string | null;
   language: ClientPreferredLanguage;
   messageBody: string;
   fromStage: CaseStage;
@@ -46,6 +52,10 @@ type AutomationRow = {
   enabled: boolean;
   from_stage: string;
   to_stage: string;
+  from_stages?: string[] | null;
+  excluded_to_stages?: string[] | null;
+  delay_days_after_signing?: number | null;
+  attorney_contact_ids?: string[] | null;
   case_types: string[] | null;
   message_en: string;
   message_es: string;
@@ -55,6 +65,32 @@ type AutomationRow = {
   updated_at: string;
 };
 
+function parseStageList(values: string[] | null | undefined): CaseStage[] {
+  return (values ?? []).filter((value): value is CaseStage => value !== "any");
+}
+
+function rowToAutomation(row: AutomationRow): SmsAutomation {
+  const fromStages = parseStageList(row.from_stages);
+  return {
+    id: row.id,
+    name: row.name,
+    enabled: row.enabled,
+    fromStage: row.from_stage === "any" ? "any" : (row.from_stage as CaseStage),
+    fromStages,
+    toStage: row.to_stage === "any" ? "any" : (row.to_stage as CaseStage),
+    excludedToStages: parseStageList(row.excluded_to_stages),
+    caseTypes: row.case_types ?? [],
+    delayDaysAfterSigning: row.delay_days_after_signing ?? null,
+    attorneyContactIds: row.attorney_contact_ids ?? [],
+    messageEn: row.message_en,
+    messageEs: row.message_es,
+    youtubeUrlEn: row.youtube_url_en,
+    youtubeUrlEs: row.youtube_url_es,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 type ApprovalRow = {
   id: string;
   case_id: string;
@@ -63,6 +99,8 @@ type ApprovalRow = {
   case_number: string;
   client_name: string | null;
   phone: string;
+  quo_contact_id: string | null;
+  quo_contact_name: string | null;
   language: ClientPreferredLanguage;
   message_body: string;
   from_stage: string;
@@ -77,23 +115,6 @@ type ApprovalRow = {
   sent_at: string | null;
 };
 
-function rowToAutomation(row: AutomationRow): SmsAutomation {
-  return {
-    id: row.id,
-    name: row.name,
-    enabled: row.enabled,
-    fromStage: row.from_stage === "any" ? "any" : (row.from_stage as CaseStage),
-    toStage: row.to_stage as CaseStage,
-    caseTypes: row.case_types ?? [],
-    messageEn: row.message_en,
-    messageEs: row.message_es,
-    youtubeUrlEn: row.youtube_url_en,
-    youtubeUrlEs: row.youtube_url_es,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
 function rowToApproval(row: ApprovalRow): SmsPendingApproval {
   return {
     id: row.id,
@@ -103,6 +124,8 @@ function rowToApproval(row: ApprovalRow): SmsPendingApproval {
     caseNumber: row.case_number,
     clientName: row.client_name,
     phone: row.phone,
+    quoContactId: row.quo_contact_id,
+    quoContactName: row.quo_contact_name,
     language: row.language,
     messageBody: row.message_body,
     fromStage: row.from_stage as CaseStage,
@@ -134,25 +157,44 @@ export async function listSmsAutomations(): Promise<SmsAutomation[]> {
 export type SmsAutomationInput = {
   name: string;
   enabled?: boolean;
-  fromStage: CaseStage | "any";
-  toStage: CaseStage;
+  fromStage?: CaseStage | "any";
+  fromStages?: CaseStage[];
+  toStage: CaseStage | "any";
+  excludedToStages?: CaseStage[];
   caseTypes?: string[];
+  delayDaysAfterSigning?: number | null;
+  attorneyContactIds?: string[];
   messageEn: string;
   messageEs: string;
   youtubeUrlEn?: string | null;
   youtubeUrlEs?: string | null;
 };
 
+function normalizeAutomationInput(input: SmsAutomationInput) {
+  const fromStages = input.fromStages ?? [];
+  const fromStage =
+    fromStages.length > 0 ? fromStages[0]! : (input.fromStage === undefined ? "any" : input.fromStage);
+
+  return {
+    from_stage: fromStage,
+    from_stages: fromStages,
+    to_stage: input.toStage,
+    excluded_to_stages: input.excludedToStages ?? [],
+    delay_days_after_signing: input.delayDaysAfterSigning ?? null,
+    attorney_contact_ids: input.attorneyContactIds ?? [],
+  };
+}
+
 export async function createSmsAutomation(input: SmsAutomationInput): Promise<SmsAutomation> {
   const admin = requireAdmin();
   const now = new Date().toISOString();
+  const stageFields = normalizeAutomationInput(input);
   const { data, error } = await admin
     .from("sms_automations")
     .insert({
       name: input.name.trim(),
       enabled: input.enabled ?? true,
-      from_stage: input.fromStage,
-      to_stage: input.toStage,
+      ...stageFields,
       case_types: input.caseTypes ?? [],
       message_en: input.messageEn.trim(),
       message_es: input.messageEs.trim(),
@@ -172,8 +214,16 @@ export async function updateSmsAutomation(id: string, input: Partial<SmsAutomati
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (input.name !== undefined) patch.name = input.name.trim();
   if (input.enabled !== undefined) patch.enabled = input.enabled;
-  if (input.fromStage !== undefined) patch.from_stage = input.fromStage;
+  if (input.fromStages !== undefined) {
+    patch.from_stages = input.fromStages;
+    patch.from_stage = input.fromStages.length > 0 ? input.fromStages[0] : (input.fromStage ?? "any");
+  } else if (input.fromStage !== undefined) {
+    patch.from_stage = input.fromStage;
+  }
   if (input.toStage !== undefined) patch.to_stage = input.toStage;
+  if (input.excludedToStages !== undefined) patch.excluded_to_stages = input.excludedToStages;
+  if (input.delayDaysAfterSigning !== undefined) patch.delay_days_after_signing = input.delayDaysAfterSigning;
+  if (input.attorneyContactIds !== undefined) patch.attorney_contact_ids = input.attorneyContactIds;
   if (input.caseTypes !== undefined) patch.case_types = input.caseTypes;
   if (input.messageEn !== undefined) patch.message_en = input.messageEn.trim();
   if (input.messageEs !== undefined) patch.message_es = input.messageEs.trim();
@@ -205,6 +255,8 @@ export async function createSmsPendingApproval(
       case_number: input.caseNumber,
       client_name: input.clientName,
       phone: input.phone,
+      quo_contact_id: input.quoContactId,
+      quo_contact_name: input.quoContactName,
       language: input.language,
       message_body: input.messageBody,
       from_stage: input.fromStage,
@@ -270,13 +322,14 @@ export async function listRecentSmsPendingApprovals(limit = 20) {
   return ((data ?? []) as ApprovalRow[]).map(rowToApproval);
 }
 
-export async function hasPendingSmsApprovalForCase(caseId: string, automationId: string) {
+export async function hasPendingSmsApprovalForCase(caseId: string, automationId: string, phone: string) {
   const admin = requireAdmin();
   const { data, error } = await admin
     .from("sms_pending_approvals")
     .select("id")
     .eq("case_id", caseId)
     .eq("automation_id", automationId)
+    .eq("phone", phone)
     .eq("status", "pending")
     .maybeSingle();
 

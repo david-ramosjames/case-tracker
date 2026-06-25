@@ -187,7 +187,18 @@ export type TrackerEntry = {
   quoContactId: string | null;
   quoConversationId: string | null;
   quoPhoneNumberId: string | null;
+  quoContacts: CaseQuoContact[];
   updatedAt: string;
+};
+
+export type CaseQuoContact = {
+  id: string;
+  quoContactId: string;
+  displayName: string;
+  phone: string | null;
+  quoConversationId: string | null;
+  quoPhoneNumberId: string | null;
+  smsEnabled: boolean;
 };
 
 export type CaseSlackChannel = {
@@ -343,7 +354,9 @@ export type TrackerUpdateInput = Partial<
     | "multipleDisbursementsEnabled"
     | "clientPhone"
   >
->;
+> & {
+  quoContactPreferences?: Array<{ id: string; smsEnabled: boolean }>;
+};
 
 /** Upcoming row from shared DocketFlow `case_events` (read-only in the tracker). */
 export type DocketFlowScheduledEvent = {

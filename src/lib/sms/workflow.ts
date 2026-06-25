@@ -1,6 +1,6 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
 import { cleanCaseNumber } from "@/lib/csv/parse";
-import { buildQuoContactMatches, groupQuoContactMatchesByCaseNumber, pickBestQuoContactMatch } from "@/lib/quo/contact-sync";
+import { buildQuoContactMatches, groupQuoContactMatchesByCaseNumber, listQuoContactMatchesForCase } from "@/lib/quo/contact-sync";
 import { lookupQuoInboxForContact, type QuoInboxMatch } from "@/lib/quo/client";
 import { isQuoEnabled } from "@/lib/quo/config";
 import { sendQuoTextMessage } from "@/lib/quo/client";
@@ -8,7 +8,10 @@ import { renderSmsMessage } from "@/lib/sms/message-template";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
 import { postSlackMessage } from "@/lib/slack/client";
 import { isSlackEnabled, getSmsApprovalSlackChannelId } from "@/lib/slack/config";
+import { getSmsRecipients } from "@/lib/sms/recipients";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { syncTrackerQuoContacts } from "@/lib/supabase/quo-contacts";
+import { automationMatchesStageChange } from "@/lib/sms/automation-match";
 import {
   createSmsPendingApproval,
   hasPendingSmsApprovalForCase,
@@ -18,14 +21,6 @@ import {
   type SmsPendingApproval,
 } from "@/lib/supabase/sms-automations";
 import { type CaseRecord, type CaseStage } from "@/lib/types";
-
-function automationMatchesRecord(automation: SmsAutomation, record: CaseRecord, fromStage: CaseStage, toStage: CaseStage) {
-  if (!automation.enabled) return false;
-  if (automation.toStage !== toStage) return false;
-  if (automation.fromStage !== "any" && automation.fromStage !== fromStage) return false;
-  if (automation.caseTypes.length > 0 && !automation.caseTypes.includes(record.shared.caseType)) return false;
-  return true;
-}
 
 function resolveClientLanguage(record: CaseRecord): "en" | "es" {
   return record.shared.preferredLanguage === "es" ? "es" : "en";
@@ -59,11 +54,14 @@ export function buildSmsApprovalSlackMessage(input: {
   appUrl: string;
 }) {
   const languageLabel = input.approval.language === "es" ? "Spanish" : "English";
+  const recipientLabel = input.approval.quoContactName
+    ? `${input.approval.quoContactName} · \`${input.approval.phone}\``
+    : `\`${input.approval.phone}\``;
   return [
     "*Pending client SMS — not sent yet.*",
     `Case *#${input.approval.caseNumber}* · ${input.approval.clientName ?? "Client"}`,
     `Stage: *${input.approval.fromStage}* → *${input.approval.toStage}*`,
-    `To: \`${input.approval.phone}\` (${languageLabel})`,
+    `To: ${recipientLabel} (${languageLabel})`,
     "",
     "*Message preview:*",
     "```",
@@ -86,12 +84,12 @@ export async function queueSmsApprovalsForStageChange(
 
   const automations = await listSmsAutomations();
   const matches = automations.filter((automation) =>
-    automationMatchesRecord(automation, after, previousStage, after.tracker.caseStage),
+    automationMatchesStageChange(automation, after, previousStage, after.tracker.caseStage),
   );
   if (matches.length === 0) return { queued: 0, skipped: "no_matching_automation" as const };
 
-  const phone = after.tracker.clientPhone?.trim();
-  if (!phone) return { queued: 0, skipped: "missing_phone" as const };
+  const recipients = getSmsRecipients(after);
+  if (recipients.length === 0) return { queued: 0, skipped: "missing_phone" as const };
 
   const channelId = await resolveApprovalChannelId(after.shared.caseNumber);
   if (!channelId) return { queued: 0, skipped: "no_slack_channel" as const };
@@ -100,32 +98,36 @@ export async function queueSmsApprovalsForStageChange(
   let queued = 0;
 
   for (const automation of matches) {
-    const alreadyPending = await hasPendingSmsApprovalForCase(after.shared.id, automation.id);
-    if (alreadyPending) continue;
+    for (const recipient of recipients) {
+      const alreadyPending = await hasPendingSmsApprovalForCase(after.shared.id, automation.id, recipient.phone);
+      if (alreadyPending) continue;
 
-    const messageBody = buildAutomationMessage(automation, after, previousStage, after.tracker.caseStage);
-    const approval = await createSmsPendingApproval({
-      caseId: after.shared.id,
-      trackerEntryId: after.tracker.id,
-      automationId: automation.id,
-      caseNumber: after.shared.caseNumber,
-      clientName: after.shared.clientName,
-      phone,
-      language: resolveClientLanguage(after),
-      messageBody,
-      fromStage: previousStage,
-      toStage: after.tracker.caseStage,
-    });
+      const messageBody = buildAutomationMessage(automation, after, previousStage, after.tracker.caseStage);
+      const approval = await createSmsPendingApproval({
+        caseId: after.shared.id,
+        trackerEntryId: after.tracker.id,
+        automationId: automation.id,
+        caseNumber: after.shared.caseNumber,
+        clientName: after.shared.clientName,
+        phone: recipient.phone,
+        quoContactId: recipient.quoContactId,
+        quoContactName: recipient.displayName,
+        language: resolveClientLanguage(after),
+        messageBody,
+        fromStage: previousStage,
+        toStage: after.tracker.caseStage,
+      });
 
-    const slackText = buildSmsApprovalSlackMessage({ approval, appUrl });
-    const posted = await postSlackMessage({ channel: channelId, text: slackText });
-    if (!posted?.ts) continue;
+      const slackText = buildSmsApprovalSlackMessage({ approval, appUrl });
+      const posted = await postSlackMessage({ channel: channelId, text: slackText });
+      if (!posted?.ts) continue;
 
-    await updateSmsPendingApproval(approval.id, {
-      slackChannelId: channelId,
-      slackThreadTs: posted.ts,
-    });
-    queued += 1;
+      await updateSmsPendingApproval(approval.id, {
+        slackChannelId: channelId,
+        slackThreadTs: posted.ts,
+      });
+      queued += 1;
+    }
   }
 
   return { queued };
@@ -250,47 +252,59 @@ export async function syncQuoPhonesToTracker() {
 
   for (const row of trackerRows ?? []) {
     const caseNumber = cleanCaseNumber(String(row.case_number ?? ""));
-    const match = pickBestQuoContactMatch(groupedMatches.get(caseNumber) ?? [], row.client_name_snapshot);
+    const caseMatches = listQuoContactMatchesForCase(groupedMatches.get(caseNumber) ?? [], row.client_name_snapshot);
 
     const currentPhone = String(row.client_phone ?? "").trim() || null;
     const currentContactId = String(row.quo_contact_id ?? "").trim() || null;
     const currentConversationId = String(row.quo_conversation_id ?? "").trim() || null;
     const currentPhoneNumberId = String(row.quo_phone_number_id ?? "").trim() || null;
 
-    let nextPhone = match?.phone?.trim() || currentPhone || null;
-    const nextContactId = match?.quoContactId ?? (currentContactId || null);
-    let nextConversationId = currentConversationId;
-    let nextPhoneNumberId = currentPhoneNumberId;
+    const syncedContacts: Array<{
+      quoContactId: string;
+      displayName: string;
+      phone: string | null;
+      quoConversationId: string | null;
+      quoPhoneNumberId: string | null;
+    }> = [];
 
-    const contactChanged = Boolean(match && nextContactId !== currentContactId);
-    const phoneChanged = Boolean(match?.phone?.trim()) && nextPhone !== currentPhone;
-    const needsInboxLookup =
-      Boolean(match) &&
-      (contactChanged || phoneChanged || !currentConversationId || !currentPhoneNumberId || !nextPhone);
+    for (const match of caseMatches) {
+      let phone = match.phone?.trim() || null;
+      let conversationId: string | null = null;
+      let phoneNumberId: string | null = null;
 
-    if (match && needsInboxLookup) {
       const inbox = await resolveInboxForMatch({
         quoContactId: match.quoContactId,
         displayName: match.displayName,
-        phone: nextPhone,
+        phone,
       });
       if (inbox) {
-        nextPhone = inbox.phone;
-        nextConversationId = inbox.conversationId;
-        nextPhoneNumberId = inbox.phoneNumberId;
-      } else if (contactChanged || phoneChanged) {
-        nextConversationId = null;
-        nextPhoneNumberId = null;
+        phone = inbox.phone;
+        conversationId = inbox.conversationId;
+        phoneNumberId = inbox.phoneNumberId;
       }
-    } else if (contactChanged) {
-      nextConversationId = null;
-      nextPhoneNumberId = null;
+
+      syncedContacts.push({
+        quoContactId: match.quoContactId,
+        displayName: match.displayName,
+        phone,
+        quoConversationId: conversationId,
+        quoPhoneNumberId: phoneNumberId,
+      });
+      if (conversationId) conversationLinks += 1;
     }
 
-    if (match) matched += 1;
-    if (nextConversationId) conversationLinks += 1;
+    if (caseMatches.length > 0) matched += 1;
+
+    await syncTrackerQuoContacts(String(row.id), syncedContacts);
+
+    const primary = syncedContacts[0] ?? null;
+    const nextPhone = primary?.phone ?? currentPhone;
+    const nextContactId = primary?.quoContactId ?? currentContactId;
+    const nextConversationId = primary?.quoConversationId ?? currentConversationId;
+    const nextPhoneNumberId = primary?.quoPhoneNumberId ?? currentPhoneNumberId;
 
     if (
+      caseMatches.length === 0 &&
       currentPhone === nextPhone &&
       currentContactId === nextContactId &&
       currentConversationId === nextConversationId &&

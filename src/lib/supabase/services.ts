@@ -18,6 +18,7 @@ import {
   parseSlackThreadUpdate,
 } from "@/lib/slack/thread-update";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { listQuoContactsByTrackerIds, updateQuoContactSmsPreferences } from "@/lib/supabase/quo-contacts";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildStagePatchFromConfirmation } from "@/lib/stage-triggers";
 import { buildTrackerActivityDescription, describeTrackerChanges } from "@/lib/tracker-changes";
@@ -153,6 +154,12 @@ export async function getCases(): Promise<CaseRecord[]> {
     trackerClient.from("case_tracker_stage_suggestions").select("*"),
   ]);
 
+  const trackerIds = (trackerRows ?? [])
+    .map((row) => toStringOrNull((row as TrackerEntryRow).id))
+    .filter((id): id is string => Boolean(id) && isUuid(id));
+
+  const quoContactsByTrackerId = await listQuoContactsByTrackerIds(trackerIds).catch(() => new Map());
+
   return mapRecords({
     cases: (caseRows ?? []) as DocketFlowCaseRow[],
     trackers: (trackerRows ?? []) as TrackerEntryRow[],
@@ -160,6 +167,7 @@ export async function getCases(): Promise<CaseRecord[]> {
     disbursements: (disbursementRows ?? []) as DisbursementRow[],
     contacts: (contactRows ?? []) as ContactRow[],
     suggestions: (suggestionRows ?? []) as SuggestionRow[],
+    quoContactsByTrackerId,
   });
 }
 
@@ -406,6 +414,10 @@ export async function updateTrackerEntry(
       const admin = createSupabaseAdminClient();
       if (!admin) throw new Error("Service role required to save disbursement overrides.");
       await syncDisbursementPartyOverrides(admin, input.disbursementOverrides);
+    }
+
+    if (input.quoContactPreferences?.length && hasPersistedTrackerEntry(existingTracker)) {
+      await updateQuoContactSmsPreferences(existingTracker!.id, input.quoContactPreferences);
     }
 
     if (input.manualDisbursements || input.disbursementOverrides?.length) {
@@ -2985,6 +2997,7 @@ function mapRecords({
   disbursements,
   contacts,
   suggestions,
+  quoContactsByTrackerId,
 }: {
   cases: DocketFlowCaseRow[];
   trackers: TrackerEntryRow[];
@@ -2992,6 +3005,7 @@ function mapRecords({
   disbursements: DisbursementRow[];
   contacts: ContactRow[];
   suggestions: SuggestionRow[];
+  quoContactsByTrackerId: Map<string, import("@/lib/types").CaseQuoContact[]>;
 }): CaseRecord[] {
   const caseById = new Map(cases.map((row) => [row.id, row]));
   const trackerByCaseId = new Map(trackers.map((row) => [toStringOrNull(row.case_id), row]).filter((entry): entry is [string, TrackerEntryRow] => Boolean(entry[0])));
@@ -3015,7 +3029,7 @@ function mapRecords({
     ]), [
       ...(disbursementsByTrackerId.get(trackerId) ?? []),
       ...(disbursementsByCaseNumber.get(caseNumber) ?? []),
-    ]);
+    ], quoContactsByTrackerId.get(trackerId) ?? []);
   });
 
   const orphanTrackerRecords = trackers
@@ -3036,6 +3050,7 @@ function mapRecords({
           ...(disbursementsByTrackerId.get(trackerId) ?? []),
           ...(disbursementsByCaseNumber.get(caseNumber) ?? []),
         ],
+        quoContactsByTrackerId.get(trackerId) ?? [],
       );
     });
 
@@ -3049,6 +3064,7 @@ function rowToCaseRecord(
   contacts: ContactRow[],
   suggestionRows: SuggestionRow[],
   disbursementRows: DisbursementRow[] = [],
+  quoContacts: import("@/lib/types").CaseQuoContact[] = [],
 ): CaseRecord {
   const assignedContacts = contacts.filter((contact) => caseRow?.assigned_contact_ids?.includes(contact.id));
   const attorneyContact =
@@ -3060,7 +3076,7 @@ function rowToCaseRecord(
     assignedContacts.find((contact) => contact.role === "paralegal") ??
     makeTemporaryContact("unassigned-paralegal", toString(trackerRow.paralegal_name, "Unassigned Paralegal"), "paralegal");
   const sharedId = caseRow?.id ?? toString(trackerRow.id, "unlinked-case");
-  const tracker = rowToTrackerEntry(trackerRow, resultRow, suggestionRows, disbursementRows);
+  const tracker = rowToTrackerEntry(trackerRow, resultRow, suggestionRows, disbursementRows, quoContacts);
 
   return {
     shared: {
@@ -3155,6 +3171,7 @@ function rowToTrackerEntry(
   resultRow: ResultRow | null,
   suggestionRows: SuggestionRow[],
   disbursementRows: DisbursementRow[] = [],
+  quoContacts: import("@/lib/types").CaseQuoContact[] = [],
 ): TrackerEntry {
   const minimumValue = toNumber(row.minimum_value);
   const entry: TrackerEntry = {
@@ -3210,6 +3227,7 @@ function rowToTrackerEntry(
     quoContactId: toStringOrNull(row.quo_contact_id),
     quoConversationId: toStringOrNull(row.quo_conversation_id),
     quoPhoneNumberId: toStringOrNull(row.quo_phone_number_id),
+    quoContacts,
     updatedAt: toString(row.updated_at, new Date().toISOString()),
   };
   const result = applyDerivedSettlementResult(entry.result, entry);

@@ -19,19 +19,28 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const { id } = await params;
 
   try {
-    const body = (await request.json()) as {
-      name?: string;
-      enabled?: boolean;
-      fromStage?: CaseStage | "any";
-      toStage?: CaseStage;
-      caseTypes?: string[];
-      messageEn?: string;
-      messageEs?: string;
-      youtubeUrlEn?: string | null;
-      youtubeUrlEs?: string | null;
-    };
+    const body = (await request.json()) as Record<string, unknown>;
+    const patch: Record<string, unknown> = {};
 
-    const automation = await updateSmsAutomation(id, body);
+    if (body.name !== undefined) patch.name = body.name;
+    if (body.enabled !== undefined) patch.enabled = body.enabled;
+    if (body.fromStage !== undefined) patch.fromStage = body.fromStage;
+    if (body.fromStages !== undefined) patch.fromStages = body.fromStages;
+    if (body.toStage !== undefined) patch.toStage = body.toStage;
+    if (body.excludedToStages !== undefined) patch.excludedToStages = body.excludedToStages;
+    if (body.caseTypes !== undefined) patch.caseTypes = body.caseTypes;
+    if (body.delayDaysAfterSigning !== undefined) {
+      const delayRaw = body.delayDaysAfterSigning;
+      patch.delayDaysAfterSigning =
+        delayRaw === null || delayRaw === "" ? null : Number(delayRaw);
+    }
+    if (body.attorneyContactIds !== undefined) patch.attorneyContactIds = body.attorneyContactIds;
+    if (body.messageEn !== undefined) patch.messageEn = body.messageEn;
+    if (body.messageEs !== undefined) patch.messageEs = body.messageEs;
+    if (body.youtubeUrlEn !== undefined) patch.youtubeUrlEn = body.youtubeUrlEn;
+    if (body.youtubeUrlEs !== undefined) patch.youtubeUrlEs = body.youtubeUrlEs;
+
+    const automation = await updateSmsAutomation(id, patch as Parameters<typeof updateSmsAutomation>[1]);
     return NextResponse.json({ automation });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to update SMS automation.";

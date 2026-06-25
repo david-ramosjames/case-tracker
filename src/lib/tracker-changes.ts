@@ -129,7 +129,7 @@ export function buildTrackerChangeInput(
   } = {};
 
   for (const key of Object.keys(TRACKER_FIELD_LABELS)) {
-    const field = key as keyof TrackerUpdateInput;
+    const field = key as keyof TrackerEntry;
     const nextValue = next[field];
     const baselineValue = baseline[field];
     if (!valuesEqual(nextValue, baselineValue)) {

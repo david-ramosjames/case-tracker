@@ -41,6 +41,7 @@ import {
   getProjectedFeeValue,
   needsQuarterlyCheckIn,
 } from "@/lib/calculations";
+import { CaseQuoContactsList } from "@/components/cases/case-quo-contacts";
 import { DisbursementPartiesCard } from "@/components/cases/disbursement-parties-card";
 import { ResultDateInput } from "@/components/cases/result-date-input";
 import { dateInputToDateOnly, toDateInput } from "@/lib/date-input";
@@ -94,7 +95,10 @@ export function CaseDetailView({
   docketFlowCaseUrl: string | null;
 }) {
   const [shared, setShared] = useState(initialRecord.shared);
-  const [tracker, setTracker] = useState(initialRecord.tracker);
+  const [tracker, setTracker] = useState({
+    ...initialRecord.tracker,
+    quoContacts: initialRecord.tracker.quoContacts ?? [],
+  });
   const [comments, setComments] = useState(initialComments);
   const [activity, setActivity] = useState(initialActivity);
   const [newComment, setNewComment] = useState("");
@@ -388,18 +392,40 @@ export function CaseDetailView({
     });
   }
 
+  function updateQuoContactSmsEnabled(contactId: string, smsEnabled: boolean) {
+    setTracker((current) => ({
+      ...current,
+      quoContacts: current.quoContacts.map((contact) =>
+        contact.id === contactId ? { ...contact, smsEnabled } : contact,
+      ),
+    }));
+  }
+
+  function buildQuoContactPreferences(nextTracker: TrackerEntry) {
+    return nextTracker.quoContacts
+      .filter((contact) => {
+        const previous = serverTrackerRef.current.quoContacts.find((item) => item.id === contact.id);
+        return previous && previous.smsEnabled !== contact.smsEnabled;
+      })
+      .map((contact) => ({ id: contact.id, smsEnabled: contact.smsEnabled }));
+  }
+
   async function persistTracker(nextTracker: TrackerEntry, options?: { markReviewed?: boolean }) {
     const changeInput = buildTrackerChangeInput(nextTracker, serverTrackerRef.current, {
       manualDisbursements: manualDisbursementsForSave(nextTracker.disbursements),
       disbursementOverrides: disbursementOverridesForSave(nextTracker.disbursements),
     });
+    const quoContactPreferences = buildQuoContactPreferences(nextTracker);
     const payload = {
       shared: {
         caseType: shared.caseType,
         dateOfIncident: shared.dateOfIncident,
         preferredLanguage: shared.preferredLanguage,
       },
-      tracker: changeInput,
+      tracker: {
+        ...changeInput,
+        ...(quoContactPreferences.length > 0 ? { quoContactPreferences } : {}),
+      },
       changeInput,
       actor: {
         userId: sessionUser.id,
@@ -673,31 +699,35 @@ export function CaseDetailView({
                     No Slack channel mapped — import Client Contact Status in Settings.
                   </p>
                 )}
-                <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-navy-950">
-                  <span className="text-muted-foreground">Client phone</span>
-                  {clientPhoneDisplay ? (
-                    quoSmsUrl ? (
-                      <a
-                        href={quoSmsUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 font-medium text-pink-600 hover:text-pink-500"
-                      >
-                        <Phone className="h-3.5 w-3.5" />
-                        {clientPhoneDisplay}
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        <span className="sr-only">Open Quo inbox</span>
-                      </a>
+                <div className="mt-2 text-sm text-navy-950">
+                  <div className="text-muted-foreground">Quo contacts</div>
+                  <div className="mt-1">
+                    {tracker.quoContacts.length > 0 ? (
+                      <CaseQuoContactsList contacts={tracker.quoContacts} />
+                    ) : clientPhoneDisplay ? (
+                      quoSmsUrl ? (
+                        <a
+                          href={quoSmsUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 font-medium text-pink-600 hover:text-pink-500"
+                        >
+                          <Phone className="h-3.5 w-3.5" />
+                          {clientPhoneDisplay}
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          <span className="sr-only">Open Quo inbox</span>
+                        </a>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 font-medium">
+                          <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                          {clientPhoneDisplay}
+                        </span>
+                      )
                     ) : (
-                      <span className="inline-flex items-center gap-1 font-medium">
-                        <Phone className="h-3.5 w-3.5 text-muted-foreground" />
-                        {clientPhoneDisplay}
-                      </span>
-                    )
-                  ) : (
-                    <span className="text-muted-foreground">Not set — sync from Quo on Client SMS settings</span>
-                  )}
-                </p>
+                      <CaseQuoContactsList contacts={[]} />
+                    )}
+                  </div>
+                </div>
               </div>
               <div className="flex flex-wrap gap-2">
                 {isOrphanTracker ? <Badge variant="warning">Orphaned tracker row</Badge> : null}
@@ -876,7 +906,15 @@ export function CaseDetailView({
                       <p className="mt-1 text-xs text-muted-foreground">Calculated from minimum value.</p>
                     </div>
                     <Info label="Policy Source" value={tracker.policyInfoSource ?? "Not set"} />
-                    <Info label="Client phone" value={tracker.clientPhone ?? "Not set — sync from Quo or edit"} />
+                    <div>
+                      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quo contacts</div>
+                      <div className="mt-1">
+                        <CaseQuoContactsList contacts={tracker.quoContacts} />
+                      </div>
+                      {!tracker.quoContacts.length && tracker.clientPhone ? (
+                        <p className="mt-1 text-sm text-muted-foreground">Legacy phone: {tracker.clientPhone}</p>
+                      ) : null}
+                    </div>
                     <Info label="Preferred language" value={shared.preferredLanguage === "es" ? "Spanish" : "English"} />
                     <Info label="Projected firm fee" value={formatCurrency(getProjectedFeeValue(record))} />
                   </div>
@@ -929,12 +967,23 @@ export function CaseDetailView({
                         ))}
                       </Select>
                     </Field>
-                    <Field label="Client phone (SMS)">
-                      <Input
-                        value={tracker.clientPhone ?? ""}
-                        placeholder="+15125551234"
-                        onChange={(event) => updateField("clientPhone", event.target.value.trim() || null)}
-                      />
+                    <Field label="Quo contacts (SMS)">
+                      {tracker.quoContacts.length > 0 ? (
+                        <CaseQuoContactsList
+                          contacts={tracker.quoContacts}
+                          editable
+                          onSmsEnabledChange={updateQuoContactSmsEnabled}
+                        />
+                      ) : (
+                        <div className="space-y-2 text-sm text-muted-foreground">
+                          <p>No Quo contacts synced yet. Run sync on Client SMS settings, or enter a phone manually below.</p>
+                          <Input
+                            value={tracker.clientPhone ?? ""}
+                            placeholder="+15125551234"
+                            onChange={(event) => updateField("clientPhone", event.target.value.trim() || null)}
+                          />
+                        </div>
+                      )}
                     </Field>
                     <Field label="Preferred language">
                       <Select
