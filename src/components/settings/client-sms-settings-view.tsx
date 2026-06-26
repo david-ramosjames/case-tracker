@@ -5,6 +5,7 @@ import { Loader2, Plus, Trash2 } from "lucide-react";
 import { CASE_STAGE_OPTIONS, CASE_TYPE_OPTIONS } from "@/lib/case-options";
 import { SMS_DEFAULT_EXCLUDED_TO_STAGES } from "@/lib/sms/automation-match";
 import { type SmsAutomation, type SmsAutomationTriggerType } from "@/lib/supabase/sms-automations";
+import { STAGE_SLACK_LABELS } from "@/lib/slack/enum-replies";
 import { type AppUser, type CaseStage } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,7 +39,7 @@ function formatAutomationTrigger(automation: SmsAutomation, attorneys: AppUser[]
   const parts: string[] = [];
 
   if (automation.triggerType === "time_in_stage") {
-    parts.push(`While in ${automation.inStages.join(", ") || "—"}`);
+    parts.push(`While in ${formatStageList(automation.inStages) || "—"}`);
     if (automation.delayHoursAfterSigning != null) {
       parts.push(`Signing + ${automation.delayHoursAfterSigning}h`);
     }
@@ -48,15 +49,15 @@ function formatAutomationTrigger(automation: SmsAutomation, attorneys: AppUser[]
   } else {
     const fromLabel =
       automation.fromStages.length > 0
-        ? automation.fromStages.join(", ")
+        ? formatStageList(automation.fromStages)
         : automation.fromStage === "any"
           ? "Any"
-          : automation.fromStage;
+          : stageChipLabel(automation.fromStage as CaseStage);
 
     const toLabel =
       automation.toStage === "any"
-        ? `Any except ${automation.excludedToStages.length > 0 ? automation.excludedToStages.join(", ") : "none"}`
-        : automation.toStage;
+        ? `Any except ${automation.excludedToStages.length > 0 ? formatStageList(automation.excludedToStages) : "none"}`
+        : stageChipLabel(automation.toStage as CaseStage);
 
     parts.push(`${fromLabel} → ${toLabel}`);
 
@@ -78,6 +79,15 @@ function formatAutomationTrigger(automation: SmsAutomation, attorneys: AppUser[]
   }
 
   return parts.join(" · ");
+}
+
+function stageChipLabel(stage: CaseStage) {
+  const label = STAGE_SLACK_LABELS[stage] ?? stage;
+  return label === stage ? stage : `${label} (${stage})`;
+}
+
+function formatStageList(stages: CaseStage[]) {
+  return stages.map(stageChipLabel).join(", ");
 }
 
 type ClientSmsSettingsViewProps = {
@@ -328,7 +338,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                 value={form.triggerType}
                 onChange={(e) => setForm((c) => ({ ...c, triggerType: e.target.value as SmsAutomationTriggerType }))}
               >
-                <option value="stage_change">Stage change — fires when the case moves between stages</option>
+                <option value="stage_change">Stage change — fires when the case moves between stages (supports “any except” destination)</option>
                 <option value="time_in_stage">Time in stage — fires daily while in stage after signing delay (no stage change)</option>
               </Select>
             </div>
@@ -348,10 +358,10 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                       key={stage}
                       type="button"
                       className={`rounded-full border px-3 py-1 text-xs ${selected ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
-                      onClick={() => toggleInStage(stage)}
-                    >
-                      {stage}
-                    </button>
+                    onClick={() => toggleInStage(stage)}
+                  >
+                    {stageChipLabel(stage)}
+                  </button>
                   );
                 })}
               </div>
@@ -360,7 +370,9 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
             <>
           <div className="space-y-2">
             <label className="text-sm font-medium text-navy-950">From stage(s)</label>
-            <p className="text-xs text-muted-foreground">Leave empty to match any prior stage. Select one or more to require a specific origin.</p>
+            <p className="text-xs text-muted-foreground">
+              Select one or more origin stages (e.g. Treatment). Leave empty to match any prior stage.
+            </p>
             <div className="flex flex-wrap gap-2">
               {CASE_STAGE_OPTIONS.map((stage) => {
                 const selected = form.fromStages.includes(stage);
@@ -371,20 +383,35 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                     className={`rounded-full border px-3 py-1 text-xs ${selected ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
                     onClick={() => toggleFromStage(stage)}
                   >
-                    {stage}
+                    {stageChipLabel(stage)}
                   </button>
                 );
               })}
             </div>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
+          <div className="space-y-3 rounded-lg border border-border/80 p-4">
+            <div className="space-y-1">
               <label className="text-sm font-medium text-navy-950">To stage</label>
-              <Select value={form.toMode} onChange={(e) => setForm((c) => ({ ...c, toMode: e.target.value as ToMode }))}>
-                <option value="specific">Specific stage</option>
-                <option value="any">Any stage except…</option>
-              </Select>
+              <p className="text-xs text-muted-foreground">
+                Choose a single destination, or any stage except the ones you exclude below (e.g. Treatment → Demand, Litigation, etc., but not Terminated).
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium ${form.toMode === "specific" ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
+                onClick={() => setForm((c) => ({ ...c, toMode: "specific" }))}
+              >
+                One specific stage
+              </button>
+              <button
+                type="button"
+                className={`rounded-full border px-3 py-1.5 text-xs font-medium ${form.toMode === "any" ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
+                onClick={() => setForm((c) => ({ ...c, toMode: "any" }))}
+              >
+                Any stage except…
+              </button>
             </div>
             {form.toMode === "specific" ? (
               <div className="space-y-2">
@@ -392,16 +419,16 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                 <Select value={form.toStage} onChange={(e) => setForm((c) => ({ ...c, toStage: e.target.value as CaseStage }))}>
                   {CASE_STAGE_OPTIONS.map((stage) => (
                     <option key={stage} value={stage}>
-                      {stage}
+                      {stageChipLabel(stage)}
                     </option>
                   ))}
                 </Select>
               </div>
             ) : (
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-2">
                 <label className="text-sm font-medium text-navy-950">Excluded destination stages</label>
                 <p className="text-xs text-muted-foreground">
-                  The automation fires when the case moves to any stage not selected below (e.g. Treatment → anything except Terminated).
+                  The automation fires when the case moves to any stage not selected below.
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {CASE_STAGE_OPTIONS.map((stage) => {
@@ -413,7 +440,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                         className={`rounded-full border px-3 py-1 text-xs ${selected ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
                         onClick={() => toggleExcludedToStage(stage)}
                       >
-                        {stage}
+                        {stageChipLabel(stage)}
                       </button>
                     );
                   })}
