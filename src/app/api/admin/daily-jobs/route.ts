@@ -13,6 +13,7 @@ const VALID_STEPS: DailyJobStep[] = [
   "dailyPulse",
   "missingFields",
   "fieldReminders",
+  "smsTimeTriggers",
   "all",
 ];
 

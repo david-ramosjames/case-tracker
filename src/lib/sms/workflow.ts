@@ -11,15 +11,17 @@ import { isSlackEnabled, getSmsApprovalSlackChannelId } from "@/lib/slack/config
 import { getSmsRecipients } from "@/lib/sms/recipients";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { syncTrackerQuoContacts } from "@/lib/supabase/quo-contacts";
-import { automationMatchesStageChange } from "@/lib/sms/automation-match";
+import { automationMatchesStageChange, automationMatchesTimeInStage } from "@/lib/sms/automation-match";
 import {
   createSmsPendingApproval,
   hasPendingSmsApprovalForCase,
+  hasSmsAutomationDeliveryForCase,
   listSmsAutomations,
   updateSmsPendingApproval,
   type SmsAutomation,
   type SmsPendingApproval,
 } from "@/lib/supabase/sms-automations";
+import { getCases } from "@/lib/supabase/services";
 import { type CaseRecord, type CaseStage } from "@/lib/types";
 
 function resolveClientLanguage(record: CaseRecord): "en" | "es" {
@@ -57,10 +59,14 @@ export function buildSmsApprovalSlackMessage(input: {
   const recipientLabel = input.approval.quoContactName
     ? `${input.approval.quoContactName} · \`${input.approval.phone}\``
     : `\`${input.approval.phone}\``;
+  const stageLine =
+    input.approval.fromStage === input.approval.toStage
+      ? `While in *${input.approval.toStage}* (signing delay met)`
+      : `Stage: *${input.approval.fromStage}* → *${input.approval.toStage}*`;
   return [
     "*Pending client SMS — not sent yet.*",
     `Case *#${input.approval.caseNumber}* · ${input.approval.clientName ?? "Client"}`,
-    `Stage: *${input.approval.fromStage}* → *${input.approval.toStage}*`,
+    stageLine,
     `To: ${recipientLabel} (${languageLabel})`,
     "",
     "*Message preview:*",
@@ -72,6 +78,65 @@ export function buildSmsApprovalSlackMessage(input: {
     "Reply `no` or `reject` to cancel.",
     `<${input.appUrl}/cases/${input.approval.caseId}|Open case>`,
   ].join("\n");
+}
+
+async function queueSmsApprovalsForAutomation(
+  record: CaseRecord,
+  automation: SmsAutomation,
+  stages: { fromStage: CaseStage; toStage: CaseStage },
+  options?: { dryRun?: boolean; skipIfAlreadyDelivered?: boolean },
+) {
+  const recipients = getSmsRecipients(record);
+  if (recipients.length === 0) return { queued: 0, skipped: "missing_phone" as const };
+
+  const channelId = await resolveApprovalChannelId(record.shared.caseNumber);
+  if (!channelId) return { queued: 0, skipped: "no_slack_channel" as const };
+
+  const appUrl = getAppOriginForNotifications() ?? "";
+  let queued = 0;
+
+  for (const recipient of recipients) {
+    if (options?.skipIfAlreadyDelivered) {
+      const alreadyDelivered = await hasSmsAutomationDeliveryForCase(record.shared.id, automation.id, recipient.phone);
+      if (alreadyDelivered) continue;
+    } else {
+      const alreadyPending = await hasPendingSmsApprovalForCase(record.shared.id, automation.id, recipient.phone);
+      if (alreadyPending) continue;
+    }
+
+    if (options?.dryRun) {
+      queued += 1;
+      continue;
+    }
+
+    const messageBody = buildAutomationMessage(automation, record, stages.fromStage, stages.toStage);
+    const approval = await createSmsPendingApproval({
+      caseId: record.shared.id,
+      trackerEntryId: record.tracker.id,
+      automationId: automation.id,
+      caseNumber: record.shared.caseNumber,
+      clientName: record.shared.clientName,
+      phone: recipient.phone,
+      quoContactId: recipient.quoContactId,
+      quoContactName: recipient.displayName,
+      language: resolveClientLanguage(record),
+      messageBody,
+      fromStage: stages.fromStage,
+      toStage: stages.toStage,
+    });
+
+    const slackText = buildSmsApprovalSlackMessage({ approval, appUrl });
+    const posted = await postSlackMessage({ channel: channelId, text: slackText });
+    if (!posted?.ts) continue;
+
+    await updateSmsPendingApproval(approval.id, {
+      slackChannelId: channelId,
+      slackThreadTs: posted.ts,
+    });
+    queued += 1;
+  }
+
+  return { queued };
 }
 
 export async function queueSmsApprovalsForStageChange(
@@ -88,49 +153,65 @@ export async function queueSmsApprovalsForStageChange(
   );
   if (matches.length === 0) return { queued: 0, skipped: "no_matching_automation" as const };
 
-  const recipients = getSmsRecipients(after);
-  if (recipients.length === 0) return { queued: 0, skipped: "missing_phone" as const };
-
-  const channelId = await resolveApprovalChannelId(after.shared.caseNumber);
-  if (!channelId) return { queued: 0, skipped: "no_slack_channel" as const };
-
-  const appUrl = getAppOriginForNotifications() ?? "";
   let queued = 0;
-
   for (const automation of matches) {
-    for (const recipient of recipients) {
-      const alreadyPending = await hasPendingSmsApprovalForCase(after.shared.id, automation.id, recipient.phone);
-      if (alreadyPending) continue;
-
-      const messageBody = buildAutomationMessage(automation, after, previousStage, after.tracker.caseStage);
-      const approval = await createSmsPendingApproval({
-        caseId: after.shared.id,
-        trackerEntryId: after.tracker.id,
-        automationId: automation.id,
-        caseNumber: after.shared.caseNumber,
-        clientName: after.shared.clientName,
-        phone: recipient.phone,
-        quoContactId: recipient.quoContactId,
-        quoContactName: recipient.displayName,
-        language: resolveClientLanguage(after),
-        messageBody,
-        fromStage: previousStage,
-        toStage: after.tracker.caseStage,
-      });
-
-      const slackText = buildSmsApprovalSlackMessage({ approval, appUrl });
-      const posted = await postSlackMessage({ channel: channelId, text: slackText });
-      if (!posted?.ts) continue;
-
-      await updateSmsPendingApproval(approval.id, {
-        slackChannelId: channelId,
-        slackThreadTs: posted.ts,
-      });
-      queued += 1;
-    }
+    const result = await queueSmsApprovalsForAutomation(after, automation, {
+      fromStage: previousStage,
+      toStage: after.tracker.caseStage,
+    });
+    if ("skipped" in result && result.skipped) return { queued: 0, skipped: result.skipped };
+    queued += result.queued;
   }
 
   return { queued };
+}
+
+export async function processSmsTimeInStageAutomations(options?: {
+  dryRun?: boolean;
+  caseNumber?: string;
+}) {
+  if (!isSlackEnabled()) {
+    return { queued: 0, matched: 0, skipped: 0, automations: 0, reason: "slack_disabled" as const };
+  }
+
+  const automations = (await listSmsAutomations()).filter(
+    (automation) => automation.enabled && automation.triggerType === "time_in_stage",
+  );
+  if (automations.length === 0) {
+    return { queued: 0, matched: 0, skipped: 0, automations: 0, reason: "no_time_automations" as const };
+  }
+
+  const caseFilter = options?.caseNumber?.trim();
+  const caseKey = caseFilter ? cleanCaseNumber(caseFilter) : null;
+  let records = await getCases();
+  if (caseKey) {
+    records = records.filter((record) => cleanCaseNumber(record.shared.caseNumber) === caseKey);
+  }
+
+  let queued = 0;
+  let matched = 0;
+  let skipped = 0;
+
+  for (const record of records) {
+    for (const automation of automations) {
+      if (!automationMatchesTimeInStage(automation, record)) continue;
+      matched += 1;
+      const result = await queueSmsApprovalsForAutomation(
+        record,
+        automation,
+        { fromStage: record.tracker.caseStage, toStage: record.tracker.caseStage },
+        { dryRun: options?.dryRun, skipIfAlreadyDelivered: true },
+      );
+      if ("skipped" in result && result.skipped) {
+        skipped += 1;
+        continue;
+      }
+      if (result.queued === 0) skipped += 1;
+      queued += result.queued;
+    }
+  }
+
+  return { queued, matched, skipped, automations: automations.length, dryRun: Boolean(options?.dryRun) };
 }
 
 export function isSmsApprovalText(text: string) {

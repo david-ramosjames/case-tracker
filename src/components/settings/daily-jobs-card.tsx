@@ -32,6 +32,7 @@ const FULL_JOB_STEPS: DailyJobStep[] = [
   "dailyPulse",
   "missingFields",
   "fieldReminders",
+  "smsTimeTriggers",
 ];
 
 const JOB_ROWS: JobRow[] = [
@@ -64,6 +65,11 @@ const JOB_ROWS: JobRow[] = [
     step: "fieldReminders",
     title: "Field reminders",
     description: "Post one Slack reminder per overdue validation field (quarter, minimum, policy limits, etc.).",
+  },
+  {
+    step: "smsTimeTriggers",
+    title: "SMS time-in-stage",
+    description: "Queue Slack approvals for time-based SMS automations (e.g. LOP Care 24h after signing while in Onboarding).",
   },
 ];
 
@@ -102,6 +108,10 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
     const fieldReminders = body.fieldReminders as { posted?: number; fields?: number } | undefined;
     if (fieldReminders) {
       parts.push(`${fieldReminders.posted ?? 0} field reminder(s) (${fieldReminders.fields ?? 0} fields)`);
+    }
+    const smsTimeTriggers = body.smsTimeTriggers as { queued?: number; matched?: number } | undefined;
+    if (smsTimeTriggers) {
+      parts.push(`${smsTimeTriggers.queued ?? 0} SMS time trigger(s) queued (${smsTimeTriggers.matched ?? 0} matched)`);
     }
     const errors = body.errors as { step: string; error: unknown }[] | undefined;
     if (errors?.length) {
@@ -182,6 +192,14 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
     return `Posted ${result.posted ?? 0} reminder(s)${scope} (${result.fields ?? 0} fields, ${result.skipped ?? 0} cases skipped).`;
   }
 
+  if (step === "smsTimeTriggers" && result) {
+    const filter = body.filter as { caseNumber?: string } | null | undefined;
+    const scope = filter?.caseNumber ? ` for case ${filter.caseNumber}` : "";
+    if (result.reason === "slack_disabled") return "Slack is not configured.";
+    if (result.reason === "no_time_automations") return "No enabled time-in-stage SMS automations.";
+    return `Queued ${result.queued ?? 0} SMS approval(s)${scope} (${result.matched ?? 0} case/automation match(es), ${result.skipped ?? 0} skipped, ${result.automations ?? 0} automation(s)).`;
+  }
+
   return "Completed.";
 }
 
@@ -221,6 +239,12 @@ function formatJobPreviewSummary(step: DailyJobStep, body: Record<string, unknow
     const filter = body.filter as { caseNumber?: string } | null | undefined;
     const scope = filter?.caseNumber ? ` for case ${filter.caseNumber}` : "";
     return `Preview: would post ${result.posted ?? 0} reminder(s)${scope} (${result.fields ?? 0} fields, ${result.skipped ?? 0} skipped). Nothing posted.`;
+  }
+
+  if (step === "smsTimeTriggers" && result) {
+    const filter = body.filter as { caseNumber?: string } | null | undefined;
+    const scope = filter?.caseNumber ? ` for case ${filter.caseNumber}` : "";
+    return `Preview: would queue ${result.queued ?? 0} SMS approval(s)${scope} (${result.matched ?? 0} matched). Nothing posted.`;
   }
 
   return "Preview complete. No changes saved.";

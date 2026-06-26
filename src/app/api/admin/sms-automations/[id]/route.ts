@@ -24,14 +24,21 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     if (body.name !== undefined) patch.name = body.name;
     if (body.enabled !== undefined) patch.enabled = body.enabled;
+    if (body.triggerType !== undefined) patch.triggerType = body.triggerType;
     if (body.fromStage !== undefined) patch.fromStage = body.fromStage;
     if (body.fromStages !== undefined) patch.fromStages = body.fromStages;
+    if (body.inStages !== undefined) patch.inStages = body.inStages;
     if (body.toStage !== undefined) patch.toStage = body.toStage;
     if (body.excludedToStages !== undefined) patch.excludedToStages = body.excludedToStages;
     if (body.caseTypes !== undefined) patch.caseTypes = body.caseTypes;
     if (body.delayDaysAfterSigning !== undefined) {
       const delayRaw = body.delayDaysAfterSigning;
       patch.delayDaysAfterSigning =
+        delayRaw === null || delayRaw === "" ? null : Number(delayRaw);
+    }
+    if (body.delayHoursAfterSigning !== undefined) {
+      const delayRaw = body.delayHoursAfterSigning;
+      patch.delayHoursAfterSigning =
         delayRaw === null || delayRaw === "" ? null : Number(delayRaw);
     }
     if (body.attorneyContactIds !== undefined) patch.attorneyContactIds = body.attorneyContactIds;

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { CASE_STAGE_OPTIONS, CASE_TYPE_OPTIONS } from "@/lib/case-options";
 import { SMS_DEFAULT_EXCLUDED_TO_STAGES } from "@/lib/sms/automation-match";
-import { type SmsAutomation } from "@/lib/supabase/sms-automations";
+import { type SmsAutomation, type SmsAutomationTriggerType } from "@/lib/supabase/sms-automations";
 import { type AppUser, type CaseStage } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,11 +18,14 @@ type ToMode = "specific" | "any";
 const EMPTY_FORM = {
   name: "",
   enabled: true,
+  triggerType: "stage_change" as SmsAutomationTriggerType,
   fromStages: [] as CaseStage[],
+  inStages: [] as CaseStage[],
   toMode: "specific" as ToMode,
   toStage: "Dmd" as CaseStage,
   excludedToStages: [...SMS_DEFAULT_EXCLUDED_TO_STAGES] as CaseStage[],
   delayDaysAfterSigning: "",
+  delayHoursAfterSigning: "",
   attorneyContactIds: [] as string[],
   caseTypes: [] as string[],
   messageEn: "",
@@ -32,24 +35,40 @@ const EMPTY_FORM = {
 };
 
 function formatAutomationTrigger(automation: SmsAutomation, attorneys: AppUser[]) {
-  const fromLabel =
-    automation.fromStages.length > 0
-      ? automation.fromStages.join(", ")
-      : automation.fromStage === "any"
-        ? "Any"
-        : automation.fromStage;
+  const parts: string[] = [];
 
-  const toLabel =
-    automation.toStage === "any"
-      ? `Any except ${automation.excludedToStages.length > 0 ? automation.excludedToStages.join(", ") : "none"}`
-      : automation.toStage;
+  if (automation.triggerType === "time_in_stage") {
+    parts.push(`While in ${automation.inStages.join(", ") || "—"}`);
+    if (automation.delayHoursAfterSigning != null) {
+      parts.push(`Signing + ${automation.delayHoursAfterSigning}h`);
+    }
+    if (automation.delayDaysAfterSigning != null) {
+      parts.push(`Signing + ${automation.delayDaysAfterSigning}d`);
+    }
+  } else {
+    const fromLabel =
+      automation.fromStages.length > 0
+        ? automation.fromStages.join(", ")
+        : automation.fromStage === "any"
+          ? "Any"
+          : automation.fromStage;
 
-  const parts = [`${fromLabel} → ${toLabel}`];
-  parts.push(automation.caseTypes.length > 0 ? automation.caseTypes.join(", ") : "All case types");
+    const toLabel =
+      automation.toStage === "any"
+        ? `Any except ${automation.excludedToStages.length > 0 ? automation.excludedToStages.join(", ") : "none"}`
+        : automation.toStage;
 
-  if (automation.delayDaysAfterSigning != null) {
-    parts.push(`Signing + ${automation.delayDaysAfterSigning} day${automation.delayDaysAfterSigning === 1 ? "" : "s"}`);
+    parts.push(`${fromLabel} → ${toLabel}`);
+
+    if (automation.delayDaysAfterSigning != null) {
+      parts.push(`Signing + ${automation.delayDaysAfterSigning} day${automation.delayDaysAfterSigning === 1 ? "" : "s"}`);
+    }
+    if (automation.delayHoursAfterSigning != null) {
+      parts.push(`Signing + ${automation.delayHoursAfterSigning}h`);
+    }
   }
+
+  parts.push(automation.caseTypes.length > 0 ? automation.caseTypes.join(", ") : "All case types");
 
   if (automation.attorneyContactIds.length > 0) {
     const names = automation.attorneyContactIds
@@ -112,12 +131,15 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     setForm({
       name: automation.name,
       enabled: automation.enabled,
+      triggerType: automation.triggerType,
       fromStages,
+      inStages: automation.inStages,
       toMode: automation.toStage === "any" ? "any" : "specific",
       toStage: automation.toStage === "any" ? "Dmd" : automation.toStage,
       excludedToStages:
         automation.excludedToStages.length > 0 ? automation.excludedToStages : [...SMS_DEFAULT_EXCLUDED_TO_STAGES],
       delayDaysAfterSigning: automation.delayDaysAfterSigning != null ? String(automation.delayDaysAfterSigning) : "",
+      delayHoursAfterSigning: automation.delayHoursAfterSigning != null ? String(automation.delayHoursAfterSigning) : "",
       attorneyContactIds: automation.attorneyContactIds,
       caseTypes: automation.caseTypes,
       messageEn: automation.messageEn,
@@ -125,6 +147,15 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
       youtubeUrlEn: automation.youtubeUrlEn ?? "",
       youtubeUrlEs: automation.youtubeUrlEs ?? "",
     });
+  }
+
+  function toggleInStage(stage: CaseStage) {
+    setForm((current) => ({
+      ...current,
+      inStages: current.inStages.includes(stage)
+        ? current.inStages.filter((item) => item !== stage)
+        : [...current.inStages, stage],
+    }));
   }
 
   function toggleFromStage(stage: CaseStage) {
@@ -168,16 +199,20 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     setError(null);
     setMessage(null);
     try {
-      const delayTrimmed = form.delayDaysAfterSigning.trim();
+      const delayDaysTrimmed = form.delayDaysAfterSigning.trim();
+      const delayHoursTrimmed = form.delayHoursAfterSigning.trim();
       const payload = {
         name: form.name,
         enabled: form.enabled,
-        fromStages: form.fromStages,
+        triggerType: form.triggerType,
+        fromStages: form.triggerType === "stage_change" ? form.fromStages : [],
         fromStage: form.fromStages.length > 0 ? form.fromStages[0] : "any",
-        toStage: form.toMode === "any" ? "any" : form.toStage,
-        excludedToStages: form.toMode === "any" ? form.excludedToStages : [],
+        inStages: form.triggerType === "time_in_stage" ? form.inStages : [],
+        toStage: form.triggerType === "time_in_stage" ? (form.inStages[0] ?? "Onboarding") : form.toMode === "any" ? "any" : form.toStage,
+        excludedToStages: form.triggerType === "stage_change" && form.toMode === "any" ? form.excludedToStages : [],
         caseTypes: form.caseTypes,
-        delayDaysAfterSigning: delayTrimmed === "" ? null : Number(delayTrimmed),
+        delayDaysAfterSigning: delayDaysTrimmed === "" ? null : Number(delayDaysTrimmed),
+        delayHoursAfterSigning: delayHoursTrimmed === "" ? null : Number(delayHoursTrimmed),
         attorneyContactIds: form.attorneyContactIds,
         messageEn: form.messageEn,
         messageEs: form.messageEs,
@@ -269,15 +304,16 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
         <CardHeader>
           <CardTitle>{editingId ? "Edit automation" : "New SMS automation"}</CardTitle>
           <CardDescription>
-            When a case moves between stages (and matches filters), a Slack approval thread is posted before any SMS is sent.
-            Messages use the client&apos;s preferred language on the case page.
+            Stage-change automations fire when the tracker stage updates. Time-in-stage automations are checked daily
+            (morning cron) while the case stays in the selected stage after the signing delay. Each send is posted to
+            Slack for approval first.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <label className="text-sm font-medium text-navy-950">Name</label>
-              <Input value={form.name} onChange={(e) => setForm((c) => ({ ...c, name: e.target.value }))} placeholder="Treatment → active cases" />
+              <Input value={form.name} onChange={(e) => setForm((c) => ({ ...c, name: e.target.value }))} placeholder="LOP Care" />
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-navy-950">Enabled</label>
@@ -286,8 +322,42 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                 <option value="no">No</option>
               </Select>
             </div>
+            <div className="space-y-2 md:col-span-2">
+              <label className="text-sm font-medium text-navy-950">Trigger type</label>
+              <Select
+                value={form.triggerType}
+                onChange={(e) => setForm((c) => ({ ...c, triggerType: e.target.value as SmsAutomationTriggerType }))}
+              >
+                <option value="stage_change">Stage change — fires when the case moves between stages</option>
+                <option value="time_in_stage">Time in stage — fires daily while in stage after signing delay (no stage change)</option>
+              </Select>
+            </div>
           </div>
 
+          {form.triggerType === "time_in_stage" ? (
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-navy-950">While in stage(s)</label>
+              <p className="text-xs text-muted-foreground">
+                Case must currently be in one of these stages. Checked each morning; sends once per case when the delay is met.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {CASE_STAGE_OPTIONS.map((stage) => {
+                  const selected = form.inStages.includes(stage);
+                  return (
+                    <button
+                      key={stage}
+                      type="button"
+                      className={`rounded-full border px-3 py-1 text-xs ${selected ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
+                      onClick={() => toggleInStage(stage)}
+                    >
+                      {stage}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <>
           <div className="space-y-2">
             <label className="text-sm font-medium text-navy-950">From stage(s)</label>
             <p className="text-xs text-muted-foreground">Leave empty to match any prior stage. Select one or more to require a specific origin.</p>
@@ -351,8 +421,25 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
               </div>
             )}
           </div>
+            </>
+          )}
 
           <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-navy-950">Delay after signing (hours)</label>
+              <Input
+                type="number"
+                min={0}
+                value={form.delayHoursAfterSigning}
+                onChange={(e) => setForm((c) => ({ ...c, delayHoursAfterSigning: e.target.value }))}
+                placeholder="e.g. 24 for signing + 24 hours"
+              />
+              <p className="text-xs text-muted-foreground">
+                {form.triggerType === "time_in_stage"
+                  ? "Use hours for precise timing (e.g. LOP at 24h). Hours take precedence over days when both are set."
+                  : "Optional. Hours take precedence over days when both are set."}
+              </p>
+            </div>
             <div className="space-y-2">
               <label className="text-sm font-medium text-navy-950">Delay after signing (days)</label>
               <Input
@@ -360,11 +447,18 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                 min={0}
                 value={form.delayDaysAfterSigning}
                 onChange={(e) => setForm((c) => ({ ...c, delayDaysAfterSigning: e.target.value }))}
-                placeholder="e.g. 1 for signing date + 1 day"
+                placeholder="e.g. 1 for signing date + 1 calendar day"
               />
-              <p className="text-xs text-muted-foreground">Leave blank for no delay. Requires a signing date on the case.</p>
+              <p className="text-xs text-muted-foreground">
+                {form.triggerType === "time_in_stage"
+                  ? "Set days and/or hours. At least one is required. Requires a signing date on the case."
+                  : "Leave blank for no delay. Requires a signing date on the case."}
+              </p>
             </div>
-            <div className="space-y-2">
+          </div>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
               <label className="text-sm font-medium text-navy-950">Attorneys (leave empty for all)</label>
               <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded-md border p-2">
                 {attorneys.length === 0 ? (
@@ -474,6 +568,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-semibold text-navy-950">{automation.name}</p>
                     <Badge variant={automation.enabled ? "success" : "secondary"}>{automation.enabled ? "Enabled" : "Disabled"}</Badge>
+                    <Badge variant="outline">{automation.triggerType === "time_in_stage" ? "Time in stage" : "Stage change"}</Badge>
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">{formatAutomationTrigger(automation, attorneys)}</p>
                 </div>

@@ -1,6 +1,6 @@
 import { type SmsAutomation } from "@/lib/supabase/sms-automations";
 import { type CaseRecord, type CaseStage } from "@/lib/types";
-import { daysSince } from "@/lib/utils";
+import { daysSince, hoursSince } from "@/lib/utils";
 
 /** Closed pipeline stages commonly excluded from client SMS on transition. */
 export const SMS_DEFAULT_EXCLUDED_TO_STAGES: CaseStage[] = ["Disengaged", "Terminated", "Referred"];
@@ -25,10 +25,29 @@ export function automationMatchesAttorney(automation: SmsAutomation, record: Cas
   return automation.attorneyContactIds.includes(record.shared.attorneyId);
 }
 
+/** Optional gate on stage-change automations at transition time. */
 export function automationMatchesSigningDelay(automation: SmsAutomation, record: CaseRecord) {
-  if (automation.delayDaysAfterSigning == null) return true;
+  if (automation.delayDaysAfterSigning == null && automation.delayHoursAfterSigning == null) return true;
   if (!record.shared.dateSigned?.trim()) return false;
-  return daysSince(record.shared.dateSigned) >= automation.delayDaysAfterSigning;
+  if (automation.delayHoursAfterSigning != null) {
+    return hoursSince(record.shared.dateSigned) >= automation.delayHoursAfterSigning;
+  }
+  if (automation.delayDaysAfterSigning != null) {
+    return daysSince(record.shared.dateSigned) >= automation.delayDaysAfterSigning;
+  }
+  return true;
+}
+
+/** Required delay for time-in-stage automations (hours take precedence when set). */
+export function automationMatchesTimeInStageDelay(automation: SmsAutomation, record: CaseRecord) {
+  if (!record.shared.dateSigned?.trim()) return false;
+  if (automation.delayHoursAfterSigning != null) {
+    return hoursSince(record.shared.dateSigned) >= automation.delayHoursAfterSigning;
+  }
+  if (automation.delayDaysAfterSigning != null) {
+    return daysSince(record.shared.dateSigned) >= automation.delayDaysAfterSigning;
+  }
+  return false;
 }
 
 export function automationMatchesStageChange(
@@ -37,11 +56,24 @@ export function automationMatchesStageChange(
   fromStage: CaseStage,
   toStage: CaseStage,
 ) {
+  if (automation.triggerType !== "stage_change") return false;
   if (!automation.enabled) return false;
   if (!automationMatchesFromStage(automation, fromStage)) return false;
   if (!automationMatchesToStage(automation, toStage)) return false;
   if (automation.caseTypes.length > 0 && !automation.caseTypes.includes(record.shared.caseType)) return false;
   if (!automationMatchesAttorney(automation, record)) return false;
   if (!automationMatchesSigningDelay(automation, record)) return false;
+  return true;
+}
+
+export function automationMatchesTimeInStage(automation: SmsAutomation, record: CaseRecord) {
+  if (automation.triggerType !== "time_in_stage") return false;
+  if (!automation.enabled) return false;
+  if (!record.tracker.isActive) return false;
+  if (automation.inStages.length === 0) return false;
+  if (!automation.inStages.includes(record.tracker.caseStage)) return false;
+  if (automation.caseTypes.length > 0 && !automation.caseTypes.includes(record.shared.caseType)) return false;
+  if (!automationMatchesAttorney(automation, record)) return false;
+  if (!automationMatchesTimeInStageDelay(automation, record)) return false;
   return true;
 }

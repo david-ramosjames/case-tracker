@@ -115,6 +115,14 @@ export function daysSince(value: string | null | undefined) {
   return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
+/** Whole hours elapsed since the start of the signing calendar date (local time). */
+export function hoursSince(value: string | null | undefined, now = new Date()) {
+  if (!value) return Number.POSITIVE_INFINITY;
+  const date = parseCalendarDate(value);
+  if (!date) return Number.POSITIVE_INFINITY;
+  return Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+}
+
 export function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }

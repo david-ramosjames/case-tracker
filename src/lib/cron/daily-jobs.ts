@@ -5,7 +5,7 @@ import { sendSlackFieldReminders } from "@/lib/slack/field-reminder-notify";
 import { sendSlackMissingFieldNotices } from "@/lib/slack/missing-field-notify";
 import { processDailyPulseRecap } from "@/lib/slack/stage-confirmation";
 import { promoteOnboardingToTreatment, runDailyStageWorkflow } from "@/lib/slack/stage-workflow";
-import { syncQuoPhonesToTrackerIfConfigured } from "@/lib/sms/workflow";
+import { syncQuoPhonesToTrackerIfConfigured, processSmsTimeInStageAutomations } from "@/lib/sms/workflow";
 import { getCases } from "@/lib/supabase/services";
 import { errorMessage } from "@/lib/utils";
 
@@ -17,6 +17,7 @@ export type DailyJobStep =
   | "dailyPulse"
   | "missingFields"
   | "fieldReminders"
+  | "smsTimeTriggers"
   | "all";
 
 export type DailyJobStepError = { step: string; error: string };
@@ -114,6 +115,11 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
     const fieldRemindersResult = await runDailyJobStep("fieldReminders", () => runFieldReminders(options));
     if (fieldRemindersResult.error) errors.push(fieldRemindersResult.error);
 
+    const smsTimeTriggersResult = await runDailyJobStep("smsTimeTriggers", () =>
+      processSmsTimeInStageAutomations({ dryRun, caseNumber: options.caseNumber }),
+    );
+    if (smsTimeTriggersResult.error) errors.push(smsTimeTriggersResult.error);
+
     const slackRan = Boolean(missingFieldsResult.data || fieldRemindersResult.data || stageWorkflowResult.data);
     const ok = errors.length === 0 || slackRan;
 
@@ -154,6 +160,9 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
       fieldReminders:
         fieldRemindersResult.data ??
         ({ posted: 0, skipped: 0, fields: 0, error: fieldRemindersResult.error?.error } as const),
+      smsTimeTriggers:
+        smsTimeTriggersResult.data ??
+        ({ queued: 0, matched: 0, skipped: 0, automations: 0, error: smsTimeTriggersResult.error?.error } as const),
       errors: errors.length > 0 ? errors : undefined,
       filter: options.caseNumber ? { caseNumber: options.caseNumber, force } : null,
     };
@@ -219,6 +228,22 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
 
   if (step === "fieldReminders") {
     const result = await runDailyJobStep("fieldReminders", () => runFieldReminders(options));
+    if (result.error) {
+      return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
+    }
+    return {
+      ok: true,
+      step,
+      dryRun,
+      result: result.data,
+      filter: options.caseNumber ? { caseNumber: options.caseNumber, force } : null,
+    };
+  }
+
+  if (step === "smsTimeTriggers") {
+    const result = await runDailyJobStep("smsTimeTriggers", () =>
+      processSmsTimeInStageAutomations({ dryRun, caseNumber: options.caseNumber }),
+    );
     if (result.error) {
       return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
     }
