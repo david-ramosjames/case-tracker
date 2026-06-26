@@ -7,6 +7,26 @@ export type PulseSignal = "disbursed";
 /** Days after date signed before auto-promoting Onboarding → Treatment (Txt). */
 export const TREATMENT_AUTO_DAYS = 10;
 
+/** Workflow order for pulse suggestions — do not suggest moving to an earlier stage. */
+const CASE_STAGE_RANK: Record<CaseStage, number> = {
+  Onboarding: 1,
+  Txt: 2,
+  Dmd: 3,
+  Lit: 4,
+  Settled: 5,
+  Disengaged: 6,
+  Referred: 7,
+  Terminated: 8,
+};
+
+export function caseStageRank(stage: CaseStage) {
+  return CASE_STAGE_RANK[stage];
+}
+
+export function isPulseStageRegression(currentStage: CaseStage, suggestedStage: CaseStage) {
+  return caseStageRank(suggestedStage) < caseStageRank(currentStage);
+}
+
 const CONFIRMATION_REQUIRED_STAGES = new Set<CaseStage>([
   "Onboarding",
   "Txt",
@@ -89,6 +109,10 @@ export function shouldSkipPulseSuggestion(
   }
 
   if (record.tracker.caseStage === item.suggestedStage) return "already_at_stage";
+
+  if (isPulseStageRegression(record.tracker.caseStage, item.suggestedStage)) {
+    return "stage_regression";
+  }
 
   if (
     !record.tracker.isActive &&

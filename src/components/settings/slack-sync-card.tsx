@@ -29,7 +29,7 @@ export function SlackSyncCard() {
           : "";
       const dateSignedNote =
         body.dateSignedUpdated && body.dateSignedUpdated > 0
-          ? ` Updated Date Signed on ${body.dateSignedUpdated} tracker case(s) from column H.`
+          ? ` Changed Date Signed on ${body.dateSignedUpdated} tracker case(s) from column H.`
           : "";
       setMessage(
         `Imported ${body.synced ?? 0} case → channel mappings from Google Sheet.${duplicateNote}${dateSignedNote}`,

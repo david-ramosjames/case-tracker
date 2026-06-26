@@ -1164,6 +1164,40 @@ export async function updateSharedCaseFields(
   }
 }
 
+/** Load tracker date-signed overrides for sheet sync comparisons. */
+export async function loadDateSignedOverridesByCaseNumber(caseNumbers: string[]) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) throw new Error("Service role required to load date signed overrides.");
+
+  const cleaned = [...new Set(caseNumbers.map(cleanCaseNumber).filter(Boolean))];
+  const result = new Map<string, string | null>();
+  if (cleaned.length === 0) return result;
+
+  const chunkSize = 500;
+  for (let index = 0; index < cleaned.length; index += chunkSize) {
+    const chunk = cleaned.slice(index, index + chunkSize);
+    const { data, error } = await admin
+      .from("case_tracker_entries")
+      .select("case_number, date_signed_override")
+      .in("case_number", chunk);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) {
+      const key = cleanCaseNumber(row.case_number);
+      result.set(
+        key,
+        row.date_signed_override ? String(row.date_signed_override) : null,
+      );
+    }
+  }
+
+  return result;
+}
+
+export function sheetDateSignedMatchesOverride(sheetDateIso: string, override: string | null | undefined) {
+  if (!override) return false;
+  return toDateOnly(sheetDateIso) === toDateOnly(override);
+}
+
 /** Apply Date Signed from Client Contact Status column H to matching tracker rows. */
 export async function syncDateSignedFromSheet(entries: Array<{ caseNumber: string; dateSigned: string }>) {
   const admin = createSupabaseAdminClient();
@@ -1174,9 +1208,15 @@ export async function syncDateSignedFromSheet(entries: Array<{ caseNumber: strin
     const key = cleanCaseNumber(entry.caseNumber);
     if (key && entry.dateSigned) byCaseNumber.set(key, entry.dateSigned);
   }
+  if (byCaseNumber.size === 0) return { updated: 0 };
+
+  const existingOverrides = await loadDateSignedOverridesByCaseNumber([...byCaseNumber.keys()]);
 
   let updated = 0;
   for (const [caseNumber, dateSigned] of byCaseNumber) {
+    const existing = existingOverrides.get(caseNumber) ?? null;
+    if (sheetDateSignedMatchesOverride(dateSigned, existing)) continue;
+
     const { data, error } = await admin
       .from("case_tracker_entries")
       .update({ date_signed_override: dateSigned })

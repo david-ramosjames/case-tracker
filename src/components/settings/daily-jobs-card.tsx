@@ -129,7 +129,7 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
         : "";
     const dateSignedNote =
       result.dateSignedUpdated && Number(result.dateSignedUpdated) > 0
-        ? ` Updated Date Signed on ${result.dateSignedUpdated} case(s).`
+        ? ` Changed Date Signed on ${result.dateSignedUpdated} case(s).`
         : "";
     if (!result.configured) return "Google Sheets channel sync is not configured.";
     return `Imported ${result.synced ?? 0} channel mapping(s).${duplicateNote}${dateSignedNote}`;

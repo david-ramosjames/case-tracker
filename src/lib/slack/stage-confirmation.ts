@@ -300,6 +300,7 @@ async function fanOutPulseItem(
   if (skipReason === "sheet_sync_owned") return "skipped_sheet_sync_owned";
   if (skipReason === "inactive_tracker") return "skipped_inactive_tracker";
   if (skipReason === "already_at_stage") return "skipped_already_at_stage";
+  if (skipReason === "stage_regression") return "skipped_stage_regression";
   if (skipReason === "already_applied") return "skipped_already_applied";
 
   const existingLine = await findPulseLineSuggestion(match.caseId, pulseMessageTs, item.channelRef);

@@ -9,6 +9,7 @@ export type PulseFanOutResult =
   | "skipped_no_match"
   | "skipped_no_case"
   | "skipped_already_at_stage"
+  | "skipped_stage_regression"
   | "skipped_already_applied"
   | "skipped_inactive_tracker"
   | "skipped_handled"
