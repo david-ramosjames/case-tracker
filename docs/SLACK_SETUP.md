@@ -81,9 +81,9 @@ curl -X POST https://YOUR_DOMAIN/api/slack/sync-channels \
 
 When you add a new case row to the sheet, the next cron run (or Sync now) picks it up.
 
-## 5. Scheduled sync + field reminders (9 AM Central)
+## 5. Scheduled sync + field reminders (daily 14:00 UTC)
 
-`vercel.json` defines **one cron job** (`/api/cron/slack-reminders` at **14:00 UTC** ≈ 9 AM Central during daylight saving). The route checks `America/Chicago` so only the 9 AM hour runs. In standard time (CST), change the schedule to `0 15 * * *` in `vercel.json`.
+`vercel.json` defines **one cron job** (`/api/cron/slack-reminders` at **14:00 UTC** every day).
 
 Set `CRON_SECRET` in Vercel env (Vercel cron sends `Authorization: Bearer CRON_SECRET` automatically).
 
@@ -94,7 +94,7 @@ curl "https://YOUR_DOMAIN/api/cron/slack-reminders" \
   -H "Authorization: Bearer YOUR_CRON_SECRET"
 ```
 
-**Test one case** (bypasses 9 AM window and field cooldown):
+**Test one case** (bypasses field cooldown):
 
 ```bash
 curl "https://YOUR_DOMAIN/api/cron/slack-reminders?caseNumber=99999&force=true&syncSheet=false" \

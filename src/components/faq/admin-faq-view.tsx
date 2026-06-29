@@ -98,7 +98,7 @@ export function AdminFaqView() {
         />
       </FaqSection>
 
-      <FaqSection title="Slack — daily 9 AM Central cron">
+      <FaqSection title="Slack — daily cron (14:00 UTC)">
         <p>One cron job (`/api/cron/slack-reminders`) runs sheet sync, stage workflow, and field reminders.</p>
         <p className="font-medium text-navy-950">Per-field reminders (one post per field)</p>
         <BulletList

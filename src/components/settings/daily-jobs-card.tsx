@@ -505,8 +505,9 @@ export function DailyJobsCard() {
       <CardHeader>
         <CardTitle>Daily cron jobs</CardTitle>
         <CardDescription>
-          Manual triggers for each step in the 9:00 AM Central cron (`/api/cron/slack-reminders`). Preview shows what
+          Manual triggers for each step in the daily cron (`/api/cron/slack-reminders`, 14:00 UTC). Preview shows what
           would change without saving or posting. Run full job executes each step separately to avoid server timeouts.
+          Completed runs (not previews) post a success or failure summary to `#daily-pulse`.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

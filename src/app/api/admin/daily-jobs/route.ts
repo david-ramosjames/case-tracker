@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 export const maxDuration = 300;
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
 import { type DailyJobStep, runDailyJob } from "@/lib/cron/daily-jobs";
+import { notifyDailyJobResult } from "@/lib/slack/daily-job-notify";
 import { errorMessage } from "@/lib/utils";
 
 const VALID_STEPS: DailyJobStep[] = [
@@ -45,10 +46,18 @@ export async function POST(request: Request) {
       dryRun: body.dryRun ?? false,
     });
 
-    return NextResponse.json(result, { status: result.ok ? 200 : 500 });
+    const slackNotify =
+      body.dryRun ? { posted: false as const, reason: "dry_run" as const } : await notifyDailyJobResult(step, result, { source: "manual" });
+
+    return NextResponse.json({ ...result, slackNotify }, { status: result.ok ? 200 : 500 });
   } catch (error) {
     console.error("Daily job failed", error);
     const message = errorMessage(error) || "Daily job failed.";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const slackNotify = await notifyDailyJobResult(
+      "all",
+      { ok: false, step: "all" },
+      { source: "manual", fatalError: message },
+    );
+    return NextResponse.json({ error: message, slackNotify }, { status: 500 });
   }
 }
