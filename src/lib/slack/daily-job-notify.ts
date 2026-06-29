@@ -63,7 +63,13 @@ function formatAllJobLines(body: Record<string, unknown>): string[] {
     | {
         error?: string;
         treatment?: { promoted?: number; eligible?: number };
-        pulse?: { posted?: number; processed?: number; skipped?: number; reason?: string };
+        pulse?: {
+          posted?: number;
+          processed?: number;
+          skipped?: number;
+          reason?: string;
+          error?: unknown;
+        };
       }
     | undefined;
   if (stageWorkflow?.error) {
