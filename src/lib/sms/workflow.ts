@@ -14,7 +14,6 @@ import { syncTrackerQuoContacts } from "@/lib/supabase/quo-contacts";
 import { automationMatchesStageChange, automationMatchesTimeInStage } from "@/lib/sms/automation-match";
 import {
   createSmsPendingApproval,
-  hasPendingSmsApprovalForCase,
   hasSmsAutomationDeliveryForCase,
   listSmsAutomations,
   updateSmsPendingApproval,
@@ -84,7 +83,7 @@ async function queueSmsApprovalsForAutomation(
   record: CaseRecord,
   automation: SmsAutomation,
   stages: { fromStage: CaseStage; toStage: CaseStage },
-  options?: { dryRun?: boolean; skipIfAlreadyDelivered?: boolean },
+  options?: { dryRun?: boolean },
 ) {
   const recipients = getSmsRecipients(record);
   if (recipients.length === 0) return { queued: 0, skipped: "missing_phone" as const };
@@ -96,13 +95,8 @@ async function queueSmsApprovalsForAutomation(
   let queued = 0;
 
   for (const recipient of recipients) {
-    if (options?.skipIfAlreadyDelivered) {
-      const alreadyDelivered = await hasSmsAutomationDeliveryForCase(record.shared.id, automation.id, recipient.phone);
-      if (alreadyDelivered) continue;
-    } else {
-      const alreadyPending = await hasPendingSmsApprovalForCase(record.shared.id, automation.id, recipient.phone);
-      if (alreadyPending) continue;
-    }
+    const alreadyHandled = await hasSmsAutomationDeliveryForCase(record.shared.id, automation.id, recipient.phone);
+    if (alreadyHandled) continue;
 
     if (options?.dryRun) {
       queued += 1;
@@ -200,7 +194,7 @@ export async function processSmsTimeInStageAutomations(options?: {
         record,
         automation,
         { fromStage: record.tracker.caseStage, toStage: record.tracker.caseStage },
-        { dryRun: options?.dryRun, skipIfAlreadyDelivered: true },
+        { dryRun: options?.dryRun },
       );
       if ("skipped" in result && result.skipped) {
         skipped += 1;

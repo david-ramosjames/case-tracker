@@ -354,7 +354,7 @@ export async function hasSmsAutomationDeliveryForCase(caseId: string, automation
     .eq("case_id", caseId)
     .eq("automation_id", automationId)
     .eq("phone", phone)
-    .in("status", ["pending", "approved", "sent"])
+    .in("status", ["pending", "approved", "sent", "rejected"])
     .maybeSingle();
 
   if (error) throw new Error(error.message);
