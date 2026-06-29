@@ -1,4 +1,5 @@
 import { cleanCaseNumber } from "@/lib/csv/parse";
+import { type DailyCronGroup } from "@/lib/cron/daily-cron-run";
 import { syncSettlementsFromGoogleSheetIfConfigured } from "@/lib/google/settlements-sync";
 import { syncSlackChannelsFromGoogleSheetIfConfigured } from "@/lib/google/sheets-sync";
 import { sendSlackFieldReminders } from "@/lib/slack/field-reminder-notify";
@@ -71,34 +72,156 @@ async function runFieldReminders(options: DailyJobOptions) {
   });
 }
 
+async function runSheetSyncStep(options: DailyJobOptions) {
+  const skipSheetSync = options.skipSheetSync ?? false;
+  if (skipSheetSync) {
+    return { data: { synced: 0, configured: false, dateSignedUpdated: 0 } };
+  }
+  return runDailyJobStep("sheetSync", syncSlackChannelsFromGoogleSheetIfConfigured);
+}
+
+async function runSettlementSyncStep(options: DailyJobOptions) {
+  const skipSheetSync = options.skipSheetSync ?? false;
+  if (skipSheetSync) {
+    return {
+      data: {
+        configured: false,
+        casesProcessed: 0,
+        disbursementsSynced: 0,
+        settlementsUpdated: 0,
+        stagesAutoSettled: 0,
+        stagesRestored: 0,
+        skippedNoTracker: 0,
+        skippedFinancialLocked: 0,
+        sheetCasesFound: 0,
+        details: [],
+      },
+    };
+  }
+  return runDailyJobStep("settlementSync", syncSettlementsFromGoogleSheetIfConfigured);
+}
+
+function emptySettlementSyncResult(error?: string) {
+  return {
+    configured: false,
+    casesProcessed: 0,
+    disbursementsSynced: 0,
+    settlementsUpdated: 0,
+    stagesAutoSettled: 0,
+    stagesRestored: 0,
+    skippedNoTracker: 0,
+    skippedFinancialLocked: 0,
+    sheetCasesFound: 0,
+    details: [],
+    error,
+  } as const;
+}
+
+export async function runDailyCronGroup(group: DailyCronGroup, options: DailyJobOptions = {}) {
+  const force = options.force ?? true;
+  const errors: DailyJobStepError[] = [];
+
+  if (group === "sync") {
+    const sheetSyncResult = await runSheetSyncStep(options);
+    if (sheetSyncResult.error) errors.push(sheetSyncResult.error);
+
+    const settlementSyncResult = await runSettlementSyncStep(options);
+    if ("error" in settlementSyncResult && settlementSyncResult.error) errors.push(settlementSyncResult.error);
+
+    const quoPhoneSyncResult = await runDailyJobStep("quoPhoneSync", syncQuoPhonesToTrackerIfConfigured);
+    if (quoPhoneSyncResult.error) errors.push(quoPhoneSyncResult.error);
+
+    return {
+      ok: errors.length === 0,
+      group,
+      sheetSync: sheetSyncResult.data ?? { synced: 0, configured: false, error: sheetSyncResult.error?.error },
+      settlementSync:
+        settlementSyncResult.data ??
+        emptySettlementSyncResult(
+          "error" in settlementSyncResult ? settlementSyncResult.error?.error : undefined,
+        ),
+      quoPhoneSync:
+        quoPhoneSyncResult.data ??
+        ({
+          configured: false,
+          totalContacts: 0,
+          matched: 0,
+          updated: 0,
+          skipped: 0,
+          conversationLinks: 0,
+          error: quoPhoneSyncResult.error?.error,
+        } as const),
+      errors: errors.length > 0 ? errors : undefined,
+    };
+  }
+
+  if (group === "stage") {
+    const stageWorkflowResult = await runDailyJobStep("stageWorkflow", () =>
+      runDailyStageWorkflow({ forcePulse: force }),
+    );
+    if (stageWorkflowResult.error) errors.push(stageWorkflowResult.error);
+
+    return {
+      ok: errors.length === 0,
+      group,
+      stageWorkflow: stageWorkflowResult.data ?? { error: stageWorkflowResult.error?.error },
+      errors: errors.length > 0 ? errors : undefined,
+    };
+  }
+
+  if (group === "missingFields") {
+    const missingFieldsResult = await runDailyJobStep("missingFields", () => runMissingFields(options));
+    if (missingFieldsResult.error) errors.push(missingFieldsResult.error);
+
+    return {
+      ok: errors.length === 0,
+      group,
+      missingFields:
+        missingFieldsResult.data ??
+        ({ posted: 0, skipped: 0, error: missingFieldsResult.error?.error } as const),
+      errors: errors.length > 0 ? errors : undefined,
+    };
+  }
+
+  if (group === "fieldReminders") {
+    const fieldRemindersResult = await runDailyJobStep("fieldReminders", () => runFieldReminders(options));
+    if (fieldRemindersResult.error) errors.push(fieldRemindersResult.error);
+
+    return {
+      ok: errors.length === 0,
+      group,
+      fieldReminders:
+        fieldRemindersResult.data ??
+        ({ posted: 0, skipped: 0, fields: 0, error: fieldRemindersResult.error?.error } as const),
+      errors: errors.length > 0 ? errors : undefined,
+    };
+  }
+
+  const smsTimeTriggersResult = await runDailyJobStep("smsTimeTriggers", () =>
+    processSmsTimeInStageAutomations({ dryRun: Boolean(options.dryRun), caseNumber: options.caseNumber }),
+  );
+  if (smsTimeTriggersResult.error) errors.push(smsTimeTriggersResult.error);
+
+  return {
+    ok: errors.length === 0,
+    group: "sms" as const,
+    smsTimeTriggers:
+      smsTimeTriggersResult.data ??
+      ({ queued: 0, matched: 0, skipped: 0, automations: 0, error: smsTimeTriggersResult.error?.error } as const),
+    errors: errors.length > 0 ? errors : undefined,
+  };
+}
+
 export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions = {}) {
   const force = options.force ?? true;
-  const skipSheetSync = options.skipSheetSync ?? false;
   const dryRun = Boolean(options.dryRun);
   const errors: DailyJobStepError[] = [];
 
   if (step === "all") {
-    const sheetSyncResult = skipSheetSync
-      ? { data: { synced: 0, configured: false, dateSignedUpdated: 0 } }
-      : await runDailyJobStep("sheetSync", syncSlackChannelsFromGoogleSheetIfConfigured);
+    const sheetSyncResult = await runSheetSyncStep(options);
     if (sheetSyncResult.error) errors.push(sheetSyncResult.error);
 
-    const settlementSyncResult = skipSheetSync
-      ? {
-          data: {
-            configured: false,
-            casesProcessed: 0,
-            disbursementsSynced: 0,
-            settlementsUpdated: 0,
-            stagesAutoSettled: 0,
-            stagesRestored: 0,
-            skippedNoTracker: 0,
-            skippedFinancialLocked: 0,
-            sheetCasesFound: 0,
-            details: [],
-          },
-        }
-      : await runDailyJobStep("settlementSync", syncSettlementsFromGoogleSheetIfConfigured);
+    const settlementSyncResult = await runSettlementSyncStep(options);
     if ("error" in settlementSyncResult && settlementSyncResult.error) errors.push(settlementSyncResult.error);
 
     const quoPhoneSyncResult = await runDailyJobStep("quoPhoneSync", syncQuoPhonesToTrackerIfConfigured);
@@ -129,19 +252,9 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
       sheetSync: sheetSyncResult.data ?? { synced: 0, configured: false, error: sheetSyncResult.error?.error },
       settlementSync:
         settlementSyncResult.data ??
-        ({
-          configured: false,
-          casesProcessed: 0,
-          disbursementsSynced: 0,
-          settlementsUpdated: 0,
-          stagesAutoSettled: 0,
-          stagesRestored: 0,
-          skippedNoTracker: 0,
-          skippedFinancialLocked: 0,
-          sheetCasesFound: 0,
-          details: [],
-          error: "error" in settlementSyncResult ? settlementSyncResult.error?.error : undefined,
-        } as const),
+        emptySettlementSyncResult(
+          "error" in settlementSyncResult ? settlementSyncResult.error?.error : undefined,
+        ),
       quoPhoneSync:
         quoPhoneSyncResult.data ??
         ({

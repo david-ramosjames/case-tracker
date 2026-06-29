@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 
-export const maxDuration = 300;
-import { runDailyJob } from "@/lib/cron/daily-jobs";
-import { notifyDailyJobResult } from "@/lib/slack/daily-job-notify";
+export const maxDuration = 60;
+import { triggerDailyCronGroup } from "@/lib/cron/daily-cron-chain";
+import { clearDailyCronRun, getDailyCronRunId } from "@/lib/cron/daily-cron-run";
 import { getCronSecret } from "@/lib/slack/config";
-import { errorMessage } from "@/lib/utils";
 
 export async function GET(request: Request) {
   const secret = getCronSecret();
@@ -17,25 +16,14 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { searchParams } = new URL(request.url);
-  const caseNumberParam = searchParams.get("caseNumber")?.trim();
-  const force = searchParams.get("force") === "true";
-  const skipSheetSync = searchParams.get("syncSheet") === "false";
+  const runId = getDailyCronRunId();
+  await clearDailyCronRun(runId);
+  triggerDailyCronGroup(request, "sync", runId);
 
-  try {
-    const result = await runDailyJob("all", {
-      force,
-      skipSheetSync,
-      caseNumber: caseNumberParam,
-    });
-
-    const notify = await notifyDailyJobResult("all", result, { source: "cron" });
-
-    return NextResponse.json({ ...result, slackNotify: notify }, { status: result.ok ? 200 : 500 });
-  } catch (error) {
-    const message = errorMessage(error) || "Daily job failed.";
-    console.error("Daily cron failed", error);
-    const notify = await notifyDailyJobResult("all", { ok: false, step: "all" }, { source: "cron", fatalError: message });
-    return NextResponse.json({ ok: false, step: "all", error: message, slackNotify: notify }, { status: 500 });
-  }
+  return NextResponse.json({
+    ok: true,
+    runId,
+    started: "sync",
+    message: "Daily cron chain started. Steps run in separate requests to avoid the 300s serverless limit.",
+  });
 }

@@ -83,7 +83,7 @@ When you add a new case row to the sheet, the next cron run (or Sync now) picks 
 
 ## 5. Scheduled sync + field reminders (daily 14:00 UTC)
 
-`vercel.json` defines **one cron job** (`/api/cron/slack-reminders` at **14:00 UTC** every day).
+`vercel.json` defines **one cron job** (`/api/cron/slack-reminders` at **14:00 UTC** every day). That endpoint starts a **chain** of steps (`sync` → `stage` → `missingFields` → `fieldReminders` → `sms`), each in its own serverless request (up to 300s each) so the full daily workflow does not hit Vercel's timeout. A single summary is posted to `#daily-pulse` when the last step finishes.
 
 Set `CRON_SECRET` in Vercel env (Vercel cron sends `Authorization: Bearer CRON_SECRET` automatically).
 

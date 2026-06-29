@@ -9,8 +9,11 @@
     "src/app/api/admin/daily-jobs/route.ts": {
       "maxDuration": 300
     },
-    "src/app/api/cron/slack-reminders/route.ts": {
+    "src/app/api/cron/daily-job-step/route.ts": {
       "maxDuration": 300
+    },
+    "src/app/api/cron/slack-reminders/route.ts": {
+      "maxDuration": 60
     }
   }
 }
