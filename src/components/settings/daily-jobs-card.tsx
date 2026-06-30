@@ -26,6 +26,7 @@ type JobRow = {
 };
 
 const FULL_JOB_STEPS: DailyJobStep[] = [
+  "quoPhoneSync",
   "sheetSync",
   "settlementSync",
   "treatmentPromotion",
@@ -36,6 +37,11 @@ const FULL_JOB_STEPS: DailyJobStep[] = [
 ];
 
 const JOB_ROWS: JobRow[] = [
+  {
+    step: "quoPhoneSync",
+    title: "Quo phone sync",
+    description: "Match Quo contacts to cases and sync client phone numbers.",
+  },
   {
     step: "sheetSync",
     title: "Slack channels sheet",
@@ -84,6 +90,8 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
 
   if (step === "all") {
     const parts: string[] = [];
+    const quoPhoneSync = body.quoPhoneSync as { updated?: number; configured?: boolean } | undefined;
+    if (quoPhoneSync?.configured) parts.push(`${quoPhoneSync.updated ?? 0} Quo phone(s) updated`);
     const sheetSync = body.sheetSync as { synced?: number; configured?: boolean } | undefined;
     if (sheetSync?.configured) parts.push(`${sheetSync.synced ?? 0} channel row(s) synced`);
     const settlementSync = body.settlementSync as { disbursementsSynced?: number; stagesAutoSettled?: number } | undefined;

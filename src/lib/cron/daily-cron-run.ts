@@ -1,11 +1,22 @@
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { type DailyJobStepError } from "@/lib/cron/daily-jobs";
 
-export type DailyCronGroup = "sync" | "stage" | "missingFields" | "fieldReminders" | "sms";
+export type DailyCronGroup =
+  | "quoSync"
+  | "slackChannels"
+  | "settlementSync"
+  | "treatmentPromotion"
+  | "dailyPulse"
+  | "missingFields"
+  | "fieldReminders"
+  | "sms";
 
 export const DAILY_CRON_GROUP_ORDER: DailyCronGroup[] = [
-  "sync",
-  "stage",
+  "quoSync",
+  "slackChannels",
+  "settlementSync",
+  "treatmentPromotion",
+  "dailyPulse",
   "missingFields",
   "fieldReminders",
   "sms",
@@ -96,12 +107,6 @@ export function mergeDailyCronRunToAllResult(run: DailyCronRunState | null) {
   const errors: DailyJobStepError[] = [];
   let ok = true;
 
-  const sync = run?.groups.sync;
-  const stage = run?.groups.stage;
-  const missingFields = run?.groups.missingFields;
-  const fieldReminders = run?.groups.fieldReminders;
-  const sms = run?.groups.sms;
-
   for (const group of DAILY_CRON_GROUP_ORDER) {
     const groupResult = run?.groups[group];
     if (!groupResult) {
@@ -117,12 +122,31 @@ export function mergeDailyCronRunToAllResult(run: DailyCronRunState | null) {
     }
   }
 
+  const quoSync = run?.groups.quoSync;
+  const slackChannels = run?.groups.slackChannels;
+  const settlement = run?.groups.settlementSync;
+  const treatment = run?.groups.treatmentPromotion;
+  const pulse = run?.groups.dailyPulse;
+  const missingFields = run?.groups.missingFields;
+  const fieldReminders = run?.groups.fieldReminders;
+  const sms = run?.groups.sms;
+
   return {
     ok,
     step: "all" as const,
-    sheetSync: (sync?.sheetSync as Record<string, unknown>) ?? { synced: 0, configured: false },
+    quoPhoneSync:
+      (quoSync?.quoPhoneSync as Record<string, unknown>) ??
+      ({
+        configured: false,
+        totalContacts: 0,
+        matched: 0,
+        updated: 0,
+        skipped: 0,
+        conversationLinks: 0,
+      } as const),
+    sheetSync: (slackChannels?.sheetSync as Record<string, unknown>) ?? { synced: 0, configured: false },
     settlementSync:
-      (sync?.settlementSync as Record<string, unknown>) ??
+      (settlement?.settlementSync as Record<string, unknown>) ??
       ({
         configured: false,
         casesProcessed: 0,
@@ -135,17 +159,10 @@ export function mergeDailyCronRunToAllResult(run: DailyCronRunState | null) {
         sheetCasesFound: 0,
         details: [],
       } as const),
-    quoPhoneSync:
-      (sync?.quoPhoneSync as Record<string, unknown>) ??
-      ({
-        configured: false,
-        totalContacts: 0,
-        matched: 0,
-        updated: 0,
-        skipped: 0,
-        conversationLinks: 0,
-      } as const),
-    stageWorkflow: (stage?.stageWorkflow as Record<string, unknown>) ?? {},
+    stageWorkflow: {
+      treatment: (treatment?.treatmentPromotion as Record<string, unknown>) ?? {},
+      pulse: (pulse?.dailyPulse as Record<string, unknown>) ?? {},
+    },
     missingFields: (missingFields?.missingFields as Record<string, unknown>) ?? { posted: 0, skipped: 0 },
     fieldReminders:
       (fieldReminders?.fieldReminders as Record<string, unknown>) ?? { posted: 0, skipped: 0, fields: 0 },

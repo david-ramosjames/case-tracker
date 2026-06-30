@@ -14,6 +14,17 @@ function formatCentralTimestamp(now = new Date()) {
 function formatAllJobLines(body: Record<string, unknown>): string[] {
   const lines: string[] = [];
 
+  const quoPhoneSync = body.quoPhoneSync as
+    | { configured?: boolean; matched?: number; updated?: number; error?: string }
+    | undefined;
+  if (quoPhoneSync?.error) {
+    lines.push(`Quo phone sync failed: ${quoPhoneSync.error}`);
+  } else if (quoPhoneSync?.configured) {
+    lines.push(`Quo phone sync: ${quoPhoneSync.updated ?? 0} case(s) updated (${quoPhoneSync.matched ?? 0} matched)`);
+  } else {
+    lines.push("Quo phone sync: not configured");
+  }
+
   const sheetSync = body.sheetSync as
     | { synced?: number; configured?: boolean; dateSignedUpdated?: number; error?: string }
     | undefined;
@@ -48,21 +59,10 @@ function formatAllJobLines(body: Record<string, unknown>): string[] {
     lines.push("Settlement sync: not configured");
   }
 
-  const quoPhoneSync = body.quoPhoneSync as
-    | { configured?: boolean; matched?: number; updated?: number; error?: string }
-    | undefined;
-  if (quoPhoneSync?.error) {
-    lines.push(`Quo phone sync failed: ${quoPhoneSync.error}`);
-  } else if (quoPhoneSync?.configured) {
-    lines.push(`Quo phone sync: ${quoPhoneSync.updated ?? 0} case(s) updated (${quoPhoneSync.matched ?? 0} matched)`);
-  } else {
-    lines.push("Quo phone sync: not configured");
-  }
-
   const stageWorkflow = body.stageWorkflow as
     | {
         error?: string;
-        treatment?: { promoted?: number; eligible?: number };
+        treatment?: { promoted?: number; eligible?: number; error?: string };
         pulse?: {
           posted?: number;
           processed?: number;
@@ -75,8 +75,14 @@ function formatAllJobLines(body: Record<string, unknown>): string[] {
   if (stageWorkflow?.error) {
     lines.push(`Stage workflow failed: ${stageWorkflow.error}`);
   } else {
-    const promoted = stageWorkflow?.treatment?.promoted ?? 0;
-    lines.push(`Treatment promotion: ${promoted} case(s) promoted`);
+    const treatment = stageWorkflow?.treatment;
+    if (treatment?.error) {
+      lines.push(`Treatment promotion failed: ${treatment.error}`);
+    } else if (treatment) {
+      const promoted = treatment.promoted ?? 0;
+      lines.push(`Treatment promotion: ${promoted} case(s) promoted`);
+    }
+
     const pulse = stageWorkflow?.pulse;
     if (pulse?.reason === "slack_disabled") {
       lines.push("Pulse recap: Slack disabled");

@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 
 export const maxDuration = 300;
-import { triggerDailyCronGroup } from "@/lib/cron/daily-cron-chain";
+import { getNextDailyCronGroup, triggerDailyCronGroup } from "@/lib/cron/daily-cron-chain";
 import { clearDailyCronRun, getDailyCronRunId, saveDailyCronGroupResult } from "@/lib/cron/daily-cron-run";
 import { runDailyCronGroup } from "@/lib/cron/daily-jobs";
 import { getCronSecret } from "@/lib/slack/config";
 import { errorMessage } from "@/lib/utils";
+
+const FIRST_CRON_GROUP = "quoSync" as const;
 
 export async function GET(request: Request) {
   const secret = getCronSecret();
@@ -28,25 +30,28 @@ export async function GET(request: Request) {
   try {
     await clearDailyCronRun(runId);
 
-    const syncResult = await runDailyCronGroup("sync", {
+    const firstResult = await runDailyCronGroup(FIRST_CRON_GROUP, {
       force,
       skipSheetSync,
       caseNumber,
     });
-    await saveDailyCronGroupResult(runId, "sync", syncResult);
+    await saveDailyCronGroupResult(runId, FIRST_CRON_GROUP, firstResult);
 
-    triggerDailyCronGroup(request, "stage", runId);
+    const next = getNextDailyCronGroup(FIRST_CRON_GROUP);
+    if (next) {
+      triggerDailyCronGroup(request, next, runId);
+    }
 
     return NextResponse.json({
-      ok: syncResult.ok,
+      ok: firstResult.ok,
       runId,
-      sync: syncResult,
-      chained: "stage",
-      message: "Sync completed; remaining steps run in follow-up requests.",
+      [FIRST_CRON_GROUP]: firstResult,
+      chained: next,
+      message: "First step completed; remaining steps run in follow-up requests.",
     });
   } catch (error) {
-    const message = errorMessage(error) || "Daily cron failed during sync.";
-    console.error("Daily cron sync step failed", error);
-    return NextResponse.json({ ok: false, runId, error: message, step: "sync" }, { status: 500 });
+    const message = errorMessage(error) || `Daily cron failed during ${FIRST_CRON_GROUP}.`;
+    console.error(`Daily cron ${FIRST_CRON_GROUP} step failed`, error);
+    return NextResponse.json({ ok: false, runId, error: message, step: FIRST_CRON_GROUP }, { status: 500 });
   }
 }
