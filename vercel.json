@@ -13,7 +13,7 @@
       "maxDuration": 300
     },
     "src/app/api/cron/slack-reminders/route.ts": {
-      "maxDuration": 60
+      "maxDuration": 300
     }
   }
 }
