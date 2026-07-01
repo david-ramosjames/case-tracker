@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   ArrowRightLeft,
+  BarChart3,
   BriefcaseBusiness,
   CalendarClock,
   CircleDollarSign,
@@ -12,11 +13,12 @@ import {
   Timer,
 } from "lucide-react";
 import { MetricCard } from "@/components/dashboard/metric-card";
+import { SignedCasesTrendChart } from "@/components/jumbotron/signed-cases-trend-chart";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Select } from "@/components/ui/select";
 import { CASE_TYPE_OPTIONS, getGoalYearOptions } from "@/lib/case-options";
-import { computeJumbotronMetrics } from "@/lib/jumbotron-metrics";
+import { computeJumbotronMetrics, computeSignedCasesByMonth } from "@/lib/jumbotron-metrics";
 import { type AppUser, type AttorneyGoal, type CaseRecord } from "@/lib/types";
 
 export function JumbotronView({
@@ -35,14 +37,19 @@ export function JumbotronView({
   const attorneys = users.filter((user) => user.role === "attorney");
   const yearOptions = useMemo(() => getGoalYearOptions(), []);
 
-  const metrics = useMemo(
-    () =>
-      computeJumbotronMetrics(records, goals, {
-        attorneyIds,
-        caseTypes,
-        calendarYear,
-      }),
-    [records, goals, attorneyIds, caseTypes, calendarYear],
+  const filters = useMemo(
+    () => ({
+      attorneyIds,
+      caseTypes,
+      calendarYear,
+    }),
+    [attorneyIds, caseTypes, calendarYear],
+  );
+
+  const metrics = useMemo(() => computeJumbotronMetrics(records, goals, filters), [records, goals, filters]);
+  const signedCasesByMonth = useMemo(
+    () => computeSignedCasesByMonth(records, filters),
+    [records, filters],
   );
 
   return (
@@ -54,8 +61,8 @@ export function JumbotronView({
             <CardTitle className="text-base">Filters</CardTitle>
           </div>
           <CardDescription>
-            Open-case metrics use every active pipeline case. Settlement and timing metrics use closed cases in the
-            selected calendar year.
+            Open-case metrics use every active pipeline case. Settlement, timing, and signed-case trend metrics respect
+            the selected calendar year.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -73,7 +80,7 @@ export function JumbotronView({
           />
           <div className="flex min-w-0 flex-col gap-1">
             <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-              Closed-case year
+              Calendar year
             </span>
             <Select
               className="h-8 text-xs"
@@ -129,6 +136,21 @@ export function JumbotronView({
           icon={ArrowRightLeft}
         />
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-pink-500" />
+            <CardTitle className="text-base">Signed cases by month</CardTitle>
+          </div>
+          <CardDescription>
+            Cases with a date signed in {calendarYear}, grouped by month. Attorney and case-type filters apply.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <SignedCasesTrendChart buckets={signedCasesByMonth} calendarYear={calendarYear} />
+        </CardContent>
+      </Card>
 
       <Card className="border-dashed">
         <CardContent className="flex flex-wrap items-center gap-3 p-4 text-sm text-muted-foreground">

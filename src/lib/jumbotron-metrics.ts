@@ -28,6 +28,14 @@ export type JumbotronMetrics = {
   daysSettlementToDisbursement: JumbotronMetric;
 };
 
+export type SignedCasesMonthBucket = {
+  month: number;
+  label: string;
+  count: number;
+};
+
+const MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
 function mean(values: number[]) {
   if (values.length === 0) return null;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -160,4 +168,29 @@ export function computeJumbotronMetrics(
       settlementToDisbursementDays.length,
     ),
   };
+}
+
+export function computeSignedCasesByMonth(
+  records: CaseRecord[],
+  filters: JumbotronFilters,
+): SignedCasesMonthBucket[] {
+  const counts = Array.from({ length: 12 }, () => 0);
+
+  for (const record of records) {
+    if (!matchesJumbotronFilters(record, filters)) continue;
+
+    const dateSigned = record.shared.dateSigned;
+    if (!dateSigned || !isDateInCalendarYear(dateSigned, filters.calendarYear)) continue;
+
+    const signed = parseCalendarDate(dateSigned);
+    if (!signed || signed.getFullYear() !== filters.calendarYear) continue;
+
+    counts[signed.getMonth()] += 1;
+  }
+
+  return counts.map((count, index) => ({
+    month: index + 1,
+    label: MONTH_LABELS[index] ?? String(index + 1),
+    count,
+  }));
 }
