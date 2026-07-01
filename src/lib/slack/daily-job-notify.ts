@@ -116,11 +116,21 @@ function formatAllJobLines(body: Record<string, unknown>): string[] {
   }
 
   const smsTimeTriggers = body.smsTimeTriggers as
-    | { queued?: number; matched?: number; skipped?: number; error?: string }
+    | {
+        queued?: number;
+        matched?: number;
+        skipped?: number;
+        error?: string;
+        staleRejections?: { rejected?: number; stale?: number; maxAgeDays?: number };
+      }
     | undefined;
   if (smsTimeTriggers?.error) {
     lines.push(`SMS time-in-stage failed: ${smsTimeTriggers.error}`);
   } else if (smsTimeTriggers) {
+    const staleRejected = smsTimeTriggers.staleRejections?.rejected ?? 0;
+    if (staleRejected > 0) {
+      lines.push(`SMS stale approvals: ${staleRejected} auto-rejected (7+ days pending)`);
+    }
     lines.push(
       `SMS time-in-stage: ${smsTimeTriggers.queued ?? 0} queued (${smsTimeTriggers.matched ?? 0} matched, ${smsTimeTriggers.skipped ?? 0} skipped)`,
     );

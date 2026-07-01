@@ -6,7 +6,7 @@ import { sendSlackFieldReminders } from "@/lib/slack/field-reminder-notify";
 import { sendSlackMissingFieldNotices } from "@/lib/slack/missing-field-notify";
 import { processDailyPulseRecap } from "@/lib/slack/stage-confirmation";
 import { promoteOnboardingToTreatment } from "@/lib/slack/stage-workflow";
-import { syncQuoPhonesToTrackerIfConfigured, processSmsTimeInStageAutomations } from "@/lib/sms/workflow";
+import { syncQuoPhonesToTrackerIfConfigured, processSmsTimeInStageAutomations, autoRejectStaleSmsPendingApprovals } from "@/lib/sms/workflow";
 import { getCases } from "@/lib/supabase/services";
 import { errorMessage } from "@/lib/utils";
 
@@ -229,9 +229,16 @@ export async function runDailyCronGroup(group: DailyCronGroup, options: DailyJob
     };
   }
 
-  const smsTimeTriggersResult = await runDailyJobStep("smsTimeTriggers", () =>
-    processSmsTimeInStageAutomations({ dryRun: Boolean(options.dryRun), caseNumber: options.caseNumber }),
-  );
+  const smsTimeTriggersResult = await runDailyJobStep("smsTimeTriggers", async () => {
+    const staleRejections = await autoRejectStaleSmsPendingApprovals({
+      dryRun: Boolean(options.dryRun),
+    });
+    const timeTriggers = await processSmsTimeInStageAutomations({
+      dryRun: Boolean(options.dryRun),
+      caseNumber: options.caseNumber,
+    });
+    return { ...timeTriggers, staleRejections };
+  });
   if (smsTimeTriggersResult.error) errors.push(smsTimeTriggersResult.error);
 
   return {
@@ -273,9 +280,11 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
     const fieldRemindersResult = await runDailyJobStep("fieldReminders", () => runFieldReminders(options));
     if (fieldRemindersResult.error) errors.push(fieldRemindersResult.error);
 
-    const smsTimeTriggersResult = await runDailyJobStep("smsTimeTriggers", () =>
-      processSmsTimeInStageAutomations({ dryRun, caseNumber: options.caseNumber }),
-    );
+    const smsTimeTriggersResult = await runDailyJobStep("smsTimeTriggers", async () => {
+      const staleRejections = await autoRejectStaleSmsPendingApprovals({ dryRun });
+      const timeTriggers = await processSmsTimeInStageAutomations({ dryRun, caseNumber: options.caseNumber });
+      return { ...timeTriggers, staleRejections };
+    });
     if (smsTimeTriggersResult.error) errors.push(smsTimeTriggersResult.error);
 
     const slackRan = Boolean(missingFieldsResult.data || fieldRemindersResult.data || pulseResult.data);
@@ -383,9 +392,11 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
   }
 
   if (step === "smsTimeTriggers") {
-    const result = await runDailyJobStep("smsTimeTriggers", () =>
-      processSmsTimeInStageAutomations({ dryRun, caseNumber: options.caseNumber }),
-    );
+    const result = await runDailyJobStep("smsTimeTriggers", async () => {
+      const staleRejections = await autoRejectStaleSmsPendingApprovals({ dryRun });
+      const timeTriggers = await processSmsTimeInStageAutomations({ dryRun, caseNumber: options.caseNumber });
+      return { ...timeTriggers, staleRejections };
+    });
     if (result.error) {
       return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
     }

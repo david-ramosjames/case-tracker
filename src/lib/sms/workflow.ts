@@ -8,6 +8,7 @@ import { renderSmsMessage } from "@/lib/sms/message-template";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
 import { postSlackMessage } from "@/lib/slack/client";
 import { isSlackEnabled, getSmsApprovalSlackChannelId } from "@/lib/slack/config";
+import { rejectSmsPendingApproval } from "@/lib/sms/approval";
 import { getSmsRecipients } from "@/lib/sms/recipients";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { syncTrackerQuoContacts } from "@/lib/supabase/quo-contacts";
@@ -16,6 +17,7 @@ import {
   createSmsPendingApproval,
   hasSmsAutomationDeliveryForCase,
   listSmsAutomations,
+  listStaleSmsPendingApprovals,
   updateSmsPendingApproval,
   type SmsAutomation,
   type SmsPendingApproval,
@@ -206,6 +208,34 @@ export async function processSmsTimeInStageAutomations(options?: {
   }
 
   return { queued, matched, skipped, automations: automations.length, dryRun: Boolean(options?.dryRun) };
+}
+
+export const SMS_APPROVAL_AUTO_REJECT_DAYS = 7;
+
+export async function autoRejectStaleSmsPendingApprovals(options?: {
+  dryRun?: boolean;
+  maxAgeDays?: number;
+}) {
+  if (!isSlackEnabled()) {
+    return { rejected: 0, stale: 0, reason: "slack_disabled" as const };
+  }
+
+  const maxAgeDays = options?.maxAgeDays ?? SMS_APPROVAL_AUTO_REJECT_DAYS;
+  const stale = await listStaleSmsPendingApprovals(maxAgeDays);
+
+  if (options?.dryRun) {
+    return { rejected: stale.length, stale: stale.length, dryRun: true as const, maxAgeDays };
+  }
+
+  let rejected = 0;
+  const slackMessage = `Client SMS auto-cancelled — no approval received within ${maxAgeDays} days. No message was sent.`;
+
+  for (const approval of stale) {
+    const result = await rejectSmsPendingApproval(approval, { slackMessage });
+    if (result.rejected) rejected += 1;
+  }
+
+  return { rejected, stale: stale.length, maxAgeDays };
 }
 
 export function isSmsApprovalText(text: string) {

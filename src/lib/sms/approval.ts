@@ -4,11 +4,34 @@ import {
   isSmsApprovalText,
   isSmsRejectionText,
 } from "@/lib/sms/workflow";
-import { findSmsPendingApprovalByThread, updateSmsPendingApproval } from "@/lib/supabase/sms-automations";
+import {
+  findSmsPendingApprovalByThread,
+  updateSmsPendingApproval,
+  type SmsPendingApproval,
+} from "@/lib/supabase/sms-automations";
 
 export function isSmsApprovalReaction(reaction: string | undefined) {
   const normalized = reaction?.trim().toLowerCase();
   return normalized === "white_check_mark" || normalized === "heavy_check_mark" || normalized === "+1";
+}
+
+export async function rejectSmsPendingApproval(
+  approval: SmsPendingApproval,
+  options?: { slackMessage?: string },
+) {
+  if (approval.status !== "pending") return { rejected: false as const };
+
+  await updateSmsPendingApproval(approval.id, { status: "rejected" });
+
+  if (approval.slackChannelId && approval.slackThreadTs) {
+    await postSlackMessage({
+      channel: approval.slackChannelId,
+      text: options?.slackMessage ?? "Client SMS cancelled — no message was sent.",
+      threadTs: approval.slackThreadTs,
+    });
+  }
+
+  return { rejected: true as const };
 }
 
 export async function handleSmsApprovalReply(channelId: string, threadTs: string, text: string) {
@@ -16,8 +39,7 @@ export async function handleSmsApprovalReply(channelId: string, threadTs: string
   if (!approval) return { handled: false as const };
 
   if (isSmsRejectionText(text)) {
-    await updateSmsPendingApproval(approval.id, { status: "rejected" });
-    await postSlackMessage({ channel: channelId, text: "Client SMS cancelled — no message was sent.", threadTs });
+    await rejectSmsPendingApproval(approval);
     return { handled: true as const, action: "rejected" as const };
   }
 
