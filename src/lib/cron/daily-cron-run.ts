@@ -22,6 +22,31 @@ export const DAILY_CRON_GROUP_ORDER: DailyCronGroup[] = [
   "sms",
 ];
 
+/** Batched to stay under Vercel's self-fetch infinite-loop limit (~5 hops). Order preserved within each batch. */
+export const DAILY_CRON_BATCHES: DailyCronGroup[][] = [
+  ["quoSync", "slackChannels", "settlementSync"],
+  ["treatmentPromotion", "dailyPulse"],
+  ["missingFields", "fieldReminders"],
+  ["sms"],
+];
+
+export function getBatch(batchIndex: number): DailyCronGroup[] | null {
+  return DAILY_CRON_BATCHES[batchIndex] ?? null;
+}
+
+export function getFirstGroupOfBatch(batchIndex: number): DailyCronGroup | null {
+  return DAILY_CRON_BATCHES[batchIndex]?.[0] ?? null;
+}
+
+export function getNextDailyCronBatchIndex(currentBatchIndex: number): number | null {
+  if (currentBatchIndex < 0 || currentBatchIndex >= DAILY_CRON_BATCHES.length - 1) return null;
+  return currentBatchIndex + 1;
+}
+
+export function getBatchIndexForGroup(group: DailyCronGroup): number {
+  return DAILY_CRON_BATCHES.findIndex((batch) => batch.includes(group));
+}
+
 export type DailyCronRunState = {
   runId: string;
   startedAt: string;

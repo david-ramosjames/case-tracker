@@ -1,13 +1,14 @@
 import { after } from "next/server";
 import { resolvePublicAppOrigin } from "@/lib/auth/redirect-url";
 import {
-  DAILY_CRON_GROUP_ORDER,
+  DAILY_CRON_BATCHES,
   type DailyCronGroup,
+  getFirstGroupOfBatch,
   getNextDailyCronGroup,
 } from "@/lib/cron/daily-cron-run";
 import { getCronSecret } from "@/lib/slack/config";
 
-function buildCronStepUrl(request: Request, group: DailyCronGroup, runId: string) {
+function buildCronBatchUrl(request: Request, batchIndex: number, runId: string) {
   const origin = resolvePublicAppOrigin() ?? new URL(request.url).origin;
   const url = new URL("/api/cron/daily-job-step", origin);
 
@@ -17,14 +18,14 @@ function buildCronStepUrl(request: Request, group: DailyCronGroup, runId: string
     if (value) url.searchParams.set(key, value);
   }
 
-  url.searchParams.set("group", group);
+  url.searchParams.set("batch", String(batchIndex));
   url.searchParams.set("runId", runId);
   return url;
 }
 
-export function triggerDailyCronGroup(request: Request, group: DailyCronGroup, runId: string) {
+export function triggerDailyCronBatch(request: Request, batchIndex: number, runId: string) {
   const secret = getCronSecret();
-  const url = buildCronStepUrl(request, group, runId);
+  const url = buildCronBatchUrl(request, batchIndex, runId);
 
   after(async () => {
     try {
@@ -34,18 +35,33 @@ export function triggerDailyCronGroup(request: Request, group: DailyCronGroup, r
       });
       if (!response.ok) {
         const body = await response.text();
-        console.error(`Daily cron chain failed to start ${group}`, response.status, body);
+        console.error(`Daily cron batch failed to start ${batchIndex}`, response.status, body);
         return;
       }
-      console.info(`Daily cron chain started ${group}`, { runId, status: response.status });
+      console.info(`Daily cron batch started`, {
+        runId,
+        batchIndex,
+        firstGroup: getFirstGroupOfBatch(batchIndex),
+        status: response.status,
+      });
     } catch (error) {
-      console.error(`Failed to trigger daily cron group ${group}`, error);
+      console.error(`Failed to trigger daily cron batch ${batchIndex}`, error);
     }
   });
+}
+
+/** One HTTP hop per batch (not per step) to avoid Vercel INFINITE_LOOP_DETECTED. */
+export function triggerDailyCronGroup(request: Request, group: DailyCronGroup, runId: string) {
+  const batchIndex = DAILY_CRON_BATCHES.findIndex((batch) => batch.includes(group));
+  if (batchIndex < 0) {
+    console.error(`No daily cron batch for group ${group}`);
+    return;
+  }
+  triggerDailyCronBatch(request, batchIndex, runId);
 }
 
 export function getNextDailyCronGroupAfter(current: DailyCronGroup) {
   return getNextDailyCronGroup(current);
 }
 
-export { DAILY_CRON_GROUP_ORDER, getNextDailyCronGroup };
+export { DAILY_CRON_BATCHES };

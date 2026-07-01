@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
 export const maxDuration = 300;
-import { getNextDailyCronGroup, triggerDailyCronGroup } from "@/lib/cron/daily-cron-chain";
-import { clearDailyCronRun, getDailyCronRunId, saveDailyCronGroupResult } from "@/lib/cron/daily-cron-run";
-import { runDailyCronGroup } from "@/lib/cron/daily-jobs";
+import { triggerDailyCronBatch } from "@/lib/cron/daily-cron-chain";
+import { clearDailyCronRun, getDailyCronRunId, getNextDailyCronBatchIndex } from "@/lib/cron/daily-cron-run";
+import { runDailyCronBatch } from "@/lib/cron/daily-cron-executor";
 import { getCronSecret } from "@/lib/slack/config";
 import { errorMessage } from "@/lib/utils";
 
-const FIRST_CRON_GROUP = "quoSync" as const;
+const FIRST_BATCH_INDEX = 0;
 
 export async function GET(request: Request) {
   const secret = getCronSecret();
@@ -30,28 +30,29 @@ export async function GET(request: Request) {
   try {
     await clearDailyCronRun(runId);
 
-    const firstResult = await runDailyCronGroup(FIRST_CRON_GROUP, {
+    const firstResult = await runDailyCronBatch(FIRST_BATCH_INDEX, runId, {
       force,
       skipSheetSync,
       caseNumber,
     });
-    await saveDailyCronGroupResult(runId, FIRST_CRON_GROUP, firstResult);
 
-    const next = getNextDailyCronGroup(FIRST_CRON_GROUP);
-    if (next) {
-      triggerDailyCronGroup(request, next, runId);
+    const nextBatch = getNextDailyCronBatchIndex(FIRST_BATCH_INDEX);
+    if (nextBatch != null) {
+      triggerDailyCronBatch(request, nextBatch, runId);
     }
 
     return NextResponse.json({
       ok: firstResult.ok,
       runId,
-      [FIRST_CRON_GROUP]: firstResult,
-      chained: next,
-      message: "First step completed; remaining steps run in follow-up requests.",
+      batch: FIRST_BATCH_INDEX,
+      groups: firstResult.groups,
+      results: firstResult.results,
+      chained: nextBatch,
+      message: "First batch completed; remaining batches run in follow-up requests.",
     });
   } catch (error) {
-    const message = errorMessage(error) || `Daily cron failed during ${FIRST_CRON_GROUP}.`;
-    console.error(`Daily cron ${FIRST_CRON_GROUP} step failed`, error);
-    return NextResponse.json({ ok: false, runId, error: message, step: FIRST_CRON_GROUP }, { status: 500 });
+    const message = errorMessage(error) || "Daily cron failed during first batch.";
+    console.error("Daily cron first batch failed", error);
+    return NextResponse.json({ ok: false, runId, error: message, batch: FIRST_BATCH_INDEX }, { status: 500 });
   }
 }
