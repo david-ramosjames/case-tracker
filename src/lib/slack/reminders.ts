@@ -17,7 +17,7 @@ export function getSlackReminderReasons(
   const { tracker } = record;
 
   if (!tracker.targetResolutionQuarter) reasons.push("missing_quarter");
-  if (!tracker.minimumValue) reasons.push("missing_minimum_value");
+  if (tracker.minimumValue == null) reasons.push("missing_minimum_value");
   if (sourcesLitNeedsReview(record)) reasons.push("sources_lit_stale");
 
   const outdatedValidation = getOutdatedValidationFields(record);

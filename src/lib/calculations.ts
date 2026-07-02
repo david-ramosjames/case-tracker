@@ -71,7 +71,7 @@ export function getDataQualityFlags(
   const flags: DataQualityFlag[] = [];
   const { tracker, shared } = record;
 
-  if (!tracker.minimumValue) {
+  if (tracker.minimumValue == null) {
     flags.push({ id: "missing-minimum-value", label: "Missing minimum value", severity: "danger" });
   }
 
@@ -87,7 +87,7 @@ export function getDataQualityFlags(
     flags.push({ id: "missing-balance-cta", label: "Missing balance/CTA info", severity: "warning" });
   }
 
-  if (!tracker.policyLimits) {
+  if (tracker.policyLimits == null) {
     flags.push({ id: "missing-policy-limits", label: "Missing policy limits", severity: "warning" });
   }
 
@@ -150,9 +150,9 @@ export function getCaseCompletionChecks(record: CaseRecord): CompletionCheck[] {
     { id: "date-signed", complete: Boolean(shared.dateSigned) },
     { id: "dol", complete: Boolean(shared.dateOfIncident) },
     { id: "case-type", complete: Boolean(shared.caseType?.trim()) },
-    { id: "minimum", complete: tracker.minimumValue != null && tracker.minimumValue > 0 },
+    { id: "minimum", complete: tracker.minimumValue != null },
     { id: "quarter", complete: Boolean(tracker.targetResolutionQuarter?.trim()) },
-    { id: "policy-limits", complete: tracker.policyLimits != null && tracker.policyLimits > 0 },
+    { id: "policy-limits", complete: tracker.policyLimits != null },
     { id: "policy-source", complete: Boolean(tracker.policyInfoSource?.trim()) },
     { id: "referral", complete: Boolean(tracker.referralFeeArrangement?.trim()) },
     { id: "balance-cta", complete: Boolean(tracker.balanceCtaInfo?.trim()) },

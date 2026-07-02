@@ -1,7 +1,7 @@
-import { fieldReminderValidationPatch } from "@/lib/slack/field-reminders";
+import { FIELD_REMINDER_META } from "@/lib/slack/field-reminders";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCaseById, trackerActivityLink, updateTrackerEntry } from "@/lib/supabase/services";
-import { type FieldReminderKey, type TrackerUpdateInput } from "@/lib/types";
+import { type CaseRecord, type FieldReminderKey, type TrackerUpdateInput } from "@/lib/types";
 
 type FieldReminderRow = {
   id: string;
@@ -94,7 +94,13 @@ export async function markFieldReminderPosted(reminderId: string, threadTs: stri
     .eq("id", reminderId);
 }
 
-async function closeFieldReminder(reminderId: string, caseId: string, action: "confirmed" | "dismissed", actorName: string) {
+async function closeFieldReminder(
+  reminderId: string,
+  caseId: string,
+  action: "confirmed" | "dismissed",
+  actorName: string,
+  fieldKey?: FieldReminderKey,
+) {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required.");
 
@@ -104,14 +110,34 @@ async function closeFieldReminder(reminderId: string, caseId: string, action: "c
 
   const record = await getCaseById(caseId);
   const link = record ? trackerActivityLink(record) : { caseId: null, trackerEntryId: caseId };
+  const fieldLabel = fieldKey ? FIELD_REMINDER_META[fieldKey].label : "Field";
 
   await admin.from("case_tracker_activity").insert({
     case_id: link.caseId,
     tracker_entry_id: link.trackerEntryId,
     action: action === "confirmed" ? "Field reminder confirmed" : "Field reminder dismissed",
-    description: `Slack field reminder ${action}.`,
-    metadata: { user_name: actorName, reminder_id: reminderId },
+    description:
+      action === "confirmed" ? `${fieldLabel} confirmed via Slack.` : `${fieldLabel} reminder dismissed via Slack.`,
+    metadata: { user_name: actorName, reminder_id: reminderId, field_key: fieldKey ?? null },
   });
+}
+
+function buildFieldReminderTouchInput(record: CaseRecord, fieldKey: FieldReminderKey): TrackerUpdateInput {
+  const { tracker } = record;
+  switch (fieldKey) {
+    case "liability":
+      return { liability: tracker.liability };
+    case "targetResolutionQuarter":
+      return { targetResolutionQuarter: tracker.targetResolutionQuarter };
+    case "minimumValue":
+      return { minimumValue: tracker.minimumValue };
+    case "policyLimits":
+      return { policyLimits: tracker.policyLimits };
+    case "expectedLitigation":
+      return { expectedLitigation: tracker.expectedLitigation };
+    default:
+      return {};
+  }
 }
 
 export async function confirmFieldReminder(
@@ -124,9 +150,6 @@ export async function confirmFieldReminder(
   const record = await getCaseById(caseId);
   if (!record) throw new Error("Case not found.");
 
-  const now = new Date().toISOString();
-  const validationOnly = fieldReminderValidationPatch(fieldKey, now);
-
   if (patch && Object.keys(patch).length > 0) {
     await updateTrackerEntry(caseId, patch, {
       actor: { userName: actorName },
@@ -134,19 +157,24 @@ export async function confirmFieldReminder(
       changeInput: patch,
     });
   } else {
-    const admin = createSupabaseAdminClient();
-    if (!admin) throw new Error("Service role required.");
-    await admin
-      .from("case_tracker_entries")
-      .update({ ...validationOnly, last_reviewed_at: now })
-      .or(`case_id.eq.${caseId},id.eq.${caseId}`);
+    const touchInput = buildFieldReminderTouchInput(record, fieldKey);
+    await updateTrackerEntry(caseId, touchInput, {
+      actor: { userName: actorName },
+      markReviewed: true,
+      changeInput: touchInput,
+    });
   }
 
-  await closeFieldReminder(reminderId, caseId, "confirmed", actorName);
+  await closeFieldReminder(reminderId, caseId, "confirmed", actorName, fieldKey);
   return { fieldKey, confirmed: true as const };
 }
 
-export async function dismissFieldReminder(reminderId: string, caseId: string, actorName: string) {
-  await closeFieldReminder(reminderId, caseId, "dismissed", actorName);
+export async function dismissFieldReminder(
+  reminderId: string,
+  caseId: string,
+  actorName: string,
+  fieldKey?: FieldReminderKey,
+) {
+  await closeFieldReminder(reminderId, caseId, "dismissed", actorName, fieldKey);
   return { dismissed: true as const };
 }

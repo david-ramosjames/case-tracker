@@ -1403,7 +1403,7 @@ export function CaseDetailView({
             <SetupRow label="Case type" complete={Boolean(record.shared.caseType)} />
             <SetupRow label="Referral fee arrangement" complete={Boolean(tracker.referralFeeArrangement)} />
             <SetupRow label="Balance / CTA info" complete={Boolean(tracker.balanceCtaInfo)} />
-            <SetupRow label="Policy limits" complete={Boolean(tracker.policyLimits)} />
+            <SetupRow label="Policy limits" complete={tracker.policyLimits != null} />
             <SetupRow label="Policy source" complete={Boolean(tracker.policyInfoSource)} />
             <SetupRow label="Injuries" complete={Boolean(tracker.injuries)} />
           </CardContent>

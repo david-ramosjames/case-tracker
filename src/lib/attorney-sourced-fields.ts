@@ -4,6 +4,7 @@ import { sourcesLitNeedsReview } from "@/lib/calculations";
 import {
   getOutdatedValidationFields,
   getValidationFieldValidatedAt,
+  isNumericFieldSet,
   isValidationFieldFresh,
   type ValidationFieldId,
 } from "@/lib/attorney-score";
@@ -78,11 +79,11 @@ function hasAttorneyFieldValue(record: CaseRecord, fieldId: AttorneySourcedField
     case "targetResolutionQuarter":
       return Boolean(tracker.targetResolutionQuarter?.trim());
     case "minimumValue":
-      return tracker.minimumValue != null && tracker.minimumValue > 0;
+      return isNumericFieldSet(tracker.minimumValue);
     case "referralFee":
       return tracker.referralFee != null;
     case "policyLimits":
-      return tracker.policyLimits != null && tracker.policyLimits > 0;
+      return isNumericFieldSet(tracker.policyLimits);
     case "policyInfoSource":
       return Boolean(tracker.policyInfoSource?.trim());
     case "injuries":

@@ -33,6 +33,11 @@ export const VALIDATION_FIELDS = [
 
 export type ValidationFieldId = (typeof VALIDATION_FIELDS)[number]["id"];
 
+/** Dollar fields where 0 is a valid attorney-entered value (e.g. no policy coverage). */
+export function isNumericFieldSet(value: number | null | undefined): value is number {
+  return value != null;
+}
+
 export type CaseAttorneyScore = {
   percent: number;
   completenessPercent: number;
@@ -64,11 +69,11 @@ export function hasCompletenessField(record: CaseRecord, fieldId: CompletenessFi
     case "quarter":
       return Boolean(tracker.targetResolutionQuarter?.trim());
     case "minimumValue":
-      return tracker.minimumValue != null && tracker.minimumValue > 0;
+      return isNumericFieldSet(tracker.minimumValue);
     case "referralFee":
       return tracker.referralFee != null;
     case "policyLimits":
-      return tracker.policyLimits != null && tracker.policyLimits > 0;
+      return isNumericFieldSet(tracker.policyLimits);
     case "policySource":
       return Boolean(tracker.policyInfoSource?.trim());
     default:
@@ -85,9 +90,9 @@ export function hasValidationFieldValue(record: CaseRecord, fieldId: ValidationF
     case "targetResolutionQuarter":
       return Boolean(tracker.targetResolutionQuarter?.trim());
     case "minimumValue":
-      return tracker.minimumValue != null && tracker.minimumValue > 0;
+      return isNumericFieldSet(tracker.minimumValue);
     case "policyLimits":
-      return tracker.policyLimits != null && tracker.policyLimits > 0;
+      return isNumericFieldSet(tracker.policyLimits);
     default:
       return false;
   }
@@ -229,8 +234,8 @@ export function buildFieldValidationRowPatch(
 
     if (liability) patch.liability_validated_at = now;
     if (quarter) patch.target_resolution_quarter_validated_at = now;
-    if (minimum != null && Number(minimum) > 0) patch.minimum_value_validated_at = now;
-    if (policyLimits != null && Number(policyLimits) > 0) patch.policy_limits_validated_at = now;
+    if (minimum != null) patch.minimum_value_validated_at = now;
+    if (policyLimits != null) patch.policy_limits_validated_at = now;
   }
 
   return patch;
