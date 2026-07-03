@@ -206,11 +206,7 @@ export function formatDailyJobSlackMessage(
   return [header, ...detailLines.map((line) => `• ${line}`)].join("\n");
 }
 
-export async function notifyDailyJobResult(
-  step: DailyJobStep,
-  body: Record<string, unknown>,
-  options?: { source?: "cron" | "manual"; fatalError?: string },
-) {
+async function postDailyJobSlack(text: string) {
   if (!isSlackEnabled()) {
     return { posted: false as const, reason: "slack_disabled" as const };
   }
@@ -220,8 +216,6 @@ export async function notifyDailyJobResult(
     return { posted: false as const, reason: "no_pulse_channel" as const };
   }
 
-  const text = formatDailyJobSlackMessage(step, body, options);
-
   try {
     await postSlackMessage({ channel: channelId, text });
     return { posted: true as const };
@@ -229,4 +223,18 @@ export async function notifyDailyJobResult(
     console.error("Daily job Slack notification failed", errorMessage(error), error);
     return { posted: false as const, reason: "post_failed" as const, error: errorMessage(error) };
   }
+}
+
+/** Post immediately when cron starts so a hung/killed run is still visible in #daily-pulse. */
+export async function notifyDailyCronStarted(runId: string) {
+  const when = formatCentralTimestamp();
+  return postDailyJobSlack(`:hourglass_flowing_sand: *Daily cron started* — ${when} CT\n• run \`${runId}\``);
+}
+
+export async function notifyDailyJobResult(
+  step: DailyJobStep,
+  body: Record<string, unknown>,
+  options?: { source?: "cron" | "manual"; fatalError?: string },
+) {
+  return postDailyJobSlack(formatDailyJobSlackMessage(step, body, options));
 }
