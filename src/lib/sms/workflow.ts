@@ -14,6 +14,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { syncTrackerQuoContacts } from "@/lib/supabase/quo-contacts";
 import { automationMatchesStageChange, automationMatchesTimeInStage } from "@/lib/sms/automation-match";
 import {
+  claimSmsPendingApproval,
   createSmsPendingApproval,
   hasSmsAutomationDeliveryForCase,
   listSmsAutomations,
@@ -256,12 +257,9 @@ export function isSmsRejectionText(text: string) {
 }
 
 export async function approveAndSendSmsPendingApproval(approvalId: string) {
-  const admin = createSupabaseAdminClient();
-  if (!admin) throw new Error("Service role required.");
-
-  const { data, error } = await admin.from("sms_pending_approvals").select("*").eq("id", approvalId).single();
-  if (error) throw new Error(error.message);
-  if (!data || data.status !== "pending") return { sent: false as const, reason: "not_pending" as const };
+  // Claim first so concurrent Slack retries / reactions cannot both send.
+  const claimed = await claimSmsPendingApproval(approvalId, "approved");
+  if (!claimed) return { sent: false as const, reason: "not_pending" as const };
 
   if (!isQuoEnabled()) {
     await updateSmsPendingApproval(approvalId, {
@@ -273,8 +271,8 @@ export async function approveAndSendSmsPendingApproval(approvalId: string) {
 
   try {
     const quoMessageId = await sendQuoTextMessage({
-      to: data.phone,
-      content: data.message_body,
+      to: claimed.phone,
+      content: claimed.messageBody,
     });
     await updateSmsPendingApproval(approvalId, {
       status: "sent",

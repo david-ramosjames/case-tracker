@@ -5,8 +5,8 @@ import {
   isSmsRejectionText,
 } from "@/lib/sms/workflow";
 import {
+  claimSmsPendingApproval,
   findSmsPendingApprovalByThread,
-  updateSmsPendingApproval,
   type SmsPendingApproval,
 } from "@/lib/supabase/sms-automations";
 
@@ -19,15 +19,14 @@ export async function rejectSmsPendingApproval(
   approval: SmsPendingApproval,
   options?: { slackMessage?: string },
 ) {
-  if (approval.status !== "pending") return { rejected: false as const };
+  const claimed = await claimSmsPendingApproval(approval.id, "rejected");
+  if (!claimed) return { rejected: false as const };
 
-  await updateSmsPendingApproval(approval.id, { status: "rejected" });
-
-  if (approval.slackChannelId && approval.slackThreadTs) {
+  if (claimed.slackChannelId && claimed.slackThreadTs) {
     await postSlackMessage({
-      channel: approval.slackChannelId,
+      channel: claimed.slackChannelId,
       text: options?.slackMessage ?? "Client SMS cancelled — no message was sent.",
-      threadTs: approval.slackThreadTs,
+      threadTs: claimed.slackThreadTs,
     });
   }
 
@@ -38,17 +37,31 @@ export async function handleSmsApprovalReply(channelId: string, threadTs: string
   const approval = await findSmsPendingApprovalByThread(channelId, threadTs);
   if (!approval) return { handled: false as const };
 
-  if (isSmsRejectionText(text)) {
-    await rejectSmsPendingApproval(approval);
-    return { handled: true as const, action: "rejected" as const };
+  const isApproval = isSmsApprovalText(text);
+  const isRejection = isSmsRejectionText(text);
+  if (!isApproval && !isRejection) return { handled: false as const };
+
+  // Duplicate Slack delivery / concurrent reaction after claim — do not send or notify again.
+  if (approval.status !== "pending") {
+    return { handled: true as const, action: "already_handled" as const };
   }
 
-  if (!isSmsApprovalText(text)) return { handled: false as const };
+  if (isRejection) {
+    const result = await rejectSmsPendingApproval(approval);
+    return {
+      handled: true as const,
+      action: result.rejected ? ("rejected" as const) : ("already_handled" as const),
+    };
+  }
 
   const result = await approveAndSendSmsPendingApproval(approval.id);
   if (result.sent) {
     await postSlackMessage({ channel: channelId, text: "✅ Client SMS sent via Quo.", threadTs });
     return { handled: true as const, action: "sent" as const };
+  }
+
+  if (result.reason === "not_pending") {
+    return { handled: true as const, action: "already_handled" as const };
   }
 
   const reason = "message" in result ? result.message : result.reason;

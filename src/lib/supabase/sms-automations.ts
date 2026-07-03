@@ -320,6 +320,28 @@ export async function updateSmsPendingApproval(
   return rowToApproval(data as ApprovalRow);
 }
 
+/**
+ * Atomically move a pending approval to approved/rejected.
+ * Returns null when another worker already claimed it — prevents double SMS sends.
+ */
+export async function claimSmsPendingApproval(
+  id: string,
+  nextStatus: "approved" | "rejected",
+): Promise<SmsPendingApproval | null> {
+  const admin = requireAdmin();
+  const now = new Date().toISOString();
+  const { data, error } = await admin
+    .from("sms_pending_approvals")
+    .update({ status: nextStatus, updated_at: now })
+    .eq("id", id)
+    .eq("status", "pending")
+    .select("*")
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return data ? rowToApproval(data as ApprovalRow) : null;
+}
+
 export async function findSmsPendingApprovalByThread(channelId: string, threadTs: string) {
   const admin = requireAdmin();
   const { data, error } = await admin
@@ -327,7 +349,8 @@ export async function findSmsPendingApprovalByThread(channelId: string, threadTs
     .select("*")
     .eq("slack_channel_id", channelId)
     .eq("slack_thread_ts", threadTs)
-    .eq("status", "pending")
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) throw new Error(error.message);
