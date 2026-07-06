@@ -9,7 +9,7 @@ import {
   getNextDailyCronBatchIndex,
   saveDailyCronGroupResult,
 } from "@/lib/cron/daily-cron-run";
-import { finishDailyCronRun, runDailyCronBatch } from "@/lib/cron/daily-cron-executor";
+import { executeDailyCronBatchStep, failDailyCronRun, finishDailyCronRun } from "@/lib/cron/daily-cron-executor";
 import { runDailyCronGroup } from "@/lib/cron/daily-jobs";
 import { notifyDailyJobResult } from "@/lib/slack/daily-job-notify";
 import { getCronSecret } from "@/lib/slack/config";
@@ -55,41 +55,36 @@ export async function GET(request: Request) {
 
   if (batchIndex != null) {
     try {
-      const outcome = await runDailyCronBatch(batchIndex, runId, options);
-      const nextBatch = getNextDailyCronBatchIndex(batchIndex);
-
-      if (nextBatch != null) {
-        triggerDailyCronBatch(request, nextBatch, runId);
-        return NextResponse.json({
-          ok: outcome.ok,
-          runId,
-          batch: batchIndex,
-          groups: outcome.groups,
-          chained: nextBatch,
-          results: outcome.results,
-        });
+      const outcome = await executeDailyCronBatchStep(request, batchIndex, runId, options);
+      if (outcome.completed) {
+        return NextResponse.json(
+          {
+            ...outcome.merged,
+            runId,
+            batch: batchIndex,
+            completed: true,
+            slackNotify: outcome.slackNotify,
+            progressNotify: outcome.progressNotify,
+          },
+          { status: outcome.ok ? 200 : 500 },
+        );
       }
 
-      const { merged, slackNotify } = await finishDailyCronRun(runId);
-      return NextResponse.json(
-        {
-          ...merged,
-          completed: true,
-          slackNotify,
-        },
-        { status: merged.ok ? 200 : 500 },
-      );
+      return NextResponse.json({
+        ok: outcome.ok,
+        runId,
+        batch: batchIndex,
+        groups: outcome.groups,
+        chained: outcome.chained,
+        results: outcome.results,
+        progressNotify: outcome.progressNotify,
+      });
     } catch (error) {
       const message = errorMessage(error) || "Daily cron batch failed.";
       console.error(`Daily cron batch failed: ${batchIndex}`, error);
 
       try {
-        const batch = DAILY_CRON_BATCHES[batchIndex];
-        const failedGroup = batch?.[0];
-        if (failedGroup) {
-          await saveDailyCronGroupResult(runId, failedGroup, { ok: false, group: failedGroup, error: message });
-        }
-        const { merged, slackNotify } = await finishDailyCronRun(runId);
+        const { merged, slackNotify } = await failDailyCronRun(runId, batchIndex, message);
         return NextResponse.json(
           {
             ...merged,

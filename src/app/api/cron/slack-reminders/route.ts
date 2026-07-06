@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 
-import { runFullDailyCron } from "@/lib/cron/daily-cron-executor";
+import { startDailyCronChain } from "@/lib/cron/daily-cron-executor";
 import { getDailyCronRunId } from "@/lib/cron/daily-cron-run";
 import { getCronSecret } from "@/lib/slack/config";
 import { errorMessage } from "@/lib/utils";
@@ -36,8 +36,8 @@ export async function GET(request: Request) {
   });
 
   try {
-    const outcome = await runFullDailyCron(runId, { force, skipSheetSync, caseNumber });
-    return NextResponse.json(outcome, { status: outcome.ok ? 200 : 500 });
+    const outcome = await startDailyCronChain(request, runId, { force, skipSheetSync, caseNumber });
+    return NextResponse.json(outcome, { status: outcome.ok === false ? 500 : 200 });
   } catch (error) {
     const message = errorMessage(error) || "Daily cron failed.";
     console.error("Daily cron unhandled failure", { runId, message }, error);

@@ -1,14 +1,19 @@
+import { triggerDailyCronBatch } from "@/lib/cron/daily-cron-chain";
 import {
   clearDailyCronRun,
-  DAILY_CRON_BATCHES,
   getBatch,
+  getNextDailyCronBatchIndex,
   loadDailyCronRun,
   mergeDailyCronRunToAllResult,
   saveDailyCronGroupResult,
   type DailyCronGroup,
 } from "@/lib/cron/daily-cron-run";
 import { runDailyCronGroup } from "@/lib/cron/daily-jobs";
-import { notifyDailyCronStarted, notifyDailyJobResult } from "@/lib/slack/daily-job-notify";
+import {
+  notifyDailyCronBatchProgress,
+  notifyDailyCronStarted,
+  notifyDailyJobResult,
+} from "@/lib/slack/daily-job-notify";
 import { errorMessage } from "@/lib/utils";
 
 export type DailyCronRunOptions = {
@@ -50,54 +55,77 @@ export async function finishDailyCronRun(runId: string) {
   return { merged, slackNotify };
 }
 
-/**
- * Run every daily cron group in this invocation (no self-fetch chain).
- * Posts to #daily-pulse at start and end so partial/killed runs are visible.
- */
-export async function runFullDailyCron(runId: string, options: DailyCronRunOptions) {
-  console.info("Daily cron started", { runId, options });
+/** Run one batch, post progress to Slack, then chain the next batch or finish. */
+export async function executeDailyCronBatchStep(
+  request: Request,
+  batchIndex: number,
+  runId: string,
+  options: DailyCronRunOptions,
+) {
+  const outcome = await runDailyCronBatch(batchIndex, runId, options);
+  const progressNotify = await notifyDailyCronBatchProgress(runId, batchIndex, outcome);
+  console.info("Daily cron batch progress notify", { runId, batchIndex, progressNotify });
+
+  const nextBatch = getNextDailyCronBatchIndex(batchIndex);
+  if (nextBatch != null) {
+    triggerDailyCronBatch(request, nextBatch, runId);
+    return { ...outcome, chained: nextBatch, completed: false as const, progressNotify };
+  }
+
+  const { merged, slackNotify } = await finishDailyCronRun(runId);
+  console.info("Daily cron completed", { runId, ok: merged.ok, slackNotify });
+  return { ...outcome, merged, slackNotify, completed: true as const, ok: merged.ok, progressNotify };
+}
+
+export async function failDailyCronRun(runId: string, batchIndex: number, message: string) {
+  const batch = getBatch(batchIndex);
+  const failedGroup = batch?.[0];
+  if (failedGroup) {
+    await saveDailyCronGroupResult(runId, failedGroup, { ok: false, group: failedGroup, error: message });
+  }
+
+  await notifyDailyCronBatchProgress(runId, batchIndex, {
+    ok: false,
+    groups: batch ?? [`batch ${batchIndex}`],
+  });
+
+  const run = await loadDailyCronRun(runId);
+  const partial = mergeDailyCronRunToAllResult(run);
+  const slackNotify = await notifyDailyJobResult("all", { ...partial, ok: false }, {
+    source: "cron",
+    fatalError: message,
+  });
+  await clearDailyCronRun(runId);
+  return { merged: partial, slackNotify };
+}
+
+/** First batch only — remaining batches chain via HTTP. */
+export async function startDailyCronChain(
+  request: Request,
+  runId: string,
+  options: DailyCronRunOptions,
+) {
+  console.info("Daily cron chain starting", { runId, options });
   await clearDailyCronRun(runId);
 
   const startedNotify = await notifyDailyCronStarted(runId);
   console.info("Daily cron start notify", startedNotify);
 
-  const batchResults: Array<{ batchIndex: number; ok: boolean; groups: DailyCronGroup[] }> = [];
-
   try {
-    for (let batchIndex = 0; batchIndex < DAILY_CRON_BATCHES.length; batchIndex += 1) {
-      console.info("Daily cron batch starting", { runId, batchIndex, groups: DAILY_CRON_BATCHES[batchIndex] });
-      const outcome = await runDailyCronBatch(batchIndex, runId, options);
-      batchResults.push({ batchIndex, ok: outcome.ok, groups: outcome.groups });
-    }
-
-    const { merged, slackNotify } = await finishDailyCronRun(runId);
-    console.info("Daily cron completed", { runId, ok: merged.ok, slackNotify });
-    return { ok: merged.ok, runId, merged, slackNotify, startedNotify, batchResults };
+    const result = await executeDailyCronBatchStep(request, 0, runId, options);
+    return { ...result, runId, startedNotify };
   } catch (error) {
     const message = errorMessage(error) || "Daily cron failed.";
-    console.error("Daily cron failed", { runId, message }, error);
-
-    let slackNotify: Awaited<ReturnType<typeof notifyDailyJobResult>>;
-    try {
-      const run = await loadDailyCronRun(runId);
-      const partial = mergeDailyCronRunToAllResult(run);
-      slackNotify = await notifyDailyJobResult("all", { ...partial, ok: false }, {
-        source: "cron",
-        fatalError: message,
-      });
-      await clearDailyCronRun(runId);
-    } catch (notifyError) {
-      console.error("Daily cron failure notify failed", notifyError);
-      slackNotify = { posted: false as const, reason: "post_failed" as const, error: errorMessage(notifyError) };
-    }
-
+    console.error("Daily cron batch 0 failed", { runId, message }, error);
+    const { merged, slackNotify } = await failDailyCronRun(runId, 0, message);
     return {
       ok: false as const,
       runId,
       error: message,
+      merged,
       slackNotify,
       startedNotify,
-      batchResults,
+      completed: true as const,
     };
   }
 }

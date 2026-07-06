@@ -1,3 +1,4 @@
+import { DAILY_CRON_BATCHES } from "@/lib/cron/daily-cron-run";
 import { type DailyJobStep } from "@/lib/cron/daily-jobs";
 import { postSlackMessage } from "@/lib/slack/client";
 import { getDailyPulseChannelId, isSlackEnabled } from "@/lib/slack/config";
@@ -225,10 +226,32 @@ async function postDailyJobSlack(text: string) {
   }
 }
 
+const DAILY_CRON_BATCH_LABELS = [
+  "Quo sync + Slack channels",
+  "Settlement sheet sync",
+  "Treatment promotion + daily pulse",
+  "Missing fields + field reminders",
+  "SMS automations",
+] as const;
+
 /** Post immediately when cron starts so a hung/killed run is still visible in #daily-pulse. */
 export async function notifyDailyCronStarted(runId: string) {
   const when = formatCentralTimestamp();
   return postDailyJobSlack(`:hourglass_flowing_sand: *Daily cron started* — ${when} CT\n• run \`${runId}\``);
+}
+
+/** Post after each batch so progress is visible even when a later batch times out. */
+export async function notifyDailyCronBatchProgress(
+  runId: string,
+  batchIndex: number,
+  outcome: { ok: boolean; groups: string[] },
+) {
+  const total = DAILY_CRON_BATCHES.length;
+  const icon = outcome.ok ? ":white_check_mark:" : ":warning:";
+  const label = DAILY_CRON_BATCH_LABELS[batchIndex] ?? `Batch ${batchIndex + 1}`;
+  return postDailyJobSlack(
+    `${icon} *Daily cron batch ${batchIndex + 1}/${total}* — ${label}\n• run \`${runId}\`\n• steps: ${outcome.groups.join(", ")}`,
+  );
 }
 
 export async function notifyDailyJobResult(

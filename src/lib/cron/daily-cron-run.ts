@@ -22,9 +22,14 @@ export const DAILY_CRON_GROUP_ORDER: DailyCronGroup[] = [
   "sms",
 ];
 
-/** Batched to stay under Vercel's self-fetch infinite-loop limit (~5 hops). Order preserved within each batch. */
+/**
+ * One batch per invocation so each step stays under Vercel's 300s limit.
+ * Settlement sync alone can take several minutes — never bundle it with other work.
+ * Five batches ⇒ four self-fetch hops (under Vercel's infinite-loop threshold).
+ */
 export const DAILY_CRON_BATCHES: DailyCronGroup[][] = [
-  ["quoSync", "slackChannels", "settlementSync"],
+  ["quoSync", "slackChannels"],
+  ["settlementSync"],
   ["treatmentPromotion", "dailyPulse"],
   ["missingFields", "fieldReminders"],
   ["sms"],

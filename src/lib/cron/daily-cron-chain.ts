@@ -9,8 +9,13 @@ import {
 import { getCronSecret } from "@/lib/slack/config";
 
 function buildCronBatchUrl(request: Request, batchIndex: number, runId: string) {
-  const origin = resolvePublicAppOrigin() ?? new URL(request.url).origin;
-  const url = new URL("/api/cron/daily-job-step", origin);
+  const origin = resolvePublicAppOrigin();
+  if (!origin) {
+    console.warn(
+      "NEXT_PUBLIC_SITE_URL is not set; cron chain will use the invoking host (may be a preview deployment).",
+    );
+  }
+  const url = new URL("/api/cron/daily-job-step", origin ?? new URL(request.url).origin);
 
   const incoming = new URL(request.url);
   for (const key of ["force", "syncSheet", "caseNumber"] as const) {
