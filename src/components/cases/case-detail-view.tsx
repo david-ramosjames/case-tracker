@@ -983,7 +983,7 @@ export function CaseDetailView({
                         }
                       >
                         <option value="en">English</option>
-                        <option value="es">🇲🇽 Spanish</option>
+                        <option value="es">Spanish</option>
                       </Select>
                     </Field>
                     <Field label="Stage">
@@ -1536,11 +1536,26 @@ export function CaseDetailView({
   );
 }
 
+function MexicoFlagIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 3 2"
+      aria-hidden
+      className="inline-block h-[0.9em] w-[1.35em] shrink-0 rounded-[2px] border border-black/10"
+    >
+      <rect width="1" height="2" fill="#006847" />
+      <rect x="1" width="1" height="2" fill="#fff" />
+      <rect x="2" width="1" height="2" fill="#ce1126" />
+    </svg>
+  );
+}
+
 function PreferredLanguageLabel({ language }: { language: "en" | "es" }) {
   if (language === "es") {
     return (
       <span className="inline-flex items-center gap-1.5 font-medium">
-        <span aria-hidden>🇲🇽</span>
+        <MexicoFlagIcon />
         Spanish
       </span>
     );
