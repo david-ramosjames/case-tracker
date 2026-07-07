@@ -112,7 +112,7 @@ export function ResultsTable({
     [records],
   );
   const [search, setSearch] = useState("");
-  const [caseStatus, setCaseStatus] = useState<"all" | CaseStatus>("all");
+  const [caseStatus, setCaseStatus] = useState<"all" | CaseStatus>("Active");
   const [attorneyIds, setAttorneyIds] = useState<string[]>([]);
   const [release, setRelease] = useState("all");
   const [closing, setClosing] = useState("all");
@@ -135,7 +135,7 @@ export function ResultsTable({
   const quarters = Array.from(new Set([...getTargetPeriodOptions(), ...workingRecords.map((record) => record.tracker.result.resultQuarter).filter(Boolean)]));
 
   const activeFilterCount = [
-    caseStatus !== "all",
+    caseStatus !== "Active",
     viewer.canViewAllCases && attorneyIds.length > 0,
     release,
     closing,
@@ -251,7 +251,7 @@ export function ResultsTable({
   }
 
   function clearFilters() {
-    setCaseStatus("all");
+    setCaseStatus("Active");
     setAttorneyIds([]);
     setRelease("all");
     setClosing("all");

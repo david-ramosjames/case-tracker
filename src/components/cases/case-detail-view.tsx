@@ -109,6 +109,7 @@ export function CaseDetailView({
   const [isResultsEditing, setIsResultsEditing] = useState(false);
   const isSettledStage = tracker.caseStage === "Settled";
   const isAdmin = sessionUser.role === "admin" || sessionUser.role === "super_admin";
+  const hasSheetLinkedDisbursements = tracker.disbursements.some((row) => Boolean(row.sheetRowKey));
   const [isResultsExpanded, setIsResultsExpanded] = useState(isSettledStage || isAdmin);
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingComment, setIsAddingComment] = useState(false);
@@ -269,20 +270,6 @@ export function CaseDetailView({
         },
         current,
         { skipDisbursementAggregation: true },
-      ),
-    }));
-  }
-
-  function updateResultAdminField<K extends "feePercent" | "attorneyFees">(key: K, value: SettlementResult[K]) {
-    setTracker((current) => ({
-      ...current,
-      result: applyDerivedSettlementResult(
-        {
-          ...current.result,
-          [key]: value,
-        },
-        current,
-        { skipDisbursementAggregation: true, skipFeeRecalculation: true },
       ),
     }));
   }
@@ -699,6 +686,10 @@ export function CaseDetailView({
                     No Slack channel mapped — import Client Contact Status in Settings.
                   </p>
                 )}
+                <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-navy-950">
+                  <span className="text-muted-foreground">Preferred language</span>
+                  <PreferredLanguageLabel language={shared.preferredLanguage} />
+                </p>
                 <div className="mt-2 text-sm text-navy-950">
                   <div className="text-muted-foreground">Quo contacts</div>
                   <div className="mt-1">
@@ -905,7 +896,7 @@ export function CaseDetailView({
                       <p className="mt-1 text-sm font-medium text-navy-950">{tracker.caseSize ?? "Not set"}</p>
                       <p className="mt-1 text-xs text-muted-foreground">Calculated from minimum value.</p>
                     </div>
-                    <Info label="Policy Source" value={tracker.policyInfoSource ?? "Not set"} />
+                    <LongInfo label="Policy Source" value={tracker.policyInfoSource ?? ""} className="md:col-span-3" />
                     <div>
                       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quo contacts</div>
                       <div className="mt-1">
@@ -915,7 +906,6 @@ export function CaseDetailView({
                         <p className="mt-1 text-sm text-muted-foreground">Legacy phone: {tracker.clientPhone}</p>
                       ) : null}
                     </div>
-                    <Info label="Preferred language" value={shared.preferredLanguage === "es" ? "Spanish" : "English"} />
                     <Info label="Projected firm fee" value={formatCurrency(getProjectedFeeValue(record))} />
                   </div>
                 </div>
@@ -993,7 +983,7 @@ export function CaseDetailView({
                         }
                       >
                         <option value="en">English</option>
-                        <option value="es">Spanish</option>
+                        <option value="es">🇲🇽 Spanish</option>
                       </Select>
                     </Field>
                     <Field label="Stage">
@@ -1005,8 +995,13 @@ export function CaseDetailView({
                         ))}
                       </Select>
                     </Field>
-                    <Field label="Source of Policy Information">
-                      <Input value={tracker.policyInfoSource ?? ""} placeholder="Declarations page, carrier email, adjuster call..." onChange={(event) => updateField("policyInfoSource", event.target.value || null)} />
+                    <Field className="md:col-span-2" label="Source of Policy Information">
+                      <Textarea
+                        className="min-h-[88px]"
+                        value={tracker.policyInfoSource ?? ""}
+                        placeholder={"Declarations page, carrier email, adjuster call...\nOne source per line is fine."}
+                        onChange={(event) => updateField("policyInfoSource", event.target.value || null)}
+                      />
                     </Field>
                     <Field label="Referral Fee Arrangement">
                       <Input value={tracker.referralFeeArrangement ?? ""} placeholder="No referral fee, percentage split, flat fee..." onChange={(event) => updateField("referralFeeArrangement", event.target.value || null)} />
@@ -1110,7 +1105,6 @@ export function CaseDetailView({
               <>
                 <AttorneyLongInfo fieldId="injuries" record={record} value={tracker.injuries} />
                 <AttorneyLongInfo className="md:col-span-2" fieldId="caseDescription" record={record} value={tracker.caseDescription} />
-                <LongInfo className="md:col-span-2" label="Status notes" value={tracker.statusNotes} />
               </>
             ) : (
               <>
@@ -1120,9 +1114,6 @@ export function CaseDetailView({
                 <AttorneyField className="md:col-span-2" fieldId="caseDescription" record={record}>
                   <Textarea value={tracker.caseDescription} onChange={(event) => updateField("caseDescription", event.target.value)} />
                 </AttorneyField>
-                <Field className="md:col-span-2" label="Status notes">
-                  <Textarea value={tracker.statusNotes} onChange={(event) => updateField("statusNotes", event.target.value)} />
-                </Field>
                 <SaveActions
                   className="md:col-span-2"
                   isSaving={isSaving}
@@ -1155,7 +1146,7 @@ export function CaseDetailView({
                   <CardTitle>Results Tracking</CardTitle>
                   <CardDescription>
                     {isResultsExpanded || isSettledStage || isAdmin
-                      ? "Settlement and disbursement tracking. Import from the RJL Cases Disbursing sheet to pull all rows for this case # (one row per party). Disburse date sets the result quarter automatically."
+                      ? "Update Release, Closing, Check, and Reductions while the case is settling out. Settlement amounts and dates come from the RJL Cases Disbursing sheet (import or nightly sync)."
                       : "Collapsed by default until Settled — expand when you need to review or enter settlement and disbursement details."}
                   </CardDescription>
                 </div>
@@ -1177,111 +1168,149 @@ export function CaseDetailView({
           {isResultsExpanded ? (
             <>
               {sheetSyncMessage ? <p className="px-6 text-sm text-muted-foreground">{sheetSyncMessage}</p> : null}
-              <CardContent className="grid gap-4 md:grid-cols-3">
+              <CardContent className="space-y-6">
             {!isResultsEditing ? (
               <>
-                <Info label="Settlement Date" value={formatOptionalDate(tracker.result.settlementDate)} />
-                <Info label="Settlement Amount" value={formatCurrency(tracker.result.settlementAmount)} />
-                <Info label="Fee Percent" value={`${Math.round((tracker.result.feePercent ?? 0) * 100)}%`} />
-                <Info label="RJL Attorney Fees" value={formatCurrency(tracker.result.attorneyFees)} />
-                <Info label="Release" value={tracker.result.releaseStatus} />
-                <Info label="Closing" value={tracker.result.closingStatus} />
-                <Info label="Check" value={tracker.result.checkStatus} />
-                <Info label="Reductions" value={coerceReductionsStatus(tracker.result.reductionsStatus)} />
-                <Info label="Disbursed" value={tracker.result.disbursedStatus} />
-                <Info label="Disburse Date" value={formatOptionalDate(tracker.result.disburseDate)} />
-                <Info label="Result Quarter" value={tracker.result.resultQuarter ?? "Not set"} />
+                <ResultsSectionHeading
+                  title="Disbursement workflow"
+                  description="Editable until the case is fully disbursed — then updated automatically from the sheet."
+                />
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                  <Info label="Release" value={tracker.result.releaseStatus} />
+                  <Info label="Closing" value={tracker.result.closingStatus} />
+                  <Info label="Check" value={tracker.result.checkStatus} />
+                  <Info label="Reductions" value={coerceReductionsStatus(tracker.result.reductionsStatus)} />
+                </div>
+                <ResultsSectionHeading
+                  title="From disbursing sheet"
+                  description="Settlement amounts and dates — updated on import and nightly sync."
+                  muted
+                />
+                <div className="grid gap-4 md:grid-cols-3">
+                  <SheetSyncedInfo label="Settlement Date" value={formatOptionalDate(tracker.result.settlementDate)} />
+                  <SheetSyncedInfo label="Settlement Amount" value={formatCurrency(tracker.result.settlementAmount)} />
+                  <SheetSyncedInfo label="Fee Percent" value={`${Math.round((tracker.result.feePercent ?? 0) * 100)}%`} />
+                  <SheetSyncedInfo label="RJL Attorney Fees" value={formatCurrency(tracker.result.attorneyFees)} />
+                  <SheetSyncedInfo label="Disbursed" value={tracker.result.disbursedStatus} />
+                  <SheetSyncedInfo label="Disburse Date" value={formatOptionalDate(tracker.result.disburseDate)} />
+                  <SheetSyncedInfo label="Result Quarter" value={tracker.result.resultQuarter ?? "Not set"} />
+                </div>
               </>
             ) : (
               <>
-                <Field label="Settlement Date">
-                  <ResultDateInput
-                    value={tracker.result.settlementDate}
-                    onCommit={(value) => updateResult("settlementDate", dateInputToDateOnly(value))}
-                  />
-                </Field>
-                <Field label="Settlement Amount">
-                  <FormattedNumberInput prefix="$" value={tracker.result.settlementAmount} onValueChange={(value) => updateResult("settlementAmount", value)} />
-                </Field>
-                <Field label="Fee Percent">
-                  <FormattedNumberInput
-                    suffix="%"
-                    value={Math.round((tracker.result.feePercent ?? 0) * 100)}
-                    readOnly={!isAdmin}
-                    onValueChange={
-                      isAdmin
-                        ? (value) => updateResultAdminField("feePercent", value != null ? value / 100 : null)
-                        : undefined
-                    }
-                  />
-                </Field>
-                <Field label="RJL Attorney Fees">
-                  <FormattedNumberInput
-                    prefix="$"
-                    value={tracker.result.attorneyFees}
-                    readOnly={!isAdmin}
-                    onValueChange={isAdmin ? (value) => updateResultAdminField("attorneyFees", value) : undefined}
-                  />
-                </Field>
-                <Field label="Release">
-                  <Select value={tracker.result.releaseStatus} onChange={(event) => updateResultWorkflow("releaseStatus", event.target.value as ReleaseStatus)}>
-                    {RELEASE_STATUS_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Closing">
-                  <Select value={tracker.result.closingStatus} onChange={(event) => updateResultWorkflow("closingStatus", event.target.value as ClosingStatus)}>
-                    {CLOSING_STATUS_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Check">
-                  <Select value={tracker.result.checkStatus} onChange={(event) => updateResultWorkflow("checkStatus", event.target.value as CheckStatus)}>
-                    {CHECK_STATUS_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Reductions">
-                  <Select
-                    value={coerceReductionsStatus(tracker.result.reductionsStatus)}
-                    onChange={(event) => updateResult("reductionsStatus", event.target.value as ReductionsStatus)}
-                  >
-                    {REDUCTIONS_MANUAL_STATUS_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Disbursed">
-                  <Select value={tracker.result.disbursedStatus} onChange={(event) => updateResultWorkflow("disbursedStatus", event.target.value as DisbursedStatus)}>
-                    {DISBURSED_STATUS_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Disburse Date">
-                  <ResultDateInput
-                    value={tracker.result.disburseDate}
-                    onCommit={(value) => updateResult("disburseDate", dateInputToDateOnly(value))}
-                  />
-                </Field>
-                <Field label="Result Quarter">
-                  <Input value={tracker.result.resultQuarter ?? ""} readOnly placeholder="Set disburse date" />
-                </Field>
+                <ResultsSectionHeading
+                  title="Disbursement workflow"
+                  description="Editable until the case is fully disbursed — then updated automatically from the sheet."
+                />
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                  <Field label="Release">
+                    <Select value={tracker.result.releaseStatus} onChange={(event) => updateResultWorkflow("releaseStatus", event.target.value as ReleaseStatus)}>
+                      {RELEASE_STATUS_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Closing">
+                    <Select value={tracker.result.closingStatus} onChange={(event) => updateResultWorkflow("closingStatus", event.target.value as ClosingStatus)}>
+                      {CLOSING_STATUS_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Check">
+                    <Select value={tracker.result.checkStatus} onChange={(event) => updateResultWorkflow("checkStatus", event.target.value as CheckStatus)}>
+                      {CHECK_STATUS_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="Reductions">
+                    <Select
+                      value={coerceReductionsStatus(tracker.result.reductionsStatus)}
+                      onChange={(event) => updateResult("reductionsStatus", event.target.value as ReductionsStatus)}
+                    >
+                      {REDUCTIONS_MANUAL_STATUS_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </Select>
+                  </Field>
+                </div>
+                <ResultsSectionHeading
+                  title="From disbursing sheet"
+                  description={
+                    hasSheetLinkedDisbursements
+                      ? "Read-only — updated on import and nightly sync."
+                      : "Import the disbursing sheet to populate these fields. Until then, settlement date and amount can be entered manually."
+                  }
+                  muted
+                />
+                <div className="grid gap-4 md:grid-cols-3">
+                  <SheetSyncedField label="Settlement Date" sheetSynced={hasSheetLinkedDisbursements}>
+                    <ResultDateInput
+                      value={tracker.result.settlementDate}
+                      readOnly={hasSheetLinkedDisbursements}
+                      onCommit={(value) => updateResult("settlementDate", dateInputToDateOnly(value))}
+                    />
+                  </SheetSyncedField>
+                  <SheetSyncedField label="Settlement Amount" sheetSynced={hasSheetLinkedDisbursements}>
+                    <FormattedNumberInput
+                      prefix="$"
+                      sheetSynced={hasSheetLinkedDisbursements}
+                      value={tracker.result.settlementAmount}
+                      readOnly={hasSheetLinkedDisbursements}
+                      onValueChange={(value) => updateResult("settlementAmount", value)}
+                    />
+                  </SheetSyncedField>
+                  <SheetSyncedField label="Fee Percent" sheetSynced>
+                    <FormattedNumberInput
+                      suffix="%"
+                      sheetSynced
+                      value={Math.round((tracker.result.feePercent ?? 0) * 100)}
+                      readOnly
+                    />
+                  </SheetSyncedField>
+                  <SheetSyncedField label="RJL Attorney Fees" sheetSynced>
+                    <FormattedNumberInput prefix="$" sheetSynced value={tracker.result.attorneyFees} readOnly />
+                  </SheetSyncedField>
+                  <SheetSyncedField label="Disbursed" sheetSynced={hasSheetLinkedDisbursements}>
+                    <Select
+                      value={tracker.result.disbursedStatus}
+                      disabled={hasSheetLinkedDisbursements}
+                      className={hasSheetLinkedDisbursements ? "bg-slate-50 text-slate-600" : undefined}
+                      onChange={(event) => updateResultWorkflow("disbursedStatus", event.target.value as DisbursedStatus)}
+                    >
+                      {DISBURSED_STATUS_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </Select>
+                  </SheetSyncedField>
+                  <SheetSyncedField label="Disburse Date" sheetSynced={hasSheetLinkedDisbursements}>
+                    <ResultDateInput
+                      value={tracker.result.disburseDate}
+                      readOnly={hasSheetLinkedDisbursements}
+                      onCommit={(value) => updateResult("disburseDate", dateInputToDateOnly(value))}
+                    />
+                  </SheetSyncedField>
+                  <SheetSyncedField label="Result Quarter" sheetSynced>
+                    <Input
+                      value={tracker.result.resultQuarter ?? ""}
+                      readOnly
+                      placeholder="Set disburse date"
+                      className="bg-slate-50 text-slate-600"
+                    />
+                  </SheetSyncedField>
+                </div>
                 <SaveActions
-                  className="md:col-span-3"
                   isSaving={isSaving}
                   savedAt={savedAt}
                   errorMessage={errorMessage}
@@ -1507,12 +1536,72 @@ export function CaseDetailView({
   );
 }
 
+function PreferredLanguageLabel({ language }: { language: "en" | "es" }) {
+  if (language === "es") {
+    return (
+      <span className="inline-flex items-center gap-1.5 font-medium">
+        <span aria-hidden>🇲🇽</span>
+        Spanish
+      </span>
+    );
+  }
+  return <span className="font-medium">English</span>;
+}
+
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <p className="text-xs font-semibold uppercase text-muted-foreground">{label}</p>
       <p className="mt-1 text-sm font-medium text-navy-950">{value}</p>
     </div>
+  );
+}
+
+function ResultsSectionHeading({
+  title,
+  description,
+  muted = false,
+}: {
+  title: string;
+  description: string;
+  muted?: boolean;
+}) {
+  return (
+    <div>
+      <p className={`text-xs font-semibold uppercase tracking-wide ${muted ? "text-muted-foreground" : "text-navy-950"}`}>
+        {title}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
+function SheetSyncedInfo({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50/90 px-3 py-2.5">
+      <p className="text-xs font-semibold uppercase text-muted-foreground">{label}</p>
+      <p className="mt-1 text-sm font-medium text-slate-600">{value}</p>
+    </div>
+  );
+}
+
+function SheetSyncedField({
+  label,
+  children,
+  sheetSynced = true,
+}: {
+  label: string;
+  children: React.ReactNode;
+  sheetSynced?: boolean;
+}) {
+  return (
+    <label className="block">
+      <span className={`mb-2 block text-sm font-medium ${sheetSynced ? "text-muted-foreground" : "text-navy-950"}`}>
+        {label}
+        {sheetSynced ? <span className="ml-1.5 text-xs font-normal text-muted-foreground">(sheet)</span> : null}
+      </span>
+      {children}
+    </label>
   );
 }
 
@@ -1618,12 +1707,14 @@ function FormattedNumberInput({
   prefix,
   suffix,
   readOnly,
+  sheetSynced,
 }: {
   value: number | null;
   onValueChange?: (value: number | null) => void;
   prefix?: string;
   suffix?: string;
   readOnly?: boolean;
+  sheetSynced?: boolean;
 }) {
   const [isFocused, setIsFocused] = useState(false);
   const [draft, setDraft] = useState(value == null ? "" : formatNumberForInput(value));
@@ -1645,7 +1736,11 @@ function FormattedNumberInput({
   }
 
   return (
-    <div className="flex h-10 items-center rounded-md border border-input bg-white px-3 focus-within:ring-2 focus-within:ring-ring">
+    <div
+      className={`flex h-10 items-center rounded-md border px-3 focus-within:ring-2 focus-within:ring-ring ${
+        sheetSynced ? "border-slate-200 bg-slate-50 text-slate-600" : "border-input bg-white"
+      }`}
+    >
       {prefix ? <span className="mr-1 text-muted-foreground">{prefix}</span> : null}
       <Input
         className="h-8 min-w-0 border-0 bg-transparent px-0 py-0 shadow-none focus-visible:ring-0"
