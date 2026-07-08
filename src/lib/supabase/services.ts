@@ -43,6 +43,7 @@ import {
 } from "@/lib/firm-goals";
 import { deriveFeePercentFromSettlement } from "@/lib/fee-percent";
 import { deriveCaseStatusFromTracker, applyOpenSettledTrackerFallback, isCaseFullyDisbursed } from "@/lib/case-status";
+import { EMPTY_LITIGATION_EVENTS } from "@/lib/litigation-events";
 import { pickNextScheduledEvents } from "@/lib/docketflow/case-events";
 import {
   type ActivityLogEntry,
@@ -63,6 +64,8 @@ import {
   type DisbursedStatus,
   type ExpectedLitigationStatus,
   type GoalScope,
+  type LitigationEventStatus,
+  type LitigationEvents,
   type ManualDisbursementInput,
   type DisbursementPartyOverrideInput,
   type ReleaseStatus,
@@ -3206,6 +3209,45 @@ function uniqueDisbursements(rows: DisbursementRow[]) {
   return [...byId.values()];
 }
 
+function normalizeLitigationEventStatus(value: string | null | undefined): LitigationEventStatus | null {
+  if (value === "To Schedule" || value === "Scheduled" || value === "Complete") return value;
+  return null;
+}
+
+function litigationEventsFromRow(row: UnknownRow): LitigationEvents {
+  return {
+    plaintiffDeposition: {
+      person: toString(row.lit_plaintiff_dep_person, ""),
+      status: normalizeLitigationEventStatus(toStringOrNull(row.lit_plaintiff_dep_status)),
+    },
+    defendantDeposition: {
+      person: toString(row.lit_defendant_dep_person, ""),
+      status: normalizeLitigationEventStatus(toStringOrNull(row.lit_defendant_dep_status)),
+    },
+    mediation: {
+      person: toString(row.lit_mediation_person, ""),
+      status: normalizeLitigationEventStatus(toStringOrNull(row.lit_mediation_status)),
+    },
+    trial: {
+      person: toString(row.lit_trial_person, ""),
+      status: normalizeLitigationEventStatus(toStringOrNull(row.lit_trial_status)),
+    },
+  };
+}
+
+function litigationEventsToRow(events: LitigationEvents) {
+  return {
+    lit_plaintiff_dep_person: events.plaintiffDeposition.person,
+    lit_plaintiff_dep_status: events.plaintiffDeposition.status,
+    lit_defendant_dep_person: events.defendantDeposition.person,
+    lit_defendant_dep_status: events.defendantDeposition.status,
+    lit_mediation_person: events.mediation.person,
+    lit_mediation_status: events.mediation.status,
+    lit_trial_person: events.trial.person,
+    lit_trial_status: events.trial.status,
+  };
+}
+
 function rowToTrackerEntry(
   row: TrackerEntryRow,
   resultRow: ResultRow | null,
@@ -3235,6 +3277,7 @@ function rowToTrackerEntry(
     sources: toString(row.sources, ""),
     litEventsNeeded: toString(row.lit_events_needed, ""),
     litEventsTimeline: toString(row.lit_events_timeline, ""),
+    litigationEvents: litigationEventsFromRow(row),
     injuries: toString(row.injuries, ""),
     caseDescription: toString(row.case_description, ""),
     statusNotes: toString(row.status_notes, ""),
@@ -3316,6 +3359,7 @@ function makeEmptyTrackerRow(caseRow: DocketFlowCaseRow): TrackerEntryRow {
     lrj_notes: "",
     lit_events_needed: "",
     lit_events_timeline: "",
+    ...litigationEventsToRow(EMPTY_LITIGATION_EVENTS),
     forecast_notes: "",
     attorney_notes: "",
     manager_notes: "",
@@ -3415,6 +3459,9 @@ function trackerUpdateToRow(input: TrackerUpdateInput, markReviewed = true) {
     row.expected_disbursement_count = Math.max(1, Math.trunc(input.expectedDisbursementCount));
   }
   if (input.clientPhone !== undefined) row.client_phone = input.clientPhone;
+  if (input.litigationEvents !== undefined) {
+    Object.assign(row, litigationEventsToRow(input.litigationEvents));
+  }
   if (markReviewed) row.last_reviewed_at = new Date().toISOString();
 
   return row;

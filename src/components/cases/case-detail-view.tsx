@@ -43,9 +43,15 @@ import {
 } from "@/lib/calculations";
 import { CaseQuoContactsList } from "@/components/cases/case-quo-contacts";
 import { DisbursementPartiesCard } from "@/components/cases/disbursement-parties-card";
+import {
+  LitigationEventPersonInput,
+  LitigationEventStatusSelect,
+  updateLitigationEvent,
+} from "@/components/litigation/litigation-event-fields";
 import { ResultDateInput } from "@/components/cases/result-date-input";
 import { dateInputToDateOnly, toDateInput } from "@/lib/date-input";
 import { disbursementWeight } from "@/lib/disbursements";
+import { LITIGATION_EVENT_DEFINITIONS } from "@/lib/litigation-events";
 import { type SessionUser } from "@/lib/auth/types";
 import { STAGE_SLACK_LABELS } from "@/lib/slack/enum-replies";
 import { formatSlackChannelLabel, getSlackChannelArchiveUrl } from "@/lib/slack/links";
@@ -71,6 +77,8 @@ import {
   type SettlementResult,
   type TrackerUpdateInput,
   type TrackerComment,
+  type LitigationEventKey,
+  type LitigationEventStatus,
   type TrackerEntry,
 } from "@/lib/types";
 import { formatCurrency, formatDate, formatOptionalDate, getCalculatedAttorneyFees } from "@/lib/utils";
@@ -106,10 +114,13 @@ export function CaseDetailView({
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [isOverviewEditing, setIsOverviewEditing] = useState(false);
   const [isSourcesEditing, setIsSourcesEditing] = useState(false);
+  const [isLitEventsEditing, setIsLitEventsEditing] = useState(false);
   const [isResultsEditing, setIsResultsEditing] = useState(false);
   const isSettledStage = tracker.caseStage === "Settled";
+  const isLitStage = tracker.caseStage === "Lit";
   const isAdmin = sessionUser.role === "admin" || sessionUser.role === "super_admin";
   const hasSheetLinkedDisbursements = tracker.disbursements.some((row) => Boolean(row.sheetRowKey));
+  const [isLitEventsExpanded, setIsLitEventsExpanded] = useState(isLitStage || isAdmin);
   const [isResultsExpanded, setIsResultsExpanded] = useState(isSettledStage || isAdmin);
   const [isSaving, setIsSaving] = useState(false);
   const [isAddingComment, setIsAddingComment] = useState(false);
@@ -152,6 +163,15 @@ export function CaseDetailView({
     } else if (!isAdmin) {
       setIsResultsExpanded(false);
       setIsResultsEditing(false);
+    }
+  }, [tracker.caseStage, isAdmin]);
+
+  useEffect(() => {
+    if (tracker.caseStage === "Lit") {
+      setIsLitEventsExpanded(true);
+    } else if (!isAdmin) {
+      setIsLitEventsExpanded(false);
+      setIsLitEventsEditing(false);
     }
   }, [tracker.caseStage, isAdmin]);
 
@@ -201,6 +221,16 @@ export function CaseDetailView({
       }
       return next;
     });
+  }
+
+  function updateLitigationEventField(
+    key: LitigationEventKey,
+    patch: Partial<TrackerEntry["litigationEvents"][LitigationEventKey]>,
+  ) {
+    setTracker((current) => ({
+      ...current,
+      litigationEvents: updateLitigationEvent(current.litigationEvents, key, patch),
+    }));
   }
 
   function updateShared<K extends keyof typeof shared>(key: K, value: (typeof shared)[K]) {
@@ -1125,6 +1155,95 @@ export function CaseDetailView({
               </>
             )}
           </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <div className="flex flex-col justify-between gap-3 md:flex-row md:items-start">
+              <div className="flex min-w-0 flex-1 items-start gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="mt-0.5 h-8 w-8 shrink-0 p-0"
+                  onClick={() => setIsLitEventsExpanded((current) => !current)}
+                  aria-expanded={isLitEventsExpanded}
+                  aria-label={isLitEventsExpanded ? "Collapse litigation events" : "Expand litigation events"}
+                >
+                  {isLitEventsExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                </Button>
+                <div className="min-w-0">
+                  <CardTitle>Litigation Events</CardTitle>
+                  <CardDescription>
+                    {isLitEventsExpanded || isLitStage || isAdmin
+                      ? "Track depositions, mediation, and trial with the person responsible and scheduling status for each event."
+                      : "Collapsed by default until Lit — expand when the case enters litigation."}
+                  </CardDescription>
+                </div>
+              </div>
+              {isLitEventsExpanded ? (
+                <Button
+                  variant={isLitEventsEditing ? "pink" : "outline"}
+                  size="sm"
+                  onClick={() => setIsLitEventsEditing((current) => !current)}
+                >
+                  <Pencil className="h-4 w-4" />
+                  {isLitEventsEditing ? "View" : "Edit"}
+                </Button>
+              ) : null}
+            </div>
+          </CardHeader>
+          {isLitEventsExpanded ? (
+            <CardContent>
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="w-full min-w-[640px] text-sm">
+                  <thead>
+                    <tr className="border-b bg-slate-50/80 text-left">
+                      <th className="px-4 py-3 font-semibold text-navy-950">Event</th>
+                      <th className="px-4 py-3 font-semibold text-navy-950">Person</th>
+                      <th className="px-4 py-3 font-semibold text-navy-950">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {LITIGATION_EVENT_DEFINITIONS.map((event) => {
+                      const current = tracker.litigationEvents[event.key];
+                      return (
+                        <tr key={event.key} className="border-b last:border-b-0">
+                          <td className="px-4 py-3 font-medium text-navy-950">{event.label}</td>
+                          <td className="px-4 py-3">
+                            <LitigationEventPersonInput
+                              value={current.person}
+                              readOnly={!isLitEventsEditing}
+                              onChange={(person) => updateLitigationEventField(event.key, { person })}
+                            />
+                          </td>
+                          <td className="px-4 py-3">
+                            <LitigationEventStatusSelect
+                              value={current.status}
+                              readOnly={!isLitEventsEditing}
+                              onChange={(status) =>
+                                updateLitigationEventField(event.key, { status: status as LitigationEventStatus | null })
+                              }
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {isLitEventsEditing ? (
+                <SaveActions
+                  className="mt-4"
+                  isSaving={isSaving}
+                  savedAt={savedAt}
+                  errorMessage={errorMessage}
+                  saveLabel="Save litigation events"
+                  onSave={() => saveTracker({ markReviewed: false })}
+                />
+              ) : null}
+            </CardContent>
+          ) : null}
         </Card>
 
         <Card>

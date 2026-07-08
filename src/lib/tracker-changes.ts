@@ -1,10 +1,12 @@
 import {
   type DisbursementPartyOverrideInput,
+  type LitigationEvents,
   type ManualDisbursementInput,
   type SettlementResult,
   type TrackerEntry,
   type TrackerUpdateInput,
 } from "@/lib/types";
+import { LITIGATION_EVENT_DEFINITIONS } from "@/lib/litigation-events";
 
 const TRACKER_FIELD_LABELS: Record<string, string> = {
   caseStage: "Case stage",
@@ -69,6 +71,29 @@ function valuesEqual(before: unknown, after: unknown) {
   return String(before ?? "") === String(after ?? "");
 }
 
+function litigationEventsEqual(before: LitigationEvents, after: LitigationEvents) {
+  for (const { key } of LITIGATION_EVENT_DEFINITIONS) {
+    const previous = before[key];
+    const next = after[key];
+    if (!valuesEqual(previous.person, next.person) || !valuesEqual(previous.status, next.status)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function describeLitigationEventChanges(before: LitigationEvents, after: LitigationEvents) {
+  const labels: string[] = [];
+  for (const { key, label } of LITIGATION_EVENT_DEFINITIONS) {
+    const previous = before[key];
+    const next = after[key];
+    if (!valuesEqual(previous.person, next.person) || !valuesEqual(previous.status, next.status)) {
+      labels.push(label);
+    }
+  }
+  return labels;
+}
+
 export function describeTrackerChanges(
   before: TrackerEntry,
   input: TrackerUpdateInput & { result?: SettlementResult },
@@ -95,6 +120,10 @@ export function describeTrackerChanges(
       const previousValue = before.result[resultKey];
       if (!valuesEqual(previousValue, nextValue)) labels.push(label);
     }
+  }
+
+  if (input.litigationEvents) {
+    labels.push(...describeLitigationEventChanges(before.litigationEvents, input.litigationEvents));
   }
 
   if (shared?.after) {
@@ -150,6 +179,10 @@ export function buildTrackerChangeInput(
   }
   if (resultChanged) {
     input.result = { ...next.result };
+  }
+
+  if (!litigationEventsEqual(baseline.litigationEvents, next.litigationEvents)) {
+    input.litigationEvents = { ...next.litigationEvents };
   }
 
   if (extras?.manualDisbursements) {

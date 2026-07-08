@@ -24,6 +24,17 @@ export type CheckStatus = "Deposited" | "No" | "Sent";
 export type DisbursedStatus = "No" | "Yes";
 export type ReductionsStatus = "Not Complete" | "To Be Sent" | "Sent, Not Approved" | "Approved";
 
+export type LitigationEventStatus = "To Schedule" | "Scheduled" | "Complete";
+
+export type LitigationEventKey = "plaintiffDeposition" | "defendantDeposition" | "mediation" | "trial";
+
+export type LitigationEvent = {
+  person: string;
+  status: LitigationEventStatus | null;
+};
+
+export type LitigationEvents = Record<LitigationEventKey, LitigationEvent>;
+
 export type StageSuggestion = {
   id: string;
   source: StageSignalSource;
@@ -154,6 +165,7 @@ export type TrackerEntry = {
   sources: string;
   litEventsNeeded: string;
   litEventsTimeline: string;
+  litigationEvents: LitigationEvents;
   injuries: string;
   caseDescription: string;
   statusNotes: string;
@@ -353,6 +365,7 @@ export type TrackerUpdateInput = Partial<
     | "expectedDisbursementCount"
     | "multipleDisbursementsEnabled"
     | "clientPhone"
+    | "litigationEvents"
   >
 > & {
   quoContactPreferences?: Array<{ id: string; smsEnabled: boolean }>;

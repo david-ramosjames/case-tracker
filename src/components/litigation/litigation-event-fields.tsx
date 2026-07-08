@@ -1,0 +1,74 @@
+"use client";
+
+import { type LitigationEventKey, type LitigationEventStatus, type LitigationEvents } from "@/lib/types";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
+import { LITIGATION_EVENT_STATUS_OPTIONS } from "@/lib/litigation-events";
+
+export function LitigationEventPersonInput({
+  value,
+  readOnly,
+  onChange,
+  placeholder = "Name",
+}: {
+  value: string;
+  readOnly?: boolean;
+  onChange?: (value: string) => void;
+  placeholder?: string;
+}) {
+  if (readOnly) {
+    return <span className="text-sm text-navy-950">{value.trim() || "—"}</span>;
+  }
+
+  return (
+    <Input
+      value={value}
+      placeholder={placeholder}
+      className="h-9 min-w-[120px] text-sm"
+      onChange={(event) => onChange?.(event.target.value)}
+    />
+  );
+}
+
+export function LitigationEventStatusSelect({
+  value,
+  readOnly,
+  onChange,
+}: {
+  value: LitigationEventStatus | null;
+  readOnly?: boolean;
+  onChange?: (value: LitigationEventStatus | null) => void;
+}) {
+  if (readOnly) {
+    return <span className="text-sm text-navy-950">{value ?? "—"}</span>;
+  }
+
+  return (
+    <Select
+      value={value ?? ""}
+      className="h-9 min-w-[140px] text-sm"
+      onChange={(event) => onChange?.((event.target.value || null) as LitigationEventStatus | null)}
+    >
+      <option value="">—</option>
+      {LITIGATION_EVENT_STATUS_OPTIONS.map((option) => (
+        <option key={option} value={option}>
+          {option}
+        </option>
+      ))}
+    </Select>
+  );
+}
+
+export function updateLitigationEvent(
+  events: LitigationEvents,
+  key: LitigationEventKey,
+  patch: Partial<LitigationEvents[LitigationEventKey]>,
+): LitigationEvents {
+  return {
+    ...events,
+    [key]: {
+      ...events[key],
+      ...patch,
+    },
+  };
+}
