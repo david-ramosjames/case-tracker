@@ -1,4 +1,3 @@
-import { after } from "next/server";
 import { resolvePublicAppOrigin } from "@/lib/auth/redirect-url";
 import {
   DAILY_CRON_BATCHES,
@@ -25,34 +24,49 @@ function buildCronBatchUrl(request: Request, batchIndex: number, runId: string) 
 
   url.searchParams.set("batch", String(batchIndex));
   url.searchParams.set("runId", runId);
+  // Child returns immediately and runs the batch in after(); await only the ack.
+  url.searchParams.set("async", "1");
   return url;
 }
 
-export function triggerDailyCronBatch(request: Request, batchIndex: number, runId: string) {
+/**
+ * Kick the next batch and wait only for the HTTP accept (milliseconds), not the job itself.
+ * Previously we awaited the full child fetch from after(), which could consume the parent's
+ * remaining maxDuration and abort before settlement sync finished or chained onward.
+ */
+export async function kickDailyCronBatch(request: Request, batchIndex: number, runId: string) {
   const secret = getCronSecret();
   const url = buildCronBatchUrl(request, batchIndex, runId);
 
-  after(async () => {
-    try {
-      const response = await fetch(url.toString(), {
-        method: "GET",
-        headers: secret ? { Authorization: `Bearer ${secret}` } : {},
-      });
-      if (!response.ok) {
-        const body = await response.text();
-        console.error(`Daily cron batch failed to start ${batchIndex}`, response.status, body);
-        return;
-      }
-      console.info(`Daily cron batch started`, {
-        runId,
-        batchIndex,
-        firstGroup: getFirstGroupOfBatch(batchIndex),
-        status: response.status,
-      });
-    } catch (error) {
-      console.error(`Failed to trigger daily cron batch ${batchIndex}`, error);
+  try {
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: secret ? { Authorization: `Bearer ${secret}` } : {},
+      cache: "no-store",
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      console.error(`Daily cron batch failed to start ${batchIndex}`, response.status, body);
+      return { ok: false as const, status: response.status, body };
     }
-  });
+    const body = (await response.json().catch(() => null)) as { accepted?: boolean } | null;
+    console.info(`Daily cron batch accepted`, {
+      runId,
+      batchIndex,
+      firstGroup: getFirstGroupOfBatch(batchIndex),
+      status: response.status,
+      accepted: body?.accepted === true,
+    });
+    return { ok: true as const, status: response.status, accepted: body?.accepted === true };
+  } catch (error) {
+    console.error(`Failed to trigger daily cron batch ${batchIndex}`, error);
+    return { ok: false as const, error };
+  }
+}
+
+/** @deprecated Prefer kickDailyCronBatch (awaited). Kept name for call sites. */
+export function triggerDailyCronBatch(request: Request, batchIndex: number, runId: string) {
+  void kickDailyCronBatch(request, batchIndex, runId);
 }
 
 /** One HTTP hop per batch (not per step) to avoid Vercel INFINITE_LOOP_DETECTED. */
@@ -62,7 +76,7 @@ export function triggerDailyCronGroup(request: Request, group: DailyCronGroup, r
     console.error(`No daily cron batch for group ${group}`);
     return;
   }
-  triggerDailyCronBatch(request, batchIndex, runId);
+  void kickDailyCronBatch(request, batchIndex, runId);
 }
 
 export function getNextDailyCronGroupAfter(current: DailyCronGroup) {

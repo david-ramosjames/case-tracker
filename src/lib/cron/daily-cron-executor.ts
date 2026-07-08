@@ -1,4 +1,4 @@
-import { triggerDailyCronBatch } from "@/lib/cron/daily-cron-chain";
+import { kickDailyCronBatch } from "@/lib/cron/daily-cron-chain";
 import {
   clearDailyCronRun,
   getBatch,
@@ -68,8 +68,9 @@ export async function executeDailyCronBatchStep(
 
   const nextBatch = getNextDailyCronBatchIndex(batchIndex);
   if (nextBatch != null) {
-    triggerDailyCronBatch(request, nextBatch, runId);
-    return { ...outcome, chained: nextBatch, completed: false as const, progressNotify };
+    const kick = await kickDailyCronBatch(request, nextBatch, runId);
+    console.info("Daily cron next batch kick", { runId, nextBatch, kick });
+    return { ...outcome, chained: nextBatch, completed: false as const, progressNotify, kick };
   }
 
   const { merged, slackNotify } = await finishDailyCronRun(runId);

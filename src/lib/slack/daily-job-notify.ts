@@ -240,6 +240,16 @@ export async function notifyDailyCronStarted(runId: string) {
   return postDailyJobSlack(`:hourglass_flowing_sand: *Daily cron started* — ${when} CT\n• run \`${runId}\``);
 }
 
+/** Post when a chained batch is accepted so we can tell start-vs-hang for long steps like settlement sync. */
+export async function notifyDailyCronBatchStarting(runId: string, batchIndex: number) {
+  const total = DAILY_CRON_BATCHES.length;
+  const label = DAILY_CRON_BATCH_LABELS[batchIndex] ?? `Batch ${batchIndex + 1}`;
+  const groups = DAILY_CRON_BATCHES[batchIndex]?.join(", ") ?? "unknown";
+  return postDailyJobSlack(
+    `:hourglass_flowing_sand: *Daily cron batch ${batchIndex + 1}/${total} starting* — ${label}\n• run \`${runId}\`\n• steps: ${groups}`,
+  );
+}
+
 /** Post after each batch so progress is visible even when a later batch times out. */
 export async function notifyDailyCronBatchProgress(
   runId: string,

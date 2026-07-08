@@ -1,7 +1,10 @@
+import { after } from "next/server";
 import { NextResponse } from "next/server";
 
 export const maxDuration = 300;
-import { triggerDailyCronBatch } from "@/lib/cron/daily-cron-chain";
+export const dynamic = "force-dynamic";
+
+import { kickDailyCronBatch } from "@/lib/cron/daily-cron-chain";
 import {
   DAILY_CRON_BATCHES,
   type DailyCronGroup,
@@ -11,7 +14,7 @@ import {
 } from "@/lib/cron/daily-cron-run";
 import { executeDailyCronBatchStep, failDailyCronRun, finishDailyCronRun } from "@/lib/cron/daily-cron-executor";
 import { runDailyCronGroup } from "@/lib/cron/daily-jobs";
-import { notifyDailyJobResult } from "@/lib/slack/daily-job-notify";
+import { notifyDailyCronBatchStarting, notifyDailyJobResult } from "@/lib/slack/daily-job-notify";
 import { getCronSecret } from "@/lib/slack/config";
 import { errorMessage } from "@/lib/utils";
 
@@ -44,6 +47,35 @@ function parseRunOptions(searchParams: URLSearchParams) {
   };
 }
 
+async function runBatchWithFailureHandling(
+  request: Request,
+  batchIndex: number,
+  runId: string,
+  options: ReturnType<typeof parseRunOptions>,
+) {
+  try {
+    return await executeDailyCronBatchStep(request, batchIndex, runId, options);
+  } catch (error) {
+    const message = errorMessage(error) || "Daily cron batch failed.";
+    console.error(`Daily cron batch failed: ${batchIndex}`, error);
+    try {
+      const { merged, slackNotify } = await failDailyCronRun(runId, batchIndex, message);
+      return {
+        ok: false as const,
+        runId,
+        batch: batchIndex,
+        error: message,
+        merged,
+        slackNotify,
+        completed: true as const,
+      };
+    } catch (notifyError) {
+      console.error("Failed to record or notify daily cron batch failure", notifyError);
+      return { ok: false as const, runId, batch: batchIndex, error: message, completed: true as const };
+    }
+  }
+}
+
 export async function GET(request: Request) {
   const unauthorized = authorizeCron(request);
   if (unauthorized) return unauthorized;
@@ -52,8 +84,37 @@ export async function GET(request: Request) {
   const batchIndex = parseDailyCronBatch(searchParams.get("batch"));
   const runId = searchParams.get("runId")?.trim() || getDailyCronRunId();
   const options = parseRunOptions(searchParams);
+  const asyncMode = searchParams.get("async") === "1";
 
   if (batchIndex != null) {
+    // Chained hops: ack immediately, then do the work in after() so the parent
+    // fetch returns quickly and is not tied to settlement sync duration.
+    if (asyncMode) {
+      console.info("Daily cron batch accepted (async)", { runId, batchIndex, options });
+      after(async () => {
+        try {
+          await notifyDailyCronBatchStarting(runId, batchIndex);
+          const outcome = await runBatchWithFailureHandling(request, batchIndex, runId, options);
+          console.info("Daily cron async batch finished", {
+            runId,
+            batchIndex,
+            ok: outcome.ok !== false,
+            completed: "completed" in outcome ? outcome.completed : false,
+            chained: "chained" in outcome ? outcome.chained : null,
+          });
+        } catch (error) {
+          console.error(`Daily cron async batch crashed: ${batchIndex}`, error);
+        }
+      });
+
+      return NextResponse.json({
+        ok: true,
+        accepted: true,
+        runId,
+        batch: batchIndex,
+      });
+    }
+
     try {
       const outcome = await executeDailyCronBatchStep(request, batchIndex, runId, options);
       if (outcome.completed) {
@@ -116,8 +177,8 @@ export async function GET(request: Request) {
     const nextBatch = getNextDailyCronBatchIndex(batchForGroup);
 
     if (nextBatch != null) {
-      triggerDailyCronBatch(request, nextBatch, runId);
-      return NextResponse.json({ ok: result.ok, runId, group, chained: nextBatch, result });
+      const kick = await kickDailyCronBatch(request, nextBatch, runId);
+      return NextResponse.json({ ok: result.ok, runId, group, chained: nextBatch, kick, result });
     }
 
     const { merged, slackNotify } = await finishDailyCronRun(runId);
