@@ -44,7 +44,7 @@ import {
 import { CaseQuoContactsList } from "@/components/cases/case-quo-contacts";
 import { DisbursementPartiesCard } from "@/components/cases/disbursement-parties-card";
 import {
-  LitigationEventPersonInput,
+  LitigationEventDateInput,
   LitigationEventStatusSelect,
   updateLitigationEvent,
 } from "@/components/litigation/litigation-event-fields";
@@ -1176,7 +1176,7 @@ export function CaseDetailView({
                   <CardTitle>Litigation Events</CardTitle>
                   <CardDescription>
                     {isLitEventsExpanded || isLitStage || isAdmin
-                      ? "Track depositions, mediation, and trial with the person responsible and scheduling status for each event."
+                      ? "Track depositions, mediation, and trial with the scheduled date and status for each event."
                       : "Collapsed by default until Lit — expand when the case enters litigation."}
                   </CardDescription>
                 </div>
@@ -1200,7 +1200,7 @@ export function CaseDetailView({
                   <thead>
                     <tr className="border-b bg-slate-50/80 text-left">
                       <th className="px-4 py-3 font-semibold text-navy-950">Event</th>
-                      <th className="px-4 py-3 font-semibold text-navy-950">Person</th>
+                      <th className="px-4 py-3 font-semibold text-navy-950">Date</th>
                       <th className="px-4 py-3 font-semibold text-navy-950">Status</th>
                     </tr>
                   </thead>
@@ -1211,10 +1211,10 @@ export function CaseDetailView({
                         <tr key={event.key} className="border-b last:border-b-0">
                           <td className="px-4 py-3 font-medium text-navy-950">{event.label}</td>
                           <td className="px-4 py-3">
-                            <LitigationEventPersonInput
-                              value={current.person}
+                            <LitigationEventDateInput
+                              value={current.date}
                               readOnly={!isLitEventsEditing}
-                              onChange={(person) => updateLitigationEventField(event.key, { person })}
+                              onChange={(date) => updateLitigationEventField(event.key, { date })}
                             />
                           </td>
                           <td className="px-4 py-3">

@@ -75,7 +75,7 @@ function litigationEventsEqual(before: LitigationEvents, after: LitigationEvents
   for (const { key } of LITIGATION_EVENT_DEFINITIONS) {
     const previous = before[key];
     const next = after[key];
-    if (!valuesEqual(previous.person, next.person) || !valuesEqual(previous.status, next.status)) {
+    if (!valuesEqual(previous.date, next.date) || !valuesEqual(previous.status, next.status)) {
       return false;
     }
   }
@@ -87,7 +87,7 @@ function describeLitigationEventChanges(before: LitigationEvents, after: Litigat
   for (const { key, label } of LITIGATION_EVENT_DEFINITIONS) {
     const previous = before[key];
     const next = after[key];
-    if (!valuesEqual(previous.person, next.person) || !valuesEqual(previous.status, next.status)) {
+    if (!valuesEqual(previous.date, next.date) || !valuesEqual(previous.status, next.status)) {
       labels.push(label);
     }
   }

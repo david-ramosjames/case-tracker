@@ -5,7 +5,7 @@ import { Eye, Loader2 } from "lucide-react";
 import { Fragment } from "react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import {
-  LitigationEventPersonInput,
+  LitigationEventDateInput,
   LitigationEventStatusSelect,
   updateLitigationEvent,
 } from "@/components/litigation/litigation-event-fields";
@@ -90,7 +90,7 @@ export function LitigationTable({
           record.paralegal.name,
           ...LITIGATION_EVENT_DEFINITIONS.flatMap(({ key }) => {
             const event = record.tracker.litigationEvents[key];
-            return [event.person, event.status ?? ""];
+            return [event.date ?? "", event.status ?? ""];
           }),
         ]
           .join(" ")
@@ -271,7 +271,7 @@ export function LitigationTable({
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <Input
             value={search}
-            placeholder="Search case #, client, attorney, or event person..."
+            placeholder="Search case #, client, attorney, or event date..."
             className="max-w-md"
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -329,7 +329,7 @@ export function LitigationTable({
                 <TableHead />
                 {LITIGATION_EVENT_DEFINITIONS.map((event) => (
                   <Fragment key={`${event.key}-subheads`}>
-                    <TableHead className="border-l text-xs text-muted-foreground">Person</TableHead>
+                    <TableHead className="border-l text-xs text-muted-foreground">Date</TableHead>
                     <TableHead className="text-xs text-muted-foreground">Status</TableHead>
                   </Fragment>
                 ))}
@@ -370,9 +370,9 @@ export function LitigationTable({
                         return (
                           <Fragment key={`${caseId}-${event.key}`}>
                             <TableCell className="border-l align-top">
-                              <LitigationEventPersonInput
-                                value={current.person}
-                                onChange={(person) => updateEventField(caseId, event.key, { person })}
+                              <LitigationEventDateInput
+                                value={current.date}
+                                onChange={(date) => updateEventField(caseId, event.key, { date })}
                               />
                             </TableCell>
                             <TableCell className="align-top">

@@ -1,31 +1,28 @@
 "use client";
 
+import { ResultDateInput } from "@/components/cases/result-date-input";
 import { type LitigationEventKey, type LitigationEventStatus, type LitigationEvents } from "@/lib/types";
-import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { LITIGATION_EVENT_STATUS_OPTIONS } from "@/lib/litigation-events";
+import { formatOptionalDate } from "@/lib/utils";
 
-export function LitigationEventPersonInput({
+export function LitigationEventDateInput({
   value,
   readOnly,
   onChange,
-  placeholder = "Name",
 }: {
-  value: string;
+  value: string | null;
   readOnly?: boolean;
-  onChange?: (value: string) => void;
-  placeholder?: string;
+  onChange?: (value: string | null) => void;
 }) {
   if (readOnly) {
-    return <span className="text-sm text-navy-950">{value.trim() || "—"}</span>;
+    return <span className="text-sm text-navy-950">{formatOptionalDate(value)}</span>;
   }
 
   return (
-    <Input
+    <ResultDateInput
       value={value}
-      placeholder={placeholder}
-      className="h-9 min-w-[120px] text-sm"
-      onChange={(event) => onChange?.(event.target.value)}
+      onCommit={(next) => onChange?.(next)}
     />
   );
 }

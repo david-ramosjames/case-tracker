@@ -14,7 +14,7 @@ export default async function LitigationPage() {
       <PageHeader
         eyebrow="Litigation"
         title="Litigation events tracker"
-        description="All cases in the Lit stage in one view. Track plaintiff and defendant depositions, mediation, and trial scheduling with person and status for each event."
+        description="All cases in the Lit stage in one view. Track plaintiff and defendant depositions, mediation, and trial with date and status for each event."
       />
       <LitigationTable records={litigationRecords} users={users} viewer={viewer} />
     </>

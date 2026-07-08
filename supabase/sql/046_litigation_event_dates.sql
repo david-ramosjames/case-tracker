@@ -1,34 +1,22 @@
 begin;
 
-do $$
-begin
-  create type public.litigation_event_status as enum (
-    'To Schedule',
-    'Scheduled',
-    'Complete'
-  );
-exception
-  when duplicate_object then null;
-end $$;
+-- Replace person text columns from the initial litigation-events migration with event dates.
+alter table public.case_tracker_entries
+  drop column if exists lit_plaintiff_dep_person,
+  drop column if exists lit_defendant_dep_person,
+  drop column if exists lit_mediation_person,
+  drop column if exists lit_trial_person;
 
 alter table public.case_tracker_entries
   add column if not exists lit_plaintiff_dep_date date,
-  add column if not exists lit_plaintiff_dep_status public.litigation_event_status,
   add column if not exists lit_defendant_dep_date date,
-  add column if not exists lit_defendant_dep_status public.litigation_event_status,
   add column if not exists lit_mediation_date date,
-  add column if not exists lit_mediation_status public.litigation_event_status,
-  add column if not exists lit_trial_date date,
-  add column if not exists lit_trial_status public.litigation_event_status;
+  add column if not exists lit_trial_date date;
 
 comment on column public.case_tracker_entries.lit_plaintiff_dep_date is 'Plaintiff deposition date (litigation events).';
-comment on column public.case_tracker_entries.lit_plaintiff_dep_status is 'Plaintiff deposition scheduling status.';
 comment on column public.case_tracker_entries.lit_defendant_dep_date is 'Defendant deposition date (litigation events).';
-comment on column public.case_tracker_entries.lit_defendant_dep_status is 'Defendant deposition scheduling status.';
 comment on column public.case_tracker_entries.lit_mediation_date is 'Mediation date (litigation events).';
-comment on column public.case_tracker_entries.lit_mediation_status is 'Mediation scheduling status.';
 comment on column public.case_tracker_entries.lit_trial_date is 'Trial date (litigation events).';
-comment on column public.case_tracker_entries.lit_trial_status is 'Trial scheduling status.';
 
 create or replace function public.case_tracker_tracked_entry_json(entry public.case_tracker_entries)
 returns jsonb

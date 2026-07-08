@@ -3217,19 +3217,19 @@ function normalizeLitigationEventStatus(value: string | null | undefined): Litig
 function litigationEventsFromRow(row: UnknownRow): LitigationEvents {
   return {
     plaintiffDeposition: {
-      person: toString(row.lit_plaintiff_dep_person, ""),
+      date: toStringOrNull(row.lit_plaintiff_dep_date),
       status: normalizeLitigationEventStatus(toStringOrNull(row.lit_plaintiff_dep_status)),
     },
     defendantDeposition: {
-      person: toString(row.lit_defendant_dep_person, ""),
+      date: toStringOrNull(row.lit_defendant_dep_date),
       status: normalizeLitigationEventStatus(toStringOrNull(row.lit_defendant_dep_status)),
     },
     mediation: {
-      person: toString(row.lit_mediation_person, ""),
+      date: toStringOrNull(row.lit_mediation_date),
       status: normalizeLitigationEventStatus(toStringOrNull(row.lit_mediation_status)),
     },
     trial: {
-      person: toString(row.lit_trial_person, ""),
+      date: toStringOrNull(row.lit_trial_date),
       status: normalizeLitigationEventStatus(toStringOrNull(row.lit_trial_status)),
     },
   };
@@ -3237,13 +3237,13 @@ function litigationEventsFromRow(row: UnknownRow): LitigationEvents {
 
 function litigationEventsToRow(events: LitigationEvents) {
   return {
-    lit_plaintiff_dep_person: events.plaintiffDeposition.person,
+    lit_plaintiff_dep_date: events.plaintiffDeposition.date,
     lit_plaintiff_dep_status: events.plaintiffDeposition.status,
-    lit_defendant_dep_person: events.defendantDeposition.person,
+    lit_defendant_dep_date: events.defendantDeposition.date,
     lit_defendant_dep_status: events.defendantDeposition.status,
-    lit_mediation_person: events.mediation.person,
+    lit_mediation_date: events.mediation.date,
     lit_mediation_status: events.mediation.status,
-    lit_trial_person: events.trial.person,
+    lit_trial_date: events.trial.date,
     lit_trial_status: events.trial.status,
   };
 }

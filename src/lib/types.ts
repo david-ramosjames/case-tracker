@@ -29,7 +29,7 @@ export type LitigationEventStatus = "To Schedule" | "Scheduled" | "Complete";
 export type LitigationEventKey = "plaintiffDeposition" | "defendantDeposition" | "mediation" | "trial";
 
 export type LitigationEvent = {
-  person: string;
+  date: string | null;
   status: LitigationEventStatus | null;
 };
 
