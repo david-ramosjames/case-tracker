@@ -285,7 +285,8 @@ export function getFeePercent(record: CaseRecord) {
 }
 
 export function getProjectedFeeValue(record: CaseRecord) {
-  if (!record.tracker.minimumValue) return record.tracker.estimatedFeeValue;
+  // 0 is a valid minimum — do not fall back to a stale estimatedFeeValue.
+  if (record.tracker.minimumValue == null) return record.tracker.estimatedFeeValue;
   return Math.round(record.tracker.minimumValue * getFeePercent(record));
 }
 

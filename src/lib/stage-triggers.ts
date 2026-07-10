@@ -164,7 +164,7 @@ export function buildStagePatchFromConfirmation(
         })
       : deriveForecastFeePercent({ caseStage: stage, referralFee: record.tracker.referralFee });
 
-  if (record.tracker.minimumValue) {
+  if (record.tracker.minimumValue != null) {
     patch.estimatedFeeValue = Math.round(record.tracker.minimumValue * forecastRate);
   }
 

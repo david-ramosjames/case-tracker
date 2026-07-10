@@ -192,7 +192,8 @@ export function CaseDetailView({
   });
 
   function recalcEstimatedFee(next: TrackerEntry) {
-    if (!next.minimumValue) return next.estimatedFeeValue;
+    // 0 is a valid minimum — clear projected fee instead of keeping a stale estimate.
+    if (next.minimumValue == null) return next.estimatedFeeValue;
     return Math.round(next.minimumValue * deriveResultFeePercent(next));
   }
 
@@ -552,15 +553,16 @@ export function CaseDetailView({
         ...(savedTracker ?? {
           caseStage: signal.suggestedStage,
           expectedLitigation: signal.suggestedExpectedLitigation,
-          estimatedFeeValue: current.minimumValue
-            ? Math.round(
-                current.minimumValue *
-                  deriveResultFeePercent({
-                    caseStage: signal.suggestedStage,
-                    referralFee: current.referralFee,
-                  }),
-              )
-            : current.estimatedFeeValue,
+          estimatedFeeValue:
+            current.minimumValue == null
+              ? current.estimatedFeeValue
+              : Math.round(
+                  current.minimumValue *
+                    deriveResultFeePercent({
+                      caseStage: signal.suggestedStage,
+                      referralFee: current.referralFee,
+                    }),
+                ),
         }),
         detectedStageSignals: current.detectedStageSignals.map((item) =>
           item.id === signalId ? { ...item, confirmedAt: now } : item,
@@ -946,7 +948,7 @@ export function CaseDetailView({
                     <AttorneyInfo fieldId="liability" record={record} value={tracker.liability ?? "Not set"} />
                     <AttorneyInfo fieldId="targetResolutionQuarter" record={record} value={tracker.targetResolutionQuarter ?? "Not set"} />
                     <AttorneyInfo fieldId="minimumValue" record={record} value={formatCurrency(tracker.minimumValue)} />
-                    <AttorneyInfo fieldId="referralFee" record={record} value={formatPercentValue(tracker.referralFee)} />
+                    <AttorneyInfo fieldId="referralFee" record={record} value={formatPercentValue(tracker.referralFee, 2)} />
                     <AttorneyInfo fieldId="policyLimits" record={record} value={formatCurrency(tracker.policyLimits)} />
                   </div>
                 </div>
@@ -1088,12 +1090,16 @@ export function CaseDetailView({
                         onValueChange={(value) => {
                           updateField("minimumValue", value);
                           updateField("caseSize", deriveCaseSizeFromMinimumValue(value));
-                          updateField("estimatedFeeValue", value ? Math.round(value * getFeePercent(record)) : null);
                         }}
                       />
                     </AttorneyField>
                     <AttorneyField fieldId="referralFee" record={record}>
-                      <FormattedNumberInput suffix="%" value={tracker.referralFee} onValueChange={(value) => updateField("referralFee", value)} />
+                      <FormattedNumberInput
+                        suffix="%"
+                        fractionDigits={2}
+                        value={tracker.referralFee}
+                        onValueChange={(value) => updateField("referralFee", value)}
+                      />
                     </AttorneyField>
                     <AttorneyField fieldId="policyLimits" record={record}>
                       <FormattedNumberInput prefix="$" value={tracker.policyLimits} onValueChange={(value) => updateField("policyLimits", value)} />
@@ -1518,7 +1524,6 @@ export function CaseDetailView({
           onMinimumValueChange={(value) => {
             updateField("minimumValue", value);
             updateField("caseSize", deriveCaseSizeFromMinimumValue(value));
-            updateField("estimatedFeeValue", value ? Math.round(value * getFeePercent(record)) : null);
           }}
           onSave={() => saveTracker()}
           isSaving={isSaving}
@@ -1842,6 +1847,7 @@ function FormattedNumberInput({
   suffix,
   readOnly,
   sheetSynced,
+  fractionDigits,
 }: {
   value: number | null;
   onValueChange?: (value: number | null) => void;
@@ -1849,23 +1855,26 @@ function FormattedNumberInput({
   suffix?: string;
   readOnly?: boolean;
   sheetSynced?: boolean;
+  /** When set, always show this many fraction digits (e.g. referral fee 33.33%). */
+  fractionDigits?: number;
 }) {
   const [isFocused, setIsFocused] = useState(false);
-  const [draft, setDraft] = useState(value == null ? "" : formatNumberForInput(value));
+  const formatValue = (next: number) => formatNumberForInput(next, fractionDigits);
+  const [draft, setDraft] = useState(value == null ? "" : formatValue(value));
 
   useEffect(() => {
-    if (!isFocused) setDraft(value == null ? "" : formatNumberForInput(value));
-  }, [isFocused, value]);
+    if (!isFocused) setDraft(value == null ? "" : formatValue(value));
+  }, [isFocused, value, fractionDigits]);
 
   function commit() {
     if (readOnly) return;
     const nextValue = parseFormattedNumber(draft);
     if (nextValue !== null && Number.isNaN(nextValue)) {
-      setDraft(value == null ? "" : formatNumberForInput(value));
+      setDraft(value == null ? "" : formatValue(value));
       return;
     }
     onValueChange?.(nextValue);
-    setDraft(nextValue == null ? "" : formatNumberForInput(nextValue));
+    setDraft(nextValue == null ? "" : formatValue(nextValue));
     setIsFocused(false);
   }
 
@@ -1892,7 +1901,7 @@ function FormattedNumberInput({
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
           if (event.key === "Escape") {
-            setDraft(value == null ? "" : formatNumberForInput(value));
+            setDraft(value == null ? "" : formatValue(value));
             setIsFocused(false);
             event.currentTarget.blur();
           }
@@ -1903,8 +1912,11 @@ function FormattedNumberInput({
   );
 }
 
-function formatNumberForInput(value: number) {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+function formatNumberForInput(value: number, fractionDigits?: number) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits ?? 2,
+  }).format(value);
 }
 
 function parseFormattedNumber(value: string) {
@@ -1913,9 +1925,9 @@ function parseFormattedNumber(value: string) {
   return Number(trimmed.replace(/[$,%\s,]/g, ""));
 }
 
-function formatPercentValue(value: number | null) {
+function formatPercentValue(value: number | null, fractionDigits = 2) {
   if (value == null) return "Not set";
-  return `${formatNumberForInput(value)}%`;
+  return `${formatNumberForInput(value, fractionDigits)}%`;
 }
 
 function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {

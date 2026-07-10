@@ -164,6 +164,7 @@ function AttorneyFieldInput({
       return (
         <CompactFormattedNumberInput
           suffix="%"
+          fractionDigits={2}
           value={tracker.referralFee}
           onValueChange={(value) => onUpdateField("referralFee", value)}
         />
@@ -213,27 +214,30 @@ function CompactFormattedNumberInput({
   onValueChange,
   prefix,
   suffix,
+  fractionDigits,
 }: {
   value: number | null;
   onValueChange: (value: number | null) => void;
   prefix?: string;
   suffix?: string;
+  fractionDigits?: number;
 }) {
   const [isFocused, setIsFocused] = useState(false);
-  const [draft, setDraft] = useState(value == null ? "" : formatNumberForInput(value));
+  const formatValue = (next: number) => formatNumberForInput(next, fractionDigits);
+  const [draft, setDraft] = useState(value == null ? "" : formatValue(value));
 
   useEffect(() => {
-    if (!isFocused) setDraft(value == null ? "" : formatNumberForInput(value));
-  }, [isFocused, value]);
+    if (!isFocused) setDraft(value == null ? "" : formatValue(value));
+  }, [isFocused, value, fractionDigits]);
 
   function commit() {
     const nextValue = parseFormattedNumber(draft);
     if (nextValue !== null && Number.isNaN(nextValue)) {
-      setDraft(value == null ? "" : formatNumberForInput(value));
+      setDraft(value == null ? "" : formatValue(value));
       return;
     }
     onValueChange(nextValue);
-    setDraft(nextValue == null ? "" : formatNumberForInput(nextValue));
+    setDraft(nextValue == null ? "" : formatValue(nextValue));
     setIsFocused(false);
   }
 
@@ -254,7 +258,7 @@ function CompactFormattedNumberInput({
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
           if (event.key === "Escape") {
-            setDraft(value == null ? "" : formatNumberForInput(value));
+            setDraft(value == null ? "" : formatValue(value));
             setIsFocused(false);
             event.currentTarget.blur();
           }
@@ -265,8 +269,11 @@ function CompactFormattedNumberInput({
   );
 }
 
-function formatNumberForInput(value: number) {
-  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(value);
+function formatNumberForInput(value: number, fractionDigits?: number) {
+  return new Intl.NumberFormat("en-US", {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits ?? 2,
+  }).format(value);
 }
 
 function parseFormattedNumber(value: string) {
