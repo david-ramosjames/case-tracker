@@ -252,7 +252,11 @@ export function CaseDetailView({
         clearedSheetData?: boolean;
         sheetDisbursementsRemoved?: number;
         stageRestored?: string | null;
-        details?: Array<{ stageRestored?: string | null; disbursedStatus?: string }>;
+        details?: Array<{
+          stageRestored?: string | null;
+          disbursedStatus?: string;
+          pendingPartyCount?: number;
+        }>;
         tracker?: TrackerEntry | null;
         sharedStatus?: CaseStatus | null;
       };

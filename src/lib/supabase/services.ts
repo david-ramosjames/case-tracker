@@ -1244,11 +1244,11 @@ export type SettlementSheetCasePayload = {
   caseNumber: string;
   sheetRowCount: number;
   settlementDate: string | null;
-  /** Column G — true when any row is Y and no row is explicit N (auto-settle / keep Settled). */
+  /** Column G — true when any row is Y (auto-settle / keep Settled). N on other party rows does not clear this. */
   fullSettlement: boolean;
-  /** Column G — true when any row is explicit N/No (reopen / restore prior stage). Blank does not set this. */
+  /** Column G — true when some row is N and no row is Y (reopen / restore prior stage). */
   fullSettlementDenied?: boolean;
-  /** Some sheet rows Y and others N for the same case — sync treats as not full settlement. */
+  /** Informational: Y and N both appear on party rows for this case. Sync still treats as settled when any Y exists. */
   fullSettlementMismatch?: boolean;
   totalSettlementAmount: number | null;
   totalAttorneyFees: number | null;
@@ -2337,8 +2337,8 @@ export async function syncSettlementsFromSheet(
       aggregated?.resultQuarter ??
       (resolvedDisburseDate ? deriveResultQuarterFromDisburseDate(resolvedDisburseDate) : null);
 
-    // Column G = Full Settlement.
-    // Explicit N reopens the case. Blank G (e.g. new awaiting party) does not.
+    // Column G = Full Settlement (case-level).
+    // Reopen only when denied (N with no Y). Blank or N-on-stub alongside a Y does not reopen.
     const openCaseFromSheet = Boolean(item.fullSettlementDenied);
     if (openCaseFromSheet) {
       resolvedDisburseDate = null;
@@ -2451,7 +2451,7 @@ export async function syncSettlementsFromSheet(
         previewChanges.push(`Stage: Settled → ${stageRestored}`);
       } else if (item.fullSettlementMismatch) {
         previewChanges.push(
-          "Mixed Full Settlement (column G): Y on some rows and N on others — treated as N; will not auto-settle",
+          "Mixed Full Settlement (column G): Y on some rows and N on others — treated as Y (case stays/settles)",
         );
       }
     }

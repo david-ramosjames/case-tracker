@@ -138,13 +138,13 @@ export function buildSettlementCasePayloads(parsed: ParsedSettlementRow[]): Sett
 function buildSettlementCasePayload(caseNumber: string, caseRows: ParsedSettlementRow[]): SettlementSheetCasePayload {
   const sheetRowCount = caseRows.length;
   const settlementDate = caseRows.map((row) => row.settlementDate).find(Boolean) ?? null;
-  // Column G is case-level: any Y settles the case (even before all parties exist).
-  // Blank cells on newly added party rows must NOT reopen a settled case.
-  // Only an explicit N/No reopens / blocks settle.
+  // Column G is case-level. Practice on the sheet: completed party rows get Y; new/incomplete
+  // party stubs often get N (or blank). Any Y means the case is fully settled — do not let an
+  // N on a stub party reopen Settled → Onboarding. Reopen only when no row has Y and some have N.
   const hasFullSettlementYes = caseRows.some((row) => row.fullSettlementFlag === "yes");
   const hasFullSettlementNo = caseRows.some((row) => row.fullSettlementFlag === "no");
-  const fullSettlement = hasFullSettlementYes && !hasFullSettlementNo;
-  const fullSettlementDenied = hasFullSettlementNo;
+  const fullSettlement = hasFullSettlementYes;
+  const fullSettlementDenied = hasFullSettlementNo && !hasFullSettlementYes;
   const disbursements = caseRows.map((row) => ({
     sheetRowKey: row.sheetRowKey,
     partyLabel: row.partyLabel,
