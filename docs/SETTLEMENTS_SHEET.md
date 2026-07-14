@@ -50,7 +50,7 @@ Cases must already exist in the tracker (matched by Case #).
 
 When **Settlement Date (H)** is set and **Full Settlement (G)** is **Y** on any party row for the case, the tracker sets case stage to **Settled** on sync — even when additional disbursement parties are not on the sheet yet (or have blank G).
 
-When **Full Settlement (G)** is an **explicit N/No** on any party row, sync keeps settlement amounts/dates but leaves the case **Active** (not fully closed) and restores the prior pipeline stage if the case had been Settled. Blank G on a newly added party does **not** reopen a settled case.
+When **Full Settlement (G)** is an **explicit N/No** on any party row, sync keeps settlement amounts/dates but leaves the case **Active** and restores the prior pipeline stage if the case had been Settled. Blank G on a newly added / awaiting party does **not** reopen or change stage.
 
 ## Case detail
 

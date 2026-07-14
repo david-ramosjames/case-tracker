@@ -1244,8 +1244,10 @@ export type SettlementSheetCasePayload = {
   caseNumber: string;
   sheetRowCount: number;
   settlementDate: string | null;
-  /** Column G on the disbursing sheet — Y means full settlement (stage can move to Settled). */
+  /** Column G — true when any row is Y and no row is explicit N (auto-settle / keep Settled). */
   fullSettlement: boolean;
+  /** Column G — true when any row is explicit N/No (reopen / restore prior stage). Blank does not set this. */
+  fullSettlementDenied?: boolean;
   /** Some sheet rows Y and others N for the same case — sync treats as not full settlement. */
   fullSettlementMismatch?: boolean;
   totalSettlementAmount: number | null;
@@ -1713,7 +1715,7 @@ function buildSettlementSyncCaseSummary(input: {
     parts.push(`${input.pendingPartyCount} part${input.pendingPartyCount === 1 ? "y" : "ies"} still pending`);
   }
   if (input.stageAutoSettled) parts.push("stage set to Settled");
-  if (input.stageRestored) parts.push("stage restored from Settled (Full Settlement is not Y)");
+  if (input.stageRestored) parts.push("stage restored from Settled (Full Settlement is N)");
   return parts.join("; ");
 }
 
@@ -2335,8 +2337,9 @@ export async function syncSettlementsFromSheet(
       aggregated?.resultQuarter ??
       (resolvedDisburseDate ? deriveResultQuarterFromDisburseDate(resolvedDisburseDate) : null);
 
-    // Column G = Full Settlement. When not Y, keep partial financials but do not close the case.
-    const openCaseFromSheet = !item.fullSettlement;
+    // Column G = Full Settlement.
+    // Explicit N reopens the case. Blank G (e.g. new awaiting party) does not.
+    const openCaseFromSheet = Boolean(item.fullSettlementDenied);
     if (openCaseFromSheet) {
       resolvedDisburseDate = null;
       resolvedDisbursedStatus = "No";
@@ -2379,7 +2382,7 @@ export async function syncSettlementsFromSheet(
 
     let stageAutoSettled = false;
     let stageRestored: CaseStage | null = null;
-    if (!item.fullSettlement) {
+    if (item.fullSettlementDenied) {
       const stageBeforeRestore = normalizeStage(toStringOrNull(trackerRow.case_stage));
       if (stageBeforeRestore === "Settled") {
         stageRestored = await lookupPriorCaseStageBeforeSettlement(admin, trackerEntryId);
@@ -2392,7 +2395,7 @@ export async function syncSettlementsFromSheet(
           stagesRestored += 1;
         }
       }
-    } else if (resolvedSettlementDate) {
+    } else if (item.fullSettlement && resolvedSettlementDate) {
       const stageBeforeSettle = normalizeStage(toStringOrNull(trackerRow.case_stage));
       if (stageBeforeSettle !== "Settled") {
         stageAutoSettled = true;

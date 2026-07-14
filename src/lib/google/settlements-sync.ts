@@ -144,6 +144,7 @@ function buildSettlementCasePayload(caseNumber: string, caseRows: ParsedSettleme
   const hasFullSettlementYes = caseRows.some((row) => row.fullSettlementFlag === "yes");
   const hasFullSettlementNo = caseRows.some((row) => row.fullSettlementFlag === "no");
   const fullSettlement = hasFullSettlementYes && !hasFullSettlementNo;
+  const fullSettlementDenied = hasFullSettlementNo;
   const disbursements = caseRows.map((row) => ({
     sheetRowKey: row.sheetRowKey,
     partyLabel: row.partyLabel,
@@ -164,6 +165,7 @@ function buildSettlementCasePayload(caseNumber: string, caseRows: ParsedSettleme
     sheetRowCount,
     settlementDate,
     fullSettlement,
+    fullSettlementDenied,
     fullSettlementMismatch: hasFullSettlementYes && hasFullSettlementNo,
     totalSettlementAmount: sumMoney(caseRows.map((row) => row.settlementAmount)),
     totalAttorneyFees: sumMoney(caseRows.map((row) => row.attorneyFees)),

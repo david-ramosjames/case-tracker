@@ -277,9 +277,11 @@ export function CaseDetailView({
         const detail = body.details?.[0];
         const parts = [`Imported ${body.disbursementsSynced ?? 0} disbursement party row(s) from the sheet.`];
         if (detail?.stageRestored) {
-          parts.push(`Stage restored to ${detail.stageRestored} (Full Settlement is not Y on the sheet).`);
+          parts.push(`Stage restored to ${detail.stageRestored} (Full Settlement is N on the sheet).`);
+        } else if (detail?.disbursedStatus === "No" && (detail.pendingPartyCount ?? 0) > 0) {
+          parts.push("Case left Active — waiting on remaining disbursement parties.");
         } else if (detail?.disbursedStatus === "No" && body.sheetRowsFound) {
-          parts.push("Case left Active — Full Settlement is not Y on the sheet.");
+          parts.push("Case left Active — Full Settlement is N on the sheet.");
         }
         setSheetSyncMessage(parts.join(" "));
       }
