@@ -1,4 +1,4 @@
-import { caseNumbersMatch, cleanCaseNumber, parseSheetDate, parseSheetYesNo } from "@/lib/csv/parse";
+import { caseNumbersMatch, cleanCaseNumber, parseSheetDate, parseSheetYesNoTriState } from "@/lib/csv/parse";
 import { fetchGoogleSheetValues, findSheetColumnIndex } from "@/lib/google/client";
 import {
   getGoogleSheetsCredentials,
@@ -31,8 +31,8 @@ type ParsedSettlementRow = {
   /** Non-blank B = still waiting to disburse; blank B = this row has disbursed. */
   pendingRemaining: boolean;
   settlementDate: string | null;
-  /** Column G — Y when the case has a full settlement (can move to Settled even if not all parties are on the sheet). */
-  fullSettlement: boolean;
+  /** Column G tri-state — blank on a new party must not undo a case-level Y. */
+  fullSettlementFlag: "yes" | "no" | "blank";
   disburseDate: string | null;
   settlementAmount: number | null;
   attorneyFees: number | null;
@@ -105,7 +105,7 @@ export function parseSettlementSheetRows(rows: string[][], spreadsheetId: string
 
     const countCell = (row[resolvedCountIdx] ?? "").trim();
     const settlementDate = parseSheetDate(row[resolvedSettlementIdx] ?? "");
-    const fullSettlement = parseSheetYesNo(row[resolvedFullSettlementIdx] ?? "");
+    const fullSettlementFlag = parseSheetYesNoTriState(row[resolvedFullSettlementIdx] ?? "");
     const disburseDate = parseSheetDate(row[resolvedDisbursedIdx] ?? "");
     const partyLabel = (row[resolvedClientIdx] ?? "").trim() || null;
     const pendingRemaining = disburseDate ? false : isPendingDisbursementCountCell(countCell);
@@ -116,7 +116,7 @@ export function parseSettlementSheetRows(rows: string[][], spreadsheetId: string
       partyLabel,
       pendingRemaining,
       settlementDate,
-      fullSettlement,
+      fullSettlementFlag,
       disburseDate,
       settlementAmount: parseSheetMoney(row[resolvedGrossIdx] ?? ""),
       attorneyFees: parseSheetMoney(row[resolvedNetFeesIdx] ?? ""),
@@ -138,10 +138,12 @@ export function buildSettlementCasePayloads(parsed: ParsedSettlementRow[]): Sett
 function buildSettlementCasePayload(caseNumber: string, caseRows: ParsedSettlementRow[]): SettlementSheetCasePayload {
   const sheetRowCount = caseRows.length;
   const settlementDate = caseRows.map((row) => row.settlementDate).find(Boolean) ?? null;
-  // Column G is case-level: every sheet row must be Y. One N (or stale duplicate row) blocks auto-settle.
-  const fullSettlement = caseRows.length > 0 && caseRows.every((row) => row.fullSettlement);
-  const hasFullSettlementYes = caseRows.some((row) => row.fullSettlement);
-  const hasFullSettlementNo = caseRows.some((row) => !row.fullSettlement);
+  // Column G is case-level: any Y settles the case (even before all parties exist).
+  // Blank cells on newly added party rows must NOT reopen a settled case.
+  // Only an explicit N/No reopens / blocks settle.
+  const hasFullSettlementYes = caseRows.some((row) => row.fullSettlementFlag === "yes");
+  const hasFullSettlementNo = caseRows.some((row) => row.fullSettlementFlag === "no");
+  const fullSettlement = hasFullSettlementYes && !hasFullSettlementNo;
   const disbursements = caseRows.map((row) => ({
     sheetRowKey: row.sheetRowKey,
     partyLabel: row.partyLabel,

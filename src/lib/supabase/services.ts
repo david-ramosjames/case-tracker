@@ -2448,7 +2448,7 @@ export async function syncSettlementsFromSheet(
         previewChanges.push(`Stage: Settled → ${stageRestored}`);
       } else if (item.fullSettlementMismatch) {
         previewChanges.push(
-          "Mixed Full Settlement (column G) across sheet rows — treated as N; will not auto-settle",
+          "Mixed Full Settlement (column G): Y on some rows and N on others — treated as N; will not auto-settle",
         );
       }
     }

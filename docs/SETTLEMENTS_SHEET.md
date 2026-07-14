@@ -48,9 +48,9 @@ Use your tab name in `GOOGLE_SHEETS_SETTLEMENT_RANGE` (the workbook title is oft
 
 Cases must already exist in the tracker (matched by Case #).
 
-When **Settlement Date (H)** is set and **Full Settlement (G)** is **Y**, the tracker sets case stage to **Settled** on sync — even when additional disbursement parties are not on the sheet yet.
+When **Settlement Date (H)** is set and **Full Settlement (G)** is **Y** on any party row for the case, the tracker sets case stage to **Settled** on sync — even when additional disbursement parties are not on the sheet yet (or have blank G).
 
-When **Full Settlement (G)** is **not Y** (e.g. **N**), sync keeps settlement amounts/dates but leaves the case **Active** (not fully disbursed) and restores the prior pipeline stage if the case had been auto-settled from the sheet.
+When **Full Settlement (G)** is an **explicit N/No** on any party row, sync keeps settlement amounts/dates but leaves the case **Active** (not fully closed) and restores the prior pipeline stage if the case had been Settled. Blank G on a newly added party does **not** reopen a settled case.
 
 ## Case detail
 

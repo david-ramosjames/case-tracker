@@ -159,6 +159,15 @@ export function parseSheetYesNo(value: string): boolean {
   return normalized === "y" || normalized === "yes" || normalized === "true";
 }
 
+/** Case-level sheet flag that distinguishes blank from explicit N. */
+export function parseSheetYesNoTriState(value: string): "yes" | "no" | "blank" {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return "blank";
+  if (normalized === "y" || normalized === "yes" || normalized === "true") return "yes";
+  if (normalized === "n" || normalized === "no" || normalized === "false") return "no";
+  return "blank";
+}
+
 export function cleanCaseNumber(value: string) {
   const trimmed = value.trim().replace(/^#+/, "");
   if (!trimmed) return "";
