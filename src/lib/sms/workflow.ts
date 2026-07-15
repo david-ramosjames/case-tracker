@@ -312,7 +312,7 @@ export async function syncQuoPhonesToTracker() {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required.");
 
-  const matches = await buildQuoContactMatches();
+  const { matches, totalDirectoryContacts, noCaseNumber } = await buildQuoContactMatches();
   const groupedMatches = groupQuoContactMatchesByCaseNumber(matches);
 
   const { data: trackerRows, error } = await admin
@@ -321,6 +321,20 @@ export async function syncQuoPhonesToTracker() {
     .not("case_number", "is", null);
 
   if (error) throw new Error(error.message);
+
+  const trackerCaseNumbers = new Set(
+    (trackerRows ?? []).map((row) => cleanCaseNumber(String(row.case_number ?? ""))).filter(Boolean),
+  );
+
+  const unmatchedContacts: Array<{ displayName: string; caseNumber: string }> = [];
+  const seenUnmatchedIds = new Set<string>();
+  for (const match of matches) {
+    const key = cleanCaseNumber(match.caseNumber);
+    if (key && !trackerCaseNumbers.has(key) && !seenUnmatchedIds.has(match.quoContactId)) {
+      seenUnmatchedIds.add(match.quoContactId);
+      unmatchedContacts.push({ displayName: match.displayName, caseNumber: match.caseNumber });
+    }
+  }
 
   const inboxCache = new Map<string, QuoInboxMatch | null>();
   let conversationSyncWarning: string | null = null;
@@ -431,5 +445,15 @@ export async function syncQuoPhonesToTracker() {
     if (!updateError) updated += 1;
   }
 
-  return { totalContacts: matches.length, matched, updated, skipped, conversationLinks, conversationSyncWarning };
+  return {
+    totalContacts: matches.length,
+    totalDirectoryContacts,
+    matched,
+    updated,
+    skipped,
+    conversationLinks,
+    conversationSyncWarning,
+    noCaseNumber,
+    unmatchedContacts,
+  };
 }

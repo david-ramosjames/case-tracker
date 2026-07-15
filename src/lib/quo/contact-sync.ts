@@ -73,12 +73,23 @@ export function listQuoContactMatchesForCase(
   );
 }
 
-export async function buildQuoContactMatches(): Promise<QuoContactSyncMatch[]> {
+export type QuoContactMatchResult = {
+  matches: QuoContactSyncMatch[];
+  totalDirectoryContacts: number;
+  noCaseNumber: string[];
+};
+
+export async function buildQuoContactMatches(): Promise<QuoContactMatchResult> {
   const rows = await listAllQuoContacts();
   const matches: QuoContactSyncMatch[] = [];
+  const noCaseNumber: string[] = [];
 
   for (const contact of rows) {
     const caseNumbers = parseCaseNumbersFromQuoContactName(contact.displayName);
+    if (!caseNumbers.length) {
+      noCaseNumber.push(contact.displayName);
+      continue;
+    }
     for (const caseNumber of caseNumbers) {
       matches.push({
         caseNumber,
@@ -90,7 +101,7 @@ export async function buildQuoContactMatches(): Promise<QuoContactSyncMatch[]> {
     }
   }
 
-  return matches;
+  return { matches, totalDirectoryContacts: rows.length, noCaseNumber };
 }
 
 export function groupQuoContactMatchesByCaseNumber(matches: QuoContactSyncMatch[]) {

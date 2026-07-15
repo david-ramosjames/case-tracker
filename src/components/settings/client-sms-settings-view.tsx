@@ -270,18 +270,27 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
       const response = await fetch("/api/admin/sms-sync-contacts", { method: "POST" });
       const body = (await response.json()) as {
         totalContacts?: number;
+        totalDirectoryContacts?: number;
         matched?: number;
         updated?: number;
         skipped?: number;
         conversationLinks?: number;
         conversationSyncWarning?: string | null;
+        noCaseNumber?: string[];
+        unmatchedContacts?: Array<{ displayName: string; caseNumber: string }>;
         error?: string;
       };
       if (!response.ok) throw new Error(body.error ?? "Sync failed.");
       const warning = body.conversationSyncWarning?.trim();
-      setMessage(
-        `Synced Quo contacts: ${body.updated ?? 0} case(s) updated, ${body.skipped ?? 0} unchanged (${body.matched ?? 0} matched of ${body.totalContacts ?? 0} directory rows; ${body.conversationLinks ?? 0} inbox links).${warning ? ` Inbox links skipped: ${warning}` : ""}`,
-      );
+      const noCaseCount = body.noCaseNumber?.length ?? 0;
+      const unmatchedCount = body.unmatchedContacts?.length ?? 0;
+      const lines = [
+        `Synced Quo contacts: ${body.updated ?? 0} case(s) updated, ${body.skipped ?? 0} unchanged (${body.matched ?? 0} matched of ${body.totalContacts ?? 0} parsed, ${body.totalDirectoryContacts ?? 0} total in directory; ${body.conversationLinks ?? 0} inbox links).`,
+      ];
+      if (warning) lines.push(`Inbox links skipped: ${warning}`);
+      if (noCaseCount) lines.push(`${noCaseCount} contact(s) skipped (no trailing case number): ${body.noCaseNumber!.slice(0, 10).join(", ")}${noCaseCount > 10 ? ` … +${noCaseCount - 10} more` : ""}`);
+      if (unmatchedCount) lines.push(`${unmatchedCount} contact(s) with case numbers not in tracker: ${body.unmatchedContacts!.slice(0, 10).map((c) => `${c.displayName} (#${c.caseNumber})`).join(", ")}${unmatchedCount > 10 ? ` … +${unmatchedCount - 10} more` : ""}`);
+      setMessage(lines.join("\n"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed.");
     } finally {
@@ -689,7 +698,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
       </Card>
 
       {error ? <p className="text-sm font-medium text-pink-600">{error}</p> : null}
-      {message ? <p className="text-sm font-medium text-emerald-700">{message}</p> : null}
+      {message ? <pre className="whitespace-pre-wrap text-sm font-medium text-emerald-700">{message}</pre> : null}
     </div>
   );
 }
