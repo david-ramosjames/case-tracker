@@ -12,6 +12,11 @@ export type QuoContact = {
   updatedAt: string | null;
 };
 
+export type QuoContactRaw = QuoContact & {
+  firstName: string;
+  lastName: string;
+};
+
 type QuoContactRow = {
   id: string;
   updatedAt?: string | null;
@@ -131,6 +136,60 @@ export async function listAllQuoContacts(): Promise<QuoContact[]> {
   } while (pageToken);
 
   return contacts;
+}
+
+export async function listAllQuoContactsRaw(): Promise<QuoContactRaw[]> {
+  const contacts: QuoContactRaw[] = [];
+  let pageToken: string | undefined;
+
+  do {
+    const params = new URLSearchParams({ maxResults: "50" });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const response = await quoApiFetch(`${QUO_API_BASE}/contacts?${params.toString()}`, {
+      headers: quoHeaders(),
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Quo list contacts failed (${response.status}): ${body}`);
+    }
+
+    const payload = (await response.json()) as QuoListContactsResponse;
+    for (const row of payload.data ?? []) {
+      const displayName = buildDisplayName(row);
+      if (!displayName) continue;
+      contacts.push({
+        id: row.id,
+        displayName,
+        firstName: row.defaultFields?.firstName?.trim() ?? "",
+        lastName: row.defaultFields?.lastName?.trim() ?? "",
+        primaryPhone: pickPrimaryPhone(row),
+        updatedAt: row.updatedAt?.trim() || null,
+      });
+    }
+
+    pageToken = payload.nextPageToken?.trim() || undefined;
+  } while (pageToken);
+
+  return contacts;
+}
+
+export async function updateQuoContactName(contactId: string, firstName: string, lastName: string) {
+  const response = await quoApiFetch(`${QUO_API_BASE}/contacts/${contactId}`, {
+    method: "PATCH",
+    headers: quoHeaders(),
+    body: JSON.stringify({
+      defaultFields: { firstName, lastName },
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Quo update contact failed (${response.status}): ${body}`);
+  }
+
+  return (await response.json()) as QuoContactRow;
 }
 
 export async function resolveQuoPhoneNumberId() {

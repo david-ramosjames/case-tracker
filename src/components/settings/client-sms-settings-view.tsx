@@ -102,6 +102,8 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renameCaseNumbers, setRenameCaseNumbers] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -287,6 +289,46 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     }
   }
 
+  async function renameQuoContacts(caseNumbers?: string[]) {
+    const isAll = !caseNumbers?.length;
+    if (isAll && !window.confirm("Rename ALL Quo contacts to include language (EN/ES) before the case number?")) return;
+    setRenaming(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch("/api/admin/quo-rename-contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(caseNumbers?.length ? { caseNumbers } : {}),
+      });
+      const body = (await response.json()) as {
+        totalContacts?: number;
+        renamed?: number;
+        skipped?: number;
+        errors?: string[];
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error ?? "Rename failed.");
+      const errorCount = body.errors?.length ?? 0;
+      setMessage(
+        `Quo rename complete: ${body.renamed ?? 0} renamed, ${body.skipped ?? 0} skipped (${body.totalContacts ?? 0} total).${errorCount ? ` ${errorCount} error(s).` : ""}`,
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Rename failed.");
+    } finally {
+      setRenaming(false);
+    }
+  }
+
+  function handleRenameSelected() {
+    const numbers = renameCaseNumbers
+      .split(/[\s,]+/)
+      .map((n) => n.trim())
+      .filter(Boolean);
+    if (!numbers.length) return;
+    void renameQuoContacts(numbers);
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -307,6 +349,39 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
             {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
             Sync phones from Quo
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Rename Quo contacts</CardTitle>
+          <CardDescription>
+            Insert the client&apos;s preferred language (EN or ES) into each Quo contact name before the case number.
+            For example, &quot;David Eagan 9999&quot; becomes &quot;David Eagan EN 9999&quot;.
+            Contacts that already have a language tag or no trailing case number are skipped.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-end gap-3">
+            <div className="flex-1 space-y-1">
+              <label className="text-sm font-medium text-navy-950">Case numbers</label>
+              <Input
+                placeholder="e.g. 1345, 1570, 1280"
+                value={renameCaseNumbers}
+                onChange={(e) => setRenameCaseNumbers(e.target.value)}
+              />
+            </div>
+            <Button onClick={handleRenameSelected} disabled={renaming || !renameCaseNumbers.trim()}>
+              {renaming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Rename selected
+            </Button>
+          </div>
+          <div>
+            <Button variant="outline" onClick={() => void renameQuoContacts()} disabled={renaming}>
+              {renaming ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Rename all contacts
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
