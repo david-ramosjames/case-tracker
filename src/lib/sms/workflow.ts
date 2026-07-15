@@ -308,17 +308,27 @@ export async function syncQuoPhonesToTrackerIfConfigured() {
   return { configured: true, ...result };
 }
 
-export async function syncQuoPhonesToTracker() {
+export async function syncQuoPhonesToTracker(filterCaseNumbers?: string[]) {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required.");
+
+  const filterSet = filterCaseNumbers?.length
+    ? new Set(filterCaseNumbers.map((n) => cleanCaseNumber(n)).filter(Boolean))
+    : null;
 
   const { matches, totalDirectoryContacts, noCaseNumber } = await buildQuoContactMatches();
   const groupedMatches = groupQuoContactMatchesByCaseNumber(matches);
 
-  const { data: trackerRows, error } = await admin
+  let query = admin
     .from("case_tracker_entries")
     .select("id, case_number, client_name_snapshot, client_phone, quo_contact_id, quo_conversation_id, quo_phone_number_id")
     .not("case_number", "is", null);
+
+  if (filterSet) {
+    query = query.in("case_number", [...filterSet]);
+  }
+
+  const { data: trackerRows, error } = await query;
 
   if (error) throw new Error(error.message);
 

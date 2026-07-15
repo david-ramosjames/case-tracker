@@ -103,6 +103,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [syncCaseNumbers, setSyncCaseNumbers] = useState("");
   const [renameCaseNumbers, setRenameCaseNumbers] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -262,12 +263,16 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     }
   }
 
-  async function syncQuoContacts() {
+  async function syncQuoContacts(caseNumbers?: string[]) {
     setSyncing(true);
     setError(null);
     setMessage(null);
     try {
-      const response = await fetch("/api/admin/sms-sync-contacts", { method: "POST" });
+      const response = await fetch("/api/admin/sms-sync-contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(caseNumbers?.length ? { caseNumbers } : {}),
+      });
       const body = (await response.json()) as {
         totalContacts?: number;
         totalDirectoryContacts?: number;
@@ -296,6 +301,15 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     } finally {
       setSyncing(false);
     }
+  }
+
+  function handleSyncSelected() {
+    const numbers = syncCaseNumbers
+      .split(/[\s,]+/)
+      .map((n) => n.trim())
+      .filter(Boolean);
+    if (!numbers.length) return;
+    void syncQuoContacts(numbers);
   }
 
   async function renameQuoContacts(caseNumbers?: string[]) {
@@ -349,15 +363,31 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
             daily cron (14:00 UTC) when Quo is configured; use the button below after bulk Quo imports or when you need an immediate refresh.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-3">
+        <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
             Requires <code className="text-xs">QUO_API_KEY</code>. SMS sends also need <code className="text-xs">QUO_FROM_PHONE</code>.
             Slack approval uses the case channel, or <code className="text-xs">SMS_APPROVAL_SLACK_CHANNEL_ID</code> when set.
           </p>
-          <Button onClick={() => void syncQuoContacts()} disabled={syncing}>
-            {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-            Sync phones from Quo
-          </Button>
+          <div className="flex items-end gap-3">
+            <div className="flex-1 space-y-1">
+              <label className="text-sm font-medium text-navy-950">Sync specific cases</label>
+              <Input
+                placeholder="e.g. 1345, 1570, 1280"
+                value={syncCaseNumbers}
+                onChange={(e) => setSyncCaseNumbers(e.target.value)}
+              />
+            </div>
+            <Button onClick={handleSyncSelected} disabled={syncing || !syncCaseNumbers.trim()}>
+              {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Sync selected
+            </Button>
+          </div>
+          <div>
+            <Button variant="outline" onClick={() => void syncQuoContacts()} disabled={syncing}>
+              {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Sync all from Quo
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
