@@ -283,16 +283,21 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
         conversationSyncWarning?: string | null;
         noCaseNumber?: string[];
         unmatchedContacts?: Array<{ displayName: string; caseNumber: string }>;
+        missingCaseNumbers?: string[];
+        backfilled?: number;
         error?: string;
       };
       if (!response.ok) throw new Error(body.error ?? "Sync failed.");
       const warning = body.conversationSyncWarning?.trim();
       const noCaseCount = body.noCaseNumber?.length ?? 0;
       const unmatchedCount = body.unmatchedContacts?.length ?? 0;
+      const missingCount = body.missingCaseNumbers?.length ?? 0;
       const lines = [
         `Synced Quo contacts: ${body.updated ?? 0} case(s) updated, ${body.skipped ?? 0} unchanged (${body.matched ?? 0} matched of ${body.totalContacts ?? 0} parsed, ${body.totalDirectoryContacts ?? 0} total in directory; ${body.conversationLinks ?? 0} inbox links).`,
       ];
+      if (body.backfilled) lines.push(`Backfilled case_number on ${body.backfilled} tracker row(s).`);
       if (warning) lines.push(`Inbox links skipped: ${warning}`);
+      if (missingCount) lines.push(`No tracker row found for case(s): ${body.missingCaseNumbers!.join(", ")}`);
       if (noCaseCount) lines.push(`${noCaseCount} contact(s) skipped (no trailing case number): ${body.noCaseNumber!.slice(0, 10).join(", ")}${noCaseCount > 10 ? ` … +${noCaseCount - 10} more` : ""}`);
       if (unmatchedCount) lines.push(`${unmatchedCount} contact(s) with case numbers not in tracker: ${body.unmatchedContacts!.slice(0, 10).map((c) => `${c.displayName} (#${c.caseNumber})`).join(", ")}${unmatchedCount > 10 ? ` … +${unmatchedCount - 10} more` : ""}`);
       setMessage(lines.join("\n"));

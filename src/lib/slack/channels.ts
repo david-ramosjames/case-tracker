@@ -242,7 +242,7 @@ export async function findCaseForSlackThread(channelId: string, threadTs: string
   if (!channelRow?.case_number) return null;
 
   const caseNumber = cleanCaseNumber(channelRow.case_number);
-  const { data: trackerRow } = await admin
+  let { data: trackerRow } = await admin
     .from("case_tracker_entries")
     .select("case_number, case_id, id, slack_reminder_thread_ts, last_slack_reminder_at")
     .eq("case_number", caseNumber)
@@ -250,20 +250,35 @@ export async function findCaseForSlackThread(channelId: string, threadTs: string
     .limit(1)
     .maybeSingle();
 
+  if (!trackerRow) {
+    const { data: caseRow } = await admin
+      .from("cases")
+      .select("id")
+      .eq("case_number", caseNumber)
+      .maybeSingle();
+    if (caseRow?.id) {
+      const { data: byCaseId } = await admin
+        .from("case_tracker_entries")
+        .select("case_number, case_id, id, slack_reminder_thread_ts, last_slack_reminder_at")
+        .eq("case_id", caseRow.id)
+        .maybeSingle();
+      trackerRow = byCaseId;
+    }
+  }
+
   if (!trackerRow) return null;
 
   const storedThread = trackerRow.slack_reminder_thread_ts as string | null;
+  // Case channels are 1:1 with a case — accept replies in any thread on that channel.
+  // Prefer the stored reminder thread when present; otherwise require a recent reminder window.
   if (storedThread && storedThread !== threadTs) {
-    console.warn("Slack thread reply: ts mismatch on channel fallback", {
+    console.warn("Slack thread reply: accepting channel fallback despite ts mismatch", {
       channelId,
       expected: storedThread,
       received: threadTs,
       caseNumber,
     });
-    return null;
-  }
-
-  if (!storedThread) {
+  } else if (!storedThread) {
     const remindedAt = trackerRow.last_slack_reminder_at as string | null;
     if (!remindedAt || daysSince(remindedAt) > 14) {
       return null;

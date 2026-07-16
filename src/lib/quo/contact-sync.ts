@@ -21,6 +21,7 @@ export function normalizeContactLabel(value: string) {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .replace(/\s*\d{3,6}(?:\s*&\s*\d{3,6})*\s*$/, "")
+    .replace(/\s+\b(en|es)\b\s*$/i, "")
     .replace(/[^a-z0-9 ]/g, "")
     .trim();
 }

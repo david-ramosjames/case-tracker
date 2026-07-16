@@ -308,6 +308,96 @@ export async function syncQuoPhonesToTrackerIfConfigured() {
   return { configured: true, ...result };
 }
 
+type QuoSyncTrackerRow = {
+  id: string;
+  case_number: string | null;
+  case_id: string | null;
+  client_name_snapshot: string | null;
+  client_phone: string | null;
+  quo_contact_id: string | null;
+  quo_conversation_id: string | null;
+  quo_phone_number_id: string | null;
+};
+
+/** Load tracker rows for Quo sync, resolving via cases.case_number when tracker.case_number is blank. */
+async function loadTrackerRowsForQuoSync(
+  admin: NonNullable<ReturnType<typeof createSupabaseAdminClient>>,
+  filterSet: Set<string> | null,
+): Promise<{ rows: QuoSyncTrackerRow[]; missingCaseNumbers: string[]; backfilled: number }> {
+  const selectCols =
+    "id, case_number, case_id, client_name_snapshot, client_phone, quo_contact_id, quo_conversation_id, quo_phone_number_id";
+
+  const { data: allTrackers, error } = await admin.from("case_tracker_entries").select(selectCols);
+  if (error) throw new Error(error.message);
+
+  const { data: caseRows, error: caseError } = await admin.from("cases").select("id, case_number, client_name");
+  if (caseError) throw new Error(caseError.message);
+
+  const caseNumberById = new Map<string, string>();
+  const caseIdByNumber = new Map<string, string>();
+  const clientNameByCaseId = new Map<string, string>();
+  for (const row of caseRows ?? []) {
+    const num = cleanCaseNumber(String(row.case_number ?? ""));
+    if (!num || !row.id) continue;
+    caseNumberById.set(String(row.id), num);
+    caseIdByNumber.set(num, String(row.id));
+    if (row.client_name) clientNameByCaseId.set(String(row.id), String(row.client_name));
+  }
+
+  const byId = new Map<string, QuoSyncTrackerRow>();
+  let backfilled = 0;
+
+  for (const raw of (allTrackers ?? []) as QuoSyncTrackerRow[]) {
+    let caseNumber = cleanCaseNumber(String(raw.case_number ?? ""));
+    const caseId = raw.case_id ? String(raw.case_id) : null;
+
+    if (!caseNumber && caseId) {
+      caseNumber = caseNumberById.get(caseId) ?? "";
+      if (caseNumber) {
+        await admin.from("case_tracker_entries").update({ case_number: caseNumber }).eq("id", raw.id);
+        backfilled += 1;
+      }
+    }
+
+    if (!caseNumber) continue;
+    if (filterSet && !filterSet.has(caseNumber)) continue;
+
+    byId.set(String(raw.id), {
+      ...raw,
+      case_number: caseNumber,
+      client_name_snapshot: raw.client_name_snapshot ?? (caseId ? clientNameByCaseId.get(caseId) ?? null : null),
+    });
+  }
+
+  // For filtered sync: also find trackers linked only via cases.case_id when case_number was blank.
+  if (filterSet) {
+    for (const caseNumber of filterSet) {
+      const already = [...byId.values()].some((row) => cleanCaseNumber(String(row.case_number ?? "")) === caseNumber);
+      if (already) continue;
+
+      const caseId = caseIdByNumber.get(caseNumber);
+      if (!caseId) continue;
+
+      const linked = ((allTrackers ?? []) as QuoSyncTrackerRow[]).find((row) => String(row.case_id ?? "") === caseId);
+      if (!linked) continue;
+
+      await admin.from("case_tracker_entries").update({ case_number: caseNumber }).eq("id", linked.id);
+      backfilled += 1;
+      byId.set(String(linked.id), {
+        ...linked,
+        case_number: caseNumber,
+        client_name_snapshot: linked.client_name_snapshot ?? clientNameByCaseId.get(caseId) ?? null,
+      });
+    }
+  }
+
+  const rows = [...byId.values()];
+  const foundNumbers = new Set(rows.map((row) => cleanCaseNumber(String(row.case_number ?? ""))).filter(Boolean));
+  const missingCaseNumbers = filterSet ? [...filterSet].filter((n) => !foundNumbers.has(n)) : [];
+
+  return { rows, missingCaseNumbers, backfilled };
+}
+
 export async function syncQuoPhonesToTracker(filterCaseNumbers?: string[]) {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required.");
@@ -319,27 +409,17 @@ export async function syncQuoPhonesToTracker(filterCaseNumbers?: string[]) {
   const { matches, totalDirectoryContacts, noCaseNumber } = await buildQuoContactMatches();
   const groupedMatches = groupQuoContactMatchesByCaseNumber(matches);
 
-  let query = admin
-    .from("case_tracker_entries")
-    .select("id, case_number, client_name_snapshot, client_phone, quo_contact_id, quo_conversation_id, quo_phone_number_id")
-    .not("case_number", "is", null);
-
-  if (filterSet) {
-    query = query.in("case_number", [...filterSet]);
-  }
-
-  const { data: trackerRows, error } = await query;
-
-  if (error) throw new Error(error.message);
+  const { rows: trackerRows, missingCaseNumbers, backfilled } = await loadTrackerRowsForQuoSync(admin, filterSet);
 
   const trackerCaseNumbers = new Set(
-    (trackerRows ?? []).map((row) => cleanCaseNumber(String(row.case_number ?? ""))).filter(Boolean),
+    trackerRows.map((row) => cleanCaseNumber(String(row.case_number ?? ""))).filter(Boolean),
   );
 
   const unmatchedContacts: Array<{ displayName: string; caseNumber: string }> = [];
   const seenUnmatchedIds = new Set<string>();
   for (const match of matches) {
     const key = cleanCaseNumber(match.caseNumber);
+    if (filterSet && !filterSet.has(key)) continue;
     if (key && !trackerCaseNumbers.has(key) && !seenUnmatchedIds.has(match.quoContactId)) {
       seenUnmatchedIds.add(match.quoContactId);
       unmatchedContacts.push({ displayName: match.displayName, caseNumber: match.caseNumber });
@@ -377,7 +457,7 @@ export async function syncQuoPhonesToTracker(filterCaseNumbers?: string[]) {
   let skipped = 0;
   let conversationLinks = 0;
 
-  for (const row of trackerRows ?? []) {
+  for (const row of trackerRows) {
     const caseNumber = cleanCaseNumber(String(row.case_number ?? ""));
     const caseMatches = listQuoContactMatchesForCase(groupedMatches.get(caseNumber) ?? [], row.client_name_snapshot);
 
@@ -465,5 +545,7 @@ export async function syncQuoPhonesToTracker(filterCaseNumbers?: string[]) {
     conversationSyncWarning,
     noCaseNumber,
     unmatchedContacts,
+    missingCaseNumbers,
+    backfilled,
   };
 }
