@@ -12,19 +12,34 @@ export type QuoContact = {
   updatedAt: string | null;
 };
 
+export type QuoContactPhoneNumber = {
+  id?: string;
+  name: string;
+  value: string | null;
+};
+
+export type QuoContactDefaultFields = {
+  firstName?: string | null;
+  lastName?: string | null;
+  company?: string | null;
+  role?: string | null;
+  emails?: Array<{ id?: string; name: string; value: string | null }>;
+  phoneNumbers?: QuoContactPhoneNumber[];
+};
+
 export type QuoContactRaw = QuoContact & {
   firstName: string;
   lastName: string;
+  /** Existing Quo defaultFields — must be preserved on name-only updates. */
+  defaultFields: QuoContactDefaultFields;
 };
 
 type QuoContactRow = {
   id: string;
   updatedAt?: string | null;
-  defaultFields?: {
-    firstName?: string | null;
-    lastName?: string | null;
-    company?: string | null;
-    phoneNumbers?: Array<{ name?: string; value?: string | null }>;
+  defaultFields?: QuoContactDefaultFields & {
+    phoneNumbers?: Array<{ id?: string; name?: string; value?: string | null }>;
+    emails?: Array<{ id?: string; name?: string; value?: string | null }>;
   };
 };
 
@@ -159,6 +174,7 @@ export async function listAllQuoContactsRaw(): Promise<QuoContactRaw[]> {
     for (const row of payload.data ?? []) {
       const displayName = buildDisplayName(row);
       if (!displayName) continue;
+      const defaultFields = normalizeDefaultFields(row.defaultFields);
       contacts.push({
         id: row.id,
         displayName,
@@ -166,6 +182,7 @@ export async function listAllQuoContactsRaw(): Promise<QuoContactRaw[]> {
         lastName: row.defaultFields?.lastName?.trim() ?? "",
         primaryPhone: pickPrimaryPhone(row),
         updatedAt: row.updatedAt?.trim() || null,
+        defaultFields,
       });
     }
 
@@ -175,13 +192,50 @@ export async function listAllQuoContactsRaw(): Promise<QuoContactRaw[]> {
   return contacts;
 }
 
-export async function updateQuoContactName(contactId: string, firstName: string, lastName: string) {
+function normalizeDefaultFields(fields?: QuoContactRow["defaultFields"]): QuoContactDefaultFields {
+  const phoneNumbers = (fields?.phoneNumbers ?? [])
+    .filter((item) => Boolean(item.value?.trim()))
+    .map((item, index) => ({
+      ...(item.id ? { id: item.id } : {}),
+      name: item.name?.trim() || (index === 0 ? "primary" : `phone ${index + 1}`),
+      value: item.value?.trim() || null,
+    }));
+
+  const emails = (fields?.emails ?? [])
+    .filter((item) => Boolean(item.value?.trim()))
+    .map((item, index) => ({
+      ...(item.id ? { id: item.id } : {}),
+      name: item.name?.trim() || (index === 0 ? "primary" : `email ${index + 1}`),
+      value: item.value?.trim() || null,
+    }));
+
+  return {
+    firstName: fields?.firstName ?? null,
+    lastName: fields?.lastName ?? null,
+    company: fields?.company ?? null,
+    role: fields?.role ?? null,
+    ...(emails.length ? { emails } : {}),
+    ...(phoneNumbers.length ? { phoneNumbers } : {}),
+  };
+}
+
+/** Name-only update — re-sends existing phones/emails/company so Quo does not clear them. */
+export async function updateQuoContactName(
+  contactId: string,
+  firstName: string,
+  lastName: string,
+  existingFields: QuoContactDefaultFields = {},
+) {
+  const defaultFields: QuoContactDefaultFields = {
+    ...existingFields,
+    firstName,
+    lastName,
+  };
+
   const response = await quoApiFetch(`${QUO_API_BASE}/contacts/${contactId}`, {
     method: "PATCH",
     headers: quoHeaders(),
-    body: JSON.stringify({
-      defaultFields: { firstName, lastName },
-    }),
+    body: JSON.stringify({ defaultFields }),
   });
 
   if (!response.ok) {

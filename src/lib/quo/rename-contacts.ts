@@ -40,22 +40,33 @@ function buildRenamedFields(
 ): { firstName: string; lastName: string } | null {
   const fullName = `${contact.firstName} ${contact.lastName}`.trim();
   const nameWithoutNumbers = fullName.replace(TRAILING_CASE_NUMBERS_RE, "").trimEnd();
-  if (/\s(EN|ES)$/i.test(nameWithoutNumbers)) return null;
+  const existingTag = nameWithoutNumbers.match(/(?:^|\s)(EN|ES)$/i)?.[1]?.toUpperCase();
+  if (existingTag === languageTag) return null;
+
+  const replaceTrailingLanguageTag = (value: string) =>
+    value.replace(/(?:^|\s)(EN|ES)$/i, "").trimEnd();
+
+  const addLanguageBeforeNumbers = (value: string, numbers: string) => {
+    const name = replaceTrailingLanguageTag(value);
+    return name ? `${name} ${languageTag} ${numbers.trim()}` : `${languageTag} ${numbers.trim()}`;
+  };
 
   const lastNameMatch = contact.lastName.match(TRAILING_CASE_NUMBERS_RE);
   if (lastNameMatch) {
     const beforeNumbers = contact.lastName.slice(0, lastNameMatch.index).trimEnd();
-    const numbers = lastNameMatch[0];
-    const newLast = beforeNumbers ? `${beforeNumbers} ${languageTag} ${numbers}` : `${languageTag} ${numbers}`;
-    return { firstName: contact.firstName, lastName: newLast };
+    return {
+      firstName: existingTag ? replaceTrailingLanguageTag(contact.firstName) : contact.firstName,
+      lastName: addLanguageBeforeNumbers(beforeNumbers, lastNameMatch[0]),
+    };
   }
 
   const firstNameMatch = contact.firstName.match(TRAILING_CASE_NUMBERS_RE);
   if (firstNameMatch) {
     const beforeNumbers = contact.firstName.slice(0, firstNameMatch.index).trimEnd();
-    const numbers = firstNameMatch[0];
-    const newFirst = beforeNumbers ? `${beforeNumbers} ${languageTag} ${numbers}` : `${languageTag} ${numbers}`;
-    return { firstName: newFirst, lastName: contact.lastName };
+    return {
+      firstName: addLanguageBeforeNumbers(beforeNumbers, firstNameMatch[0]),
+      lastName: existingTag ? replaceTrailingLanguageTag(contact.lastName) : contact.lastName,
+    };
   }
 
   return null;
@@ -99,7 +110,7 @@ export async function renameQuoContactsWithLanguage(filterCaseNumbers?: string[]
     }
 
     try {
-      await updateQuoContactName(contact.id, renamed.firstName, renamed.lastName);
+      await updateQuoContactName(contact.id, renamed.firstName, renamed.lastName, contact.defaultFields);
       result.renamed += 1;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
