@@ -227,10 +227,9 @@ async function postDailyJobSlack(text: string) {
 }
 
 const DAILY_CRON_BATCH_LABELS = [
-  "Quo sync + Slack channels",
+  "Quo sync + Slack channels (parallel)",
   "Settlement sheet sync",
-  "Treatment promotion + daily pulse",
-  "Missing fields + field reminders",
+  "Treatment, pulse, missing fields, field reminders",
   "SMS automations",
 ] as const;
 

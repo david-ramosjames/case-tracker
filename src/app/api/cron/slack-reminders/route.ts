@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-export const maxDuration = 300;
+export const maxDuration = 800;
 export const dynamic = "force-dynamic";
 
 import { startDailyCronChain } from "@/lib/cron/daily-cron-executor";

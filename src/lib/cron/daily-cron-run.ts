@@ -23,17 +23,23 @@ export const DAILY_CRON_GROUP_ORDER: DailyCronGroup[] = [
 ];
 
 /**
- * One batch per invocation so each step stays under Vercel's 300s limit.
- * Settlement sync alone can take several minutes — never bundle it with other work.
- * Five batches ⇒ four self-fetch hops (under Vercel's infinite-loop threshold).
+ * Batched invocations (chained via HTTP). Within a parallel batch, groups run concurrently.
+ * Order across batches is strict: early syncs → settlement → stage/Slack → SMS last.
+ * Settlement stays alone (can take several minutes). SMS is always the final batch.
  */
 export const DAILY_CRON_BATCHES: DailyCronGroup[][] = [
   ["quoSync", "slackChannels"],
   ["settlementSync"],
-  ["treatmentPromotion", "dailyPulse"],
-  ["missingFields", "fieldReminders"],
+  ["treatmentPromotion", "dailyPulse", "missingFields", "fieldReminders"],
   ["sms"],
 ];
+
+/** Batch indexes whose groups have no mutual dependency and can run in parallel. */
+export const DAILY_CRON_PARALLEL_BATCH_INDEXES = new Set<number>([0]);
+
+export function isDailyCronBatchParallel(batchIndex: number) {
+  return DAILY_CRON_PARALLEL_BATCH_INDEXES.has(batchIndex);
+}
 
 export function getBatch(batchIndex: number): DailyCronGroup[] | null {
   return DAILY_CRON_BATCHES[batchIndex] ?? null;

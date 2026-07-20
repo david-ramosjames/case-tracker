@@ -2,18 +2,18 @@
   "crons": [
     {
       "path": "/api/cron/slack-reminders",
-      "schedule": "0 14 * * *"
+      "schedule": "0 13 * * *"
     }
   ],
   "functions": {
     "src/app/api/admin/daily-jobs/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 800
     },
     "src/app/api/cron/daily-job-step/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 800
     },
     "src/app/api/cron/slack-reminders/route.ts": {
-      "maxDuration": 300
+      "maxDuration": 800
     }
   }
 }

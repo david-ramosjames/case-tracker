@@ -3,6 +3,7 @@ import {
   clearDailyCronRun,
   getBatch,
   getNextDailyCronBatchIndex,
+  isDailyCronBatchParallel,
   loadDailyCronRun,
   mergeDailyCronRunToAllResult,
   saveDailyCronGroupResult,
@@ -22,6 +23,14 @@ export type DailyCronRunOptions = {
   caseNumber?: string;
 };
 
+async function runAndSaveGroup(runId: string, batchIndex: number, group: DailyCronGroup, options: DailyCronRunOptions) {
+  console.info("Daily cron group starting", { runId, batchIndex, group });
+  const result = await runDailyCronGroup(group, options);
+  await saveDailyCronGroupResult(runId, group, result);
+  console.info("Daily cron group finished", { runId, batchIndex, group, ok: result.ok !== false });
+  return result;
+}
+
 export async function runDailyCronBatch(
   batchIndex: number,
   runId: string,
@@ -34,12 +43,20 @@ export async function runDailyCronBatch(
 
   const results: Partial<Record<DailyCronGroup, Record<string, unknown>>> = {};
 
-  for (const group of batch) {
-    console.info("Daily cron group starting", { runId, batchIndex, group });
-    const result = await runDailyCronGroup(group, options);
-    await saveDailyCronGroupResult(runId, group, result);
-    results[group] = result;
-    console.info("Daily cron group finished", { runId, batchIndex, group, ok: result.ok !== false });
+  if (isDailyCronBatchParallel(batchIndex) && batch.length > 1) {
+    const settled = await Promise.all(
+      batch.map(async (group) => {
+        const result = await runAndSaveGroup(runId, batchIndex, group, options);
+        return [group, result] as const;
+      }),
+    );
+    for (const [group, result] of settled) {
+      results[group] = result;
+    }
+  } else {
+    for (const group of batch) {
+      results[group] = await runAndSaveGroup(runId, batchIndex, group, options);
+    }
   }
 
   const ok = Object.values(results).every((result) => result?.ok !== false);
