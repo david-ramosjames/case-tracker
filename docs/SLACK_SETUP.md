@@ -81,9 +81,9 @@ curl -X POST https://YOUR_DOMAIN/api/slack/sync-channels \
 
 When you add a new case row to the sheet, the next cron run (or Sync now) picks it up.
 
-## 5. Scheduled sync + field reminders (daily 13:00 UTC ≈ 8 AM Central)
+## 5. Scheduled sync + field reminders (daily 15:00 UTC ≈ 10 AM Central)
 
-`vercel.json` defines **one cron job** (`/api/cron/slack-reminders` at **13:00 UTC** every day ≈ **8 AM Central Daylight**). That endpoint starts a **chain** of batches:
+`vercel.json` defines **one cron job** (`/api/cron/slack-reminders` at **15:00 UTC** every day ≈ **10 AM Central Daylight**). That endpoint starts a **chain** of batches:
 
 1. Quo phone sync + Slack channel sheet sync (**in parallel**)
 2. Settlement sheet sync
