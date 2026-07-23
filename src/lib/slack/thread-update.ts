@@ -126,6 +126,14 @@ export function parseSlackThreadUpdate(
       continue;
     }
 
+    const policySourceMatch = line.match(
+      /^(?:policy\s*source|policy\s*info(?:rmation)?\s*source|source of policy(?:\s*info(?:rmation)?)?)\s*:\s*(.+)$/i,
+    );
+    if (policySourceMatch) {
+      tracker.policyInfoSource = policySourceMatch[1].trim();
+      continue;
+    }
+
     const expectedLitMatch = line.match(/^(?:expected\s*lit(?:igation)?|expected litigation)\s*:\s*(.+)$/i);
     if (expectedLitMatch) {
       const attempted = expectedLitMatch[1].trim();
@@ -196,6 +204,7 @@ export function describeSlackThreadAppliedLabels(patch: TrackerUpdateInput): str
   if (patch.estimatedFeeValue != null) labels.push("Projected firm fee");
   if (patch.confidenceLevel != null) labels.push("Confidence level");
   if (patch.policyLimits != null) labels.push("Policy limits");
+  if (patch.policyInfoSource != null) labels.push("Policy Source");
   if (patch.liability != null) labels.push("Liability");
   if (patch.expectedLitigation != null) labels.push("Expected litigation");
   if (patch.referralFee != null) labels.push("Referral fee");
