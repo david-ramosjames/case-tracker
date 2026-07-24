@@ -250,6 +250,38 @@ export async function getUsers(): Promise<AppUser[]> {
     .map(contactToUser);
 }
 
+/** Update Slack identity fields on a DocketFlow contact (used for topic handles / mentions). */
+export async function updateContactSlackProfile(
+  contactId: string,
+  input: { slackUserId?: string | null; slackDisplayName?: string | null },
+): Promise<AppUser> {
+  const admin = createSupabaseAdminClient();
+  if (!admin) throw new Error("Service role required to update contact Slack fields.");
+
+  const payload: { slack_user_id?: string | null; slack_display_name?: string | null } = {};
+  if (input.slackUserId !== undefined) {
+    const trimmed = input.slackUserId?.trim() || null;
+    if (trimmed && !/^U[A-Z0-9]+$/i.test(trimmed)) {
+      throw new Error("Slack user ID must look like U0123ABCD (starts with U).");
+    }
+    payload.slack_user_id = trimmed ? trimmed.toUpperCase() : null;
+  }
+  if (input.slackDisplayName !== undefined) {
+    payload.slack_display_name = input.slackDisplayName?.trim() || null;
+  }
+
+  const { data, error } = await admin
+    .from("contacts")
+    .update(payload)
+    .eq("id", contactId)
+    .select("id,name,email,role,slack_user_id,slack_display_name")
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("Contact not found.");
+  return contactToUser(data as ContactRow);
+}
+
 export async function getTrackerEntryByCaseId(caseId: string): Promise<TrackerEntry | null> {
   const record = await getCaseById(caseId);
   return record?.tracker ?? null;

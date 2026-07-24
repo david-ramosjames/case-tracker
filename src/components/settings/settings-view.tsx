@@ -4,13 +4,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AttorneyGoalsManager } from "@/components/settings/attorney-goals-manager";
 import { AttorneyScoreExplainer } from "@/components/attorney-score/attorney-score";
 import { BackfillImportCard } from "@/components/settings/backfill-import-card";
 import { DailyJobsCard } from "@/components/settings/daily-jobs-card";
 import { SettlementSyncCard } from "@/components/settings/settlement-sync-card";
 import { SlackSyncCard } from "@/components/settings/slack-sync-card";
+import { UserRolesCard } from "@/components/settings/user-roles-card";
 import { type AppUser, type AttorneyGoal, type CaseTrackerSettings } from "@/lib/types";
 
 export function SettingsView({
@@ -50,38 +50,7 @@ export function SettingsView({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>User Roles</CardTitle>
-            <CardDescription>Role-aware access model for attorneys, paralegals, managers, admins, and super admins.</CardDescription>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>User</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {users.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell className="font-semibold">{user.name}</TableCell>
-                    <TableCell>{user.email}</TableCell>
-                    <TableCell>
-                      <Badge variant={user.role === "manager" || user.role === "admin" ? "pink" : "outline"}>
-                        {user.role}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>{user.active ? "Active" : "Inactive"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+        <UserRolesCard users={users} />
 
         <DailyJobsCard />
       </div>
