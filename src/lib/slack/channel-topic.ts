@@ -163,6 +163,8 @@ export async function syncSlackChannelTopicSummary(record: CaseRecord) {
       name: record.paralegal.name,
       slackDisplayName: record.paralegal.slackDisplayName,
     }),
+    attorneySlackUserId: record.attorney.slackUserId,
+    paralegalSlackUserId: record.paralegal.slackUserId,
     stageLabel,
     primaryLanguage: record.shared.preferredLanguage,
     secondaryLanguage: record.shared.secondaryLanguage,
@@ -271,11 +273,18 @@ export async function syncSlackChannelTopicForStage(input: {
   // If already structured, rebuild stage segment via full replace of stage label in pipe format.
   const { parseCaseTopic, buildCaseTopic: build } = await import("@/lib/slack/topic-format");
   const parsed = parseCaseTopic(currentTopic);
-  if (parsed.format === "structured" && parsed.attorneyHandle && parsed.paralegalHandle && parsed.primaryLanguage) {
+  if (
+    parsed.format === "structured" &&
+    parsed.primaryLanguage &&
+    (parsed.attorneySlackUserId || parsed.attorneyHandle) &&
+    (parsed.paralegalSlackUserId || parsed.paralegalHandle)
+  ) {
     const nextTopic = build({
       usesEve: parsed.usesEve,
-      attorneyHandle: parsed.attorneyHandle,
-      paralegalHandle: parsed.paralegalHandle,
+      attorneyHandle: parsed.attorneyHandle ?? "Attorney",
+      paralegalHandle: parsed.paralegalHandle ?? "Paralegal",
+      attorneySlackUserId: parsed.attorneySlackUserId,
+      paralegalSlackUserId: parsed.paralegalSlackUserId,
       stageLabel,
       primaryLanguage: parsed.primaryLanguage,
       secondaryLanguage: parsed.secondaryLanguage,

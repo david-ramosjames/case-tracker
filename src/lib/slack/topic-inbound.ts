@@ -18,6 +18,16 @@ function normalizeHandle(value: string) {
   return value.trim().toLowerCase().replace(/[._-]+/g, "");
 }
 
+function matchContactBySlackUserId(contacts: ContactMatchRow[], slackUserId: string | null, role: "attorney" | "paralegal") {
+  if (!slackUserId) return null;
+  const target = slackUserId.trim().toUpperCase();
+  return (
+    contacts.find(
+      (contact) => contact.role === role && contact.slack_user_id?.trim().toUpperCase() === target,
+    ) ?? null
+  );
+}
+
 function matchContactByHandle(contacts: ContactMatchRow[], handle: string, role: "attorney" | "paralegal") {
   const target = normalizeHandle(handle);
   if (!target) return null;
@@ -38,6 +48,18 @@ function matchContactByHandle(contacts: ContactMatchRow[], handle: string, role:
     }
   }
   return null;
+}
+
+function resolveTopicContact(
+  contacts: ContactMatchRow[],
+  role: "attorney" | "paralegal",
+  slackUserId: string | null,
+  handle: string | null,
+) {
+  return (
+    matchContactBySlackUserId(contacts, slackUserId, role) ??
+    (handle ? matchContactByHandle(contacts, handle, role) : null)
+  );
 }
 
 async function findCaseIdBySlackChannel(channelId: string) {
@@ -112,19 +134,29 @@ export async function applySlackChannelTopicChange(input: {
     .in("role", ["attorney", "paralegal"]);
 
   const contactRows = (contacts ?? []) as ContactMatchRow[];
-  const attorney = parsed.attorneyHandle
-    ? matchContactByHandle(contactRows, parsed.attorneyHandle, "attorney")
-    : null;
-  const paralegal = parsed.paralegalHandle
-    ? matchContactByHandle(contactRows, parsed.paralegalHandle, "paralegal")
-    : null;
+  const attorney = resolveTopicContact(
+    contactRows,
+    "attorney",
+    parsed.attorneySlackUserId,
+    parsed.attorneyHandle,
+  );
+  const paralegal = resolveTopicContact(
+    contactRows,
+    "paralegal",
+    parsed.paralegalSlackUserId,
+    parsed.paralegalHandle,
+  );
 
   const warnings: string[] = [];
-  if (parsed.attorneyHandle && !attorney) {
-    warnings.push(`Could not match attorney @${parsed.attorneyHandle}`);
+  if ((parsed.attorneySlackUserId || parsed.attorneyHandle) && !attorney) {
+    warnings.push(
+      `Could not match attorney ${parsed.attorneySlackUserId ? `<@${parsed.attorneySlackUserId}>` : `@${parsed.attorneyHandle}`}`,
+    );
   }
-  if (parsed.paralegalHandle && !paralegal) {
-    warnings.push(`Could not match paralegal @${parsed.paralegalHandle}`);
+  if ((parsed.paralegalSlackUserId || parsed.paralegalHandle) && !paralegal) {
+    warnings.push(
+      `Could not match paralegal ${parsed.paralegalSlackUserId ? `<@${parsed.paralegalSlackUserId}>` : `@${parsed.paralegalHandle}`}`,
+    );
   }
 
   const assignmentChanged =
@@ -174,7 +206,7 @@ export async function applySlackChannelTopicChange(input: {
       text: [
         "Case Tracker could not fully apply this topic change:",
         ...warnings.map((line) => `• ${line}`),
-        "Use the structured format: `Attorney @Name | Paralegal @Name | Status | :us: (Primary)`",
+        "Use the structured format: `Attorney <@U…> | Paralegal <@U…> | Status | :us: (Primary)`",
       ].join("\n"),
     });
   } else if (assignmentChanged || nextStage) {
