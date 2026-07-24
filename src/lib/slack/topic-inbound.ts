@@ -135,7 +135,12 @@ export async function applySlackChannelTopicChange(input: {
     });
     await replyInChannel(
       input.channelId,
-      ["Slack topic is not formatted correctly for Case Tracker.", "", TOPIC_FORMAT_HELP].join("\n"),
+      [
+        "Slack topic is not formatted correctly for Case Tracker.",
+        "*Nothing was updated* — fix the topic and try again.",
+        "",
+        TOPIC_FORMAT_HELP,
+      ].join("\n"),
     );
     return { applied: false as const, reason: "unstructured" as const, caseId };
   }
