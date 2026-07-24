@@ -47,8 +47,8 @@ export type ParsedCaseTopic = {
 /** `@Laura` or `<@U123>` / `<@U123|Laura>` */
 const TOPIC_PERSON_TOKEN = String.raw`(?:<@(U[A-Z0-9]+)(?:\|([^>]+))?>|@([A-Za-z][\w.-]*))`;
 
-/** `:us:` / `:flag-mx:` or rendered regional-indicator flags. */
-const LANGUAGE_TOKEN = String.raw`(?::us:|:flag-us:|:flag-mx:|\u{1F1FA}\u{1F1F8}|\u{1F1F2}\u{1F1FD})`;
+/** `:us:` / `:flag-mx:` or rendered regional-indicator flags — must be capturing for parse groups. */
+const LANGUAGE_TOKEN = String.raw`(:us:|:flag-us:|:flag-mx:|\u{1F1FA}\u{1F1F8}|\u{1F1F2}\u{1F1FD})`;
 
 const STRUCTURED_TOPIC_BODY_PATTERN = new RegExp(
   String.raw`^Attorney\s+${TOPIC_PERSON_TOKEN}\s*\|\s*Paralegal\s+${TOPIC_PERSON_TOKEN}\s*\|\s*([^|]+?)\s*\|\s*${LANGUAGE_TOKEN}\s*\(Primary\)(?:\s*${LANGUAGE_TOKEN})?\s*$`,
