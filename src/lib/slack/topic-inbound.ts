@@ -162,6 +162,10 @@ export async function applySlackChannelTopicChange(input: {
   const assignmentChanged =
     Boolean(attorney && attorney.id !== record.shared.attorneyId) ||
     Boolean(paralegal && paralegal.id !== record.shared.paralegalId);
+  const usesEveChanged = parsed.usesEve !== record.shared.usesEve;
+  const languageChanged =
+    (parsed.primaryLanguage != null && parsed.primaryLanguage !== record.shared.preferredLanguage) ||
+    parsed.secondaryLanguage !== record.shared.secondaryLanguage;
 
   let reassignResult: Awaited<ReturnType<typeof reassignCaseTeam>> | null = null;
   if (attorney && paralegal && assignmentChanged) {
@@ -171,14 +175,13 @@ export async function applySlackChannelTopicChange(input: {
       usesEve: parsed.usesEve,
       actorName: "Slack topic",
     });
-  } else if (parsed.usesEve !== record.shared.usesEve || parsed.primaryLanguage || parsed.secondaryLanguage !== undefined) {
+  }
+
+  if (usesEveChanged || languageChanged || reassignResult) {
     await updateSharedCaseFields(caseId, {
       usesEve: parsed.usesEve,
       preferredLanguage: parsed.primaryLanguage ?? undefined,
-      secondaryLanguage:
-        parsed.secondaryLanguage === undefined
-          ? undefined
-          : parsed.secondaryLanguage,
+      secondaryLanguage: parsed.secondaryLanguage,
     });
   }
 
@@ -191,15 +194,6 @@ export async function applySlackChannelTopicChange(input: {
     );
   }
 
-  // Language updates when assignment already ran (reassign keeps existing langs unless we patch).
-  if (reassignResult && (parsed.primaryLanguage || parsed.secondaryLanguage !== null)) {
-    await updateSharedCaseFields(caseId, {
-      preferredLanguage: parsed.primaryLanguage ?? undefined,
-      secondaryLanguage: parsed.secondaryLanguage,
-      usesEve: parsed.usesEve,
-    });
-  }
-
   if (warnings.length > 0) {
     await postSlackMessage({
       channel: input.channelId,
@@ -209,12 +203,16 @@ export async function applySlackChannelTopicChange(input: {
         "Use the structured format: `Attorney <@U…> | Paralegal <@U…> | Status | :us: (Primary)`",
       ].join("\n"),
     });
-  } else if (assignmentChanged || nextStage) {
+  } else if (assignmentChanged || nextStage || usesEveChanged || languageChanged) {
     const parts = [
       assignmentChanged
         ? `Reassigned to Attorney ${attorney?.name ?? "?"} / Paralegal ${paralegal?.name ?? "?"}`
         : null,
       nextStage && nextStage !== record.tracker.caseStage ? `Stage → ${nextStage}` : null,
+      usesEveChanged ? `Eve → ${parsed.usesEve ? "Yes" : "No"}` : null,
+      languageChanged
+        ? `Language → ${parsed.primaryLanguage ?? "?"}${parsed.secondaryLanguage ? ` / ${parsed.secondaryLanguage}` : ""}`
+        : null,
       reassignResult?.calendarReconcile && !reassignResult.calendarReconcile.ok
         ? "_Calendar invite reconcile was requested but DocketFlow did not confirm — check DocketFlow env / endpoint._"
         : null,
@@ -231,6 +229,7 @@ export async function applySlackChannelTopicChange(input: {
     applied: true as const,
     caseId,
     assignmentChanged,
+    usesEveChanged,
     stage: nextStage,
     warnings,
     reassignResult,

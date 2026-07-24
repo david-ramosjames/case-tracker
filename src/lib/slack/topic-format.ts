@@ -1,7 +1,18 @@
 import { STAGE_TOPIC_LABELS } from "@/lib/slack/enum-replies";
 import { type CaseStage } from "@/lib/types";
 
+/** Canonical shortcode we write into topics. */
 export const EVE_TOPIC_EMOJI = ":eve-logo:";
+
+/** Aliases Slack may store/display for the Eve mark at the start of a topic. */
+export const EVE_TOPIC_EMOJI_ALIASES = [
+  ":eve-logo:",
+  ":eve:",
+  ":eve_logo:",
+  ":eve-ai:",
+  ":eve_ai:",
+] as const;
+
 export const LANGUAGE_TOPIC_EMOJI = {
   en: ":us:",
   es: ":flag-mx:",
@@ -36,9 +47,12 @@ export type ParsedCaseTopic = {
 /** `@Laura` or `<@U123>` / `<@U123|Laura>` */
 const TOPIC_PERSON_TOKEN = String.raw`(?:<@(U[A-Z0-9]+)(?:\|([^>]+))?>|@([A-Za-z][\w.-]*))`;
 
-const STRUCTURED_TOPIC_PATTERN = new RegExp(
-  String.raw`^(?::eve-logo:\s*)?Attorney\s+${TOPIC_PERSON_TOKEN}\s*\|\s*Paralegal\s+${TOPIC_PERSON_TOKEN}\s*\|\s*([^|]+?)\s*\|\s*(:us:|:flag-mx:)\s*\(Primary\)(?:\s*(:us:|:flag-mx:))?\s*$`,
-  "i",
+/** `:us:` / `:flag-mx:` or rendered regional-indicator flags. */
+const LANGUAGE_TOKEN = String.raw`(?::us:|:flag-us:|:flag-mx:|\u{1F1FA}\u{1F1F8}|\u{1F1F2}\u{1F1FD})`;
+
+const STRUCTURED_TOPIC_BODY_PATTERN = new RegExp(
+  String.raw`^Attorney\s+${TOPIC_PERSON_TOKEN}\s*\|\s*Paralegal\s+${TOPIC_PERSON_TOKEN}\s*\|\s*([^|]+?)\s*\|\s*${LANGUAGE_TOKEN}\s*\(Primary\)(?:\s*${LANGUAGE_TOKEN})?\s*$`,
+  "iu",
 );
 
 const LEGACY_TOPIC_PATTERN = new RegExp(
@@ -73,9 +87,11 @@ function personFromMatch(userIdGroup: string | undefined, labelGroup: string | u
 }
 
 export function languageCodeFromTopicEmoji(emoji: string | null | undefined): TopicLanguageCode | null {
-  const trimmed = emoji?.trim().toLowerCase();
-  if (trimmed === ":us:") return "en";
-  if (trimmed === ":flag-mx:") return "es";
+  const trimmed = emoji?.trim() ?? "";
+  if (!trimmed) return null;
+  const lower = trimmed.toLowerCase();
+  if (lower === ":us:" || lower === ":flag-us:" || trimmed === "🇺🇸") return "en";
+  if (lower === ":flag-mx:" || trimmed === "🇲🇽") return "es";
   return null;
 }
 
@@ -102,6 +118,35 @@ export function caseStageFromTopicLabel(label: string | null | undefined): CaseS
   if (normalized === "referred") return "Referred";
   if (normalized === "terminated") return "Terminated";
   return null;
+}
+
+/**
+ * Strip leading Eve / decorative emoji markers Slack may store as shortcodes or unicode.
+ * Leading custom emoji / pictographs before `Attorney` count as Eve for this topic format.
+ */
+export function extractLeadingEveMarker(topic: string): { usesEve: boolean; remainder: string } {
+  let remainder = topic.trim();
+  let usesEve = false;
+
+  while (remainder) {
+    const shortcode = remainder.match(/^:([a-z0-9_+-]+):\s*/i);
+    if (shortcode) {
+      usesEve = true;
+      remainder = remainder.slice(shortcode[0].length);
+      continue;
+    }
+
+    const pictograph = remainder.match(/^(?:\p{Extended_Pictographic}|\uFE0F|\u200D)+\s*/u);
+    if (pictograph) {
+      usesEve = true;
+      remainder = remainder.slice(pictograph[0].length);
+      continue;
+    }
+
+    break;
+  }
+
+  return { usesEve, remainder: remainder.trim() };
 }
 
 /** Build the canonical Slack channel topic summary. */
@@ -137,12 +182,14 @@ export function parseCaseTopic(topic: string | null | undefined): ParsedCaseTopi
   const trimmed = topic?.trim() ?? "";
   if (!trimmed) return empty;
 
-  const structured = trimmed.match(STRUCTURED_TOPIC_PATTERN);
+  const { usesEve, remainder } = extractLeadingEveMarker(trimmed);
+
+  const structured = remainder.match(STRUCTURED_TOPIC_BODY_PATTERN);
   if (structured) {
     const attorney = personFromMatch(structured[1], structured[2], structured[3]);
     const paralegal = personFromMatch(structured[4], structured[5], structured[6]);
     return {
-      usesEve: trimmed.toLowerCase().startsWith(EVE_TOPIC_EMOJI),
+      usesEve,
       attorneyHandle: attorney.handle,
       paralegalHandle: paralegal.handle,
       attorneySlackUserId: attorney.slackUserId,
@@ -154,12 +201,12 @@ export function parseCaseTopic(topic: string | null | undefined): ParsedCaseTopi
     };
   }
 
-  const legacy = trimmed.match(LEGACY_TOPIC_PATTERN);
+  const legacy = remainder.match(LEGACY_TOPIC_PATTERN);
   if (legacy) {
     const attorney = personFromMatch(legacy[1], legacy[2], legacy[3]);
     const paralegal = personFromMatch(legacy[4], legacy[5], legacy[6]);
     return {
-      usesEve: false,
+      usesEve,
       attorneyHandle: attorney.handle,
       paralegalHandle: paralegal.handle,
       attorneySlackUserId: attorney.slackUserId,
@@ -173,7 +220,7 @@ export function parseCaseTopic(topic: string | null | undefined): ParsedCaseTopi
 
   return {
     ...empty,
-    usesEve: trimmed.toLowerCase().includes(EVE_TOPIC_EMOJI),
+    usesEve: usesEve || EVE_TOPIC_EMOJI_ALIASES.some((alias) => trimmed.toLowerCase().includes(alias)),
   };
 }
 
