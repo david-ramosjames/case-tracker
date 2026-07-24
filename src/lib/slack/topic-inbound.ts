@@ -2,8 +2,9 @@ import { cleanCaseNumber } from "@/lib/csv/parse";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCaseById, updateSharedCaseFields, updateTrackerEntry } from "@/lib/supabase/services";
 import { reassignCaseTeam } from "@/lib/slack/case-reassign";
-import { getSlackBotUserId, postSlackMessage } from "@/lib/slack/client";
+import { postSlackMessage, getSlackBotUserId } from "@/lib/slack/client";
 import { wasTopicWrittenByUs } from "@/lib/slack/channel-topic";
+import { STAGE_TOPIC_LABELS } from "@/lib/slack/enum-replies";
 import { caseStageFromTopicLabel, parseCaseTopic } from "@/lib/slack/topic-format";
 
 type ContactMatchRow = {
@@ -13,6 +14,14 @@ type ContactMatchRow = {
   slack_user_id: string | null;
   slack_display_name: string | null;
 };
+
+const TOPIC_FORMAT_HELP = [
+  "Expected Slack topic format:",
+  "`[:eve-logo:] Attorney <@U…> | Paralegal <@U…> | <Status> | :us: or :flag-mx: (Primary) [optional second flag]`",
+  "",
+  `Valid statuses: ${Object.values(STAGE_TOPIC_LABELS).join(" · ")}`,
+  "Primary language must be marked `(Primary)` after the flag.",
+].join("\n");
 
 function normalizeHandle(value: string) {
   return value.trim().toLowerCase().replace(/[._-]+/g, "");
@@ -87,9 +96,13 @@ async function findCaseIdBySlackChannel(channelId: string) {
   return caseRow?.id ? String(caseRow.id) : null;
 }
 
+async function replyInChannel(channelId: string, text: string) {
+  await postSlackMessage({ channel: channelId, text }).catch(() => undefined);
+}
+
 /**
  * Apply a manually edited Slack channel topic back to Case Tracker / DocketFlow.
- * Expects the structured topic format; unknown formats are ignored.
+ * Posts a correction message when the topic is malformed or the stage is invalid.
  */
 export async function applySlackChannelTopicChange(input: {
   channelId: string;
@@ -108,18 +121,23 @@ export async function applySlackChannelTopicChange(input: {
     return { applied: false as const, reason: "bot_echo" as const };
   }
 
-  const parsed = parseCaseTopic(topic);
-  if (parsed.format !== "structured") {
-    console.warn("Slack topic change ignored: not structured format", {
-      channelId: input.channelId,
-      topic: topic.slice(0, 200),
-    });
-    return { applied: false as const, reason: "unstructured" as const };
-  }
-
   const caseId = await findCaseIdBySlackChannel(input.channelId);
   if (!caseId) {
     return { applied: false as const, reason: "no_case" as const };
+  }
+
+  const parsed = parseCaseTopic(topic);
+  if (parsed.format !== "structured") {
+    console.warn("Slack topic change rejected: not structured format", {
+      channelId: input.channelId,
+      topic: topic.slice(0, 200),
+      format: parsed.format,
+    });
+    await replyInChannel(
+      input.channelId,
+      ["Slack topic is not formatted correctly for Case Tracker.", "", TOPIC_FORMAT_HELP].join("\n"),
+    );
+    return { applied: false as const, reason: "unstructured" as const, caseId };
   }
 
   const record = await getCaseById(caseId);
@@ -159,6 +177,18 @@ export async function applySlackChannelTopicChange(input: {
     );
   }
 
+  const nextStage = caseStageFromTopicLabel(parsed.stageLabel);
+  const stageLabel = parsed.stageLabel?.trim() || "";
+  const invalidStage = Boolean(stageLabel) && !nextStage;
+  if (invalidStage) {
+    warnings.push(
+      `Unrecognized stage \`${stageLabel}\`. Use one of: ${Object.values(STAGE_TOPIC_LABELS).join(" · ")}`,
+    );
+  }
+  if (!parsed.primaryLanguage) {
+    warnings.push("Primary language flag is missing or invalid. Use `:us:` or `:flag-mx:` before `(Primary)`.");
+  }
+
   const assignmentChanged =
     Boolean(attorney && attorney.id !== record.shared.attorneyId) ||
     Boolean(paralegal && paralegal.id !== record.shared.paralegalId);
@@ -166,6 +196,7 @@ export async function applySlackChannelTopicChange(input: {
   const languageChanged =
     (parsed.primaryLanguage != null && parsed.primaryLanguage !== record.shared.preferredLanguage) ||
     parsed.secondaryLanguage !== record.shared.secondaryLanguage;
+  const stageChanged = Boolean(nextStage && nextStage !== record.tracker.caseStage);
 
   let reassignResult: Awaited<ReturnType<typeof reassignCaseTeam>> | null = null;
   if (attorney && paralegal && assignmentChanged) {
@@ -185,8 +216,7 @@ export async function applySlackChannelTopicChange(input: {
     });
   }
 
-  const nextStage = caseStageFromTopicLabel(parsed.stageLabel);
-  if (nextStage && nextStage !== record.tracker.caseStage) {
+  if (stageChanged && nextStage) {
     await updateTrackerEntry(
       caseId,
       { caseStage: nextStage },
@@ -194,39 +224,40 @@ export async function applySlackChannelTopicChange(input: {
     );
   }
 
-  if (warnings.length > 0) {
-    await postSlackMessage({
-      channel: input.channelId,
-      text: [
-        "Case Tracker could not fully apply this topic change:",
-        ...warnings.map((line) => `• ${line}`),
-        "Use the structured format: `Attorney <@U…> | Paralegal <@U…> | Status | :us: (Primary)`",
-      ].join("\n"),
-    });
-  } else if (assignmentChanged || nextStage || usesEveChanged || languageChanged) {
-    const parts = [
-      assignmentChanged
-        ? `Reassigned to Attorney ${attorney?.name ?? "?"} / Paralegal ${paralegal?.name ?? "?"}`
-        : null,
-      nextStage && nextStage !== record.tracker.caseStage ? `Stage → ${nextStage}` : null,
-      usesEveChanged ? `Eve → ${parsed.usesEve ? "Yes" : "No"}` : null,
-      languageChanged
-        ? `Language → ${parsed.primaryLanguage ?? "?"}${parsed.secondaryLanguage ? ` / ${parsed.secondaryLanguage}` : ""}`
-        : null,
-      reassignResult?.calendarReconcile && !reassignResult.calendarReconcile.ok
-        ? "_Calendar invite reconcile was requested but DocketFlow did not confirm — check DocketFlow env / endpoint._"
-        : null,
-    ].filter(Boolean);
-    if (parts.length > 0) {
-      await postSlackMessage({
-        channel: input.channelId,
-        text: `Case Tracker updated from channel topic:\n${parts.map((p) => `• ${p}`).join("\n")}`,
-      });
+  const appliedParts = [
+    assignmentChanged
+      ? `Reassigned to Attorney ${attorney?.name ?? "?"} / Paralegal ${paralegal?.name ?? "?"}`
+      : null,
+    stageChanged ? `Stage → ${nextStage}` : null,
+    usesEveChanged ? `Eve → ${parsed.usesEve ? "Yes" : "No"}` : null,
+    languageChanged
+      ? `Language → ${parsed.primaryLanguage ?? "?"}${parsed.secondaryLanguage ? ` / ${parsed.secondaryLanguage}` : ""}`
+      : null,
+    reassignResult?.calendarReconcile && !reassignResult.calendarReconcile.ok
+      ? "_Calendar invite reconcile was requested but DocketFlow did not confirm — check DocketFlow env / endpoint._"
+      : null,
+  ].filter(Boolean) as string[];
+
+  if (warnings.length > 0 || appliedParts.length > 0) {
+    const lines: string[] = [];
+    if (appliedParts.length > 0) {
+      lines.push("Case Tracker updated from channel topic:");
+      lines.push(...appliedParts.map((line) => `• ${line}`));
     }
+    if (warnings.length > 0) {
+      if (lines.length > 0) lines.push("");
+      lines.push("Could not fully apply this topic change:");
+      lines.push(...warnings.map((line) => `• ${line}`));
+      if (invalidStage || !parsed.primaryLanguage) {
+        lines.push("");
+        lines.push(TOPIC_FORMAT_HELP);
+      }
+    }
+    await replyInChannel(input.channelId, lines.join("\n"));
   }
 
   return {
-    applied: true as const,
+    applied: appliedParts.length > 0 || warnings.length === 0,
     caseId,
     assignmentChanged,
     usesEveChanged,
@@ -234,6 +265,7 @@ export async function applySlackChannelTopicChange(input: {
     primaryLanguage: parsed.primaryLanguage,
     secondaryLanguage: parsed.secondaryLanguage,
     stage: nextStage,
+    invalidStage,
     warnings,
     reassignResult,
   };
