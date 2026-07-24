@@ -445,6 +445,8 @@ export function CaseDetailView({
         caseType: shared.caseType,
         dateOfIncident: shared.dateOfIncident,
         preferredLanguage: shared.preferredLanguage,
+        secondaryLanguage: shared.secondaryLanguage,
+        usesEve: shared.usesEve,
       },
       tracker: {
         ...changeInput,
@@ -724,9 +726,19 @@ export function CaseDetailView({
                     No Slack channel mapped — import Client Contact Status in Settings.
                   </p>
                 )}
-                <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-navy-950">
-                  <span className="text-muted-foreground">Preferred language</span>
-                  <PreferredLanguageLabel language={shared.preferredLanguage} />
+                <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-navy-950">
+                  <span className="inline-flex flex-wrap items-center gap-2">
+                    <span className="text-muted-foreground">Primary language</span>
+                    <PreferredLanguageLabel language={shared.preferredLanguage} />
+                  </span>
+                  <span className="inline-flex flex-wrap items-center gap-2">
+                    <span className="text-muted-foreground">Secondary language</span>
+                    {shared.secondaryLanguage ? (
+                      <PreferredLanguageLabel language={shared.secondaryLanguage} />
+                    ) : (
+                      <span className="font-medium text-muted-foreground">None</span>
+                    )}
+                  </span>
                 </p>
                 <div className="mt-2 text-sm text-navy-950">
                   <div className="text-muted-foreground">Quo contacts</div>
@@ -1013,7 +1025,7 @@ export function CaseDetailView({
                         </div>
                       )}
                     </Field>
-                    <Field label="Preferred language">
+                    <Field label="Primary language">
                       <Select
                         value={shared.preferredLanguage}
                         onChange={(event) =>
@@ -1022,6 +1034,28 @@ export function CaseDetailView({
                       >
                         <option value="en">English</option>
                         <option value="es">Spanish</option>
+                      </Select>
+                    </Field>
+                    <Field label="Secondary language">
+                      <Select
+                        value={shared.secondaryLanguage ?? ""}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          updateShared("secondaryLanguage", value === "" ? null : (value as "en" | "es"));
+                        }}
+                      >
+                        <option value="">None</option>
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
+                      </Select>
+                    </Field>
+                    <Field label="Uses Eve">
+                      <Select
+                        value={shared.usesEve ? "yes" : "no"}
+                        onChange={(event) => updateShared("usesEve", event.target.value === "yes")}
+                      >
+                        <option value="no">No</option>
+                        <option value="yes">Yes</option>
                       </Select>
                     </Field>
                     <Field label="Stage">

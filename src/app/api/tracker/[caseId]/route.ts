@@ -10,7 +10,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ca
 
     const { caseId } = await params;
     const input = (await request.json()) as {
-      shared?: { status?: CaseStatus; caseType?: string; dateSigned?: string; dateOfIncident?: string | null; preferredLanguage?: "en" | "es" };
+      shared?: {
+        status?: CaseStatus;
+        caseType?: string;
+        dateSigned?: string;
+        dateOfIncident?: string | null;
+        preferredLanguage?: "en" | "es";
+        secondaryLanguage?: "en" | "es" | null;
+        usesEve?: boolean;
+      };
       tracker?: TrackerUpdateInput & {
         result?: SettlementResult;
         manualDisbursements?: ManualDisbursementInput[];

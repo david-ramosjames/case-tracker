@@ -33,7 +33,25 @@ Apply `supabase/sql/006_slack_integration.sql` in the Supabase SQL editor.
 4. Subscribe to bot events:
    - `message.channels` (and `message.groups` if private case channels)
    - `reaction_added` (stage confirmation ✅)
+   - `channel_topic` / `group_topic` (topic → Case Tracker reassignment / stage / language)
 5. Reinstall the app if prompted.
+
+### Case channel topic summary
+
+Canonical topic format (written by Case Tracker; editable in Slack):
+
+```text
+:eve-logo: Attorney @Ryan | Paralegal @Aivet | Litigation | :us: (Primary)  :flag-mx:
+```
+
+- `:eve-logo:` only when `cases.uses_eve` is true
+- Handles come from `contacts.slack_display_name` (seed via Settings → Seed Slack user IDs)
+- Status uses tracker stage topic labels (Treating, Demand, Litigation, …)
+- Language flags: `:us:` English, `:flag-mx:` Spanish
+
+**Manual first:** Settings → Slack → enter a case # → **Update Slack topic**. Full auto-rewrite on field changes is off unless `SLACK_TOPIC_AUTO_SYNC=true`.
+
+When someone edits the topic in Slack, Case Tracker updates `cases.assigned_contact_ids` / `responsible_attorney_contact_id`, tracker attorney/paralegal snapshots, stage, languages, and Eve — then calls DocketFlow `POST /api/cases/[caseId]/reassign-calendar` so Google Calendar invites stay in sync (requires `DOCKETFLOW_INTERNAL_API_SECRET` + DocketFlow endpoint).
 
 If verification fails with “didn't respond with the challenge”, the app was likely redirecting Slack to `/login` — ensure the latest deploy includes the public `/api/slack/*` middleware exception.
 
@@ -201,5 +219,6 @@ curl "https://YOUR_DOMAIN/api/cron/slack-reminders?force=true&syncSheet=false" \
 | ✅ / thread reply on stage prompt | Tracker stage updated |
 | Sources & Litigation saved | Confirmation message |
 | Comment / Manager note / Attorney update posted | Full note text |
+| Channel topic edited (structured format) | Reassigns attorney/paralegal via DocketFlow columns + calendar reconcile callback; updates stage / language / Eve |
 
-Client, attorney, and paralegal are never changed from Slack.
+Attorney and paralegal **can** be changed from a structured Slack channel topic (see above). Client name is never changed from Slack.

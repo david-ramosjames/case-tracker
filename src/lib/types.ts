@@ -65,6 +65,10 @@ export type AppUser = {
   role: UserRole;
   avatarInitials: string;
   active: boolean;
+  /** Slack user id (U…) when linked on contacts. */
+  slackUserId?: string | null;
+  /** Handle used in Slack topics (@Ryan). */
+  slackDisplayName?: string | null;
 };
 
 export type SharedCase = {
@@ -78,6 +82,9 @@ export type SharedCase = {
   dateSigned: string;
   dateOfIncident: string | null;
   preferredLanguage: "en" | "es";
+  secondaryLanguage: "en" | "es" | null;
+  /** When true, Slack topic includes :eve-logo:. */
+  usesEve: boolean;
   createdAt: string;
   updatedAt: string;
 };

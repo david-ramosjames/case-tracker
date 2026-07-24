@@ -34,7 +34,9 @@ import {
   deriveResultQuarterFromDisburseDate,
   normalizeCaseType,
   normalizePreferredLanguage,
+  normalizeSecondaryLanguage,
   toDocketFlowPreferredLanguage,
+  toDocketFlowSecondaryLanguage,
 } from "@/lib/case-options";
 import {
   FIRM_OUTPERFORM_GOAL_ATTORNEY_ID,
@@ -86,6 +88,8 @@ type DocketFlowCaseRow = {
   case_type: string | null;
   date_of_incident: string | null;
   preferred_language: string | null;
+  secondary_language: string | null;
+  uses_eve?: boolean | null;
   assigned_contact_ids: string[] | null;
   created_at: string | number | null;
   updated_at: string | number | null;
@@ -96,6 +100,8 @@ type ContactRow = {
   name: string | null;
   email: string | null;
   role: string | null;
+  slack_user_id?: string | null;
+  slack_display_name?: string | null;
 };
 
 type DatabaseValue = string | number | boolean | string[] | Record<string, unknown> | null;
@@ -148,12 +154,12 @@ export async function getCases(): Promise<CaseRecord[]> {
   ] = await Promise.all([
     sharedClient
       .from("cases")
-      .select("id,case_number,client_name,name,status,case_type,date_of_incident,preferred_language,assigned_contact_ids,created_at,updated_at")
+      .select("id,case_number,client_name,name,status,case_type,date_of_incident,preferred_language,secondary_language,uses_eve,assigned_contact_ids,created_at,updated_at")
       .order("created_at", { ascending: false }),
     trackerClient.from("case_tracker_entries").select("*").order("created_at", { ascending: false }),
     trackerClient.from("case_tracker_results").select("*"),
     trackerClient.from("case_tracker_disbursements").select("*").order("created_at", { ascending: true }),
-    sharedClient.from("contacts").select("id,name,email,role"),
+    sharedClient.from("contacts").select("id,name,email,role,slack_user_id,slack_display_name"),
     trackerClient.from("case_tracker_stage_suggestions").select("*"),
   ]);
 
@@ -238,7 +244,7 @@ export async function deleteTrackerCase(
 
 export async function getUsers(): Promise<AppUser[]> {
   const client = await createSharedDataClient();
-  const { data } = await client.from("contacts").select("id,name,email,role").order("name");
+  const { data } = await client.from("contacts").select("id,name,email,role,slack_user_id,slack_display_name").order("name");
   return ((data ?? []) as ContactRow[])
     .filter((row) => row.role === "attorney" || row.role === "paralegal" || row.role === "manager")
     .map(contactToUser);
@@ -1099,6 +1105,8 @@ export async function updateSharedCaseFields(
     dateSigned?: string;
     dateOfIncident?: string | null;
     preferredLanguage?: "en" | "es";
+    secondaryLanguage?: "en" | "es" | null;
+    usesEve?: boolean;
   },
   options?: { explicitStatus?: CaseStatus },
 ) {
@@ -1110,6 +1118,8 @@ export async function updateSharedCaseFields(
     case_type?: string | null;
     date_of_incident?: string | null;
     preferred_language?: string;
+    secondary_language?: string | null;
+    uses_eve?: boolean;
   } = {};
 
   const record = await getCaseById(caseId);
@@ -1140,6 +1150,17 @@ export async function updateSharedCaseFields(
   if (input.preferredLanguage !== undefined && linkedCaseId) {
     payload.preferred_language = toDocketFlowPreferredLanguage(input.preferredLanguage);
   }
+  if (input.secondaryLanguage !== undefined && linkedCaseId) {
+    payload.secondary_language = toDocketFlowSecondaryLanguage(input.secondaryLanguage);
+  }
+  if (input.usesEve !== undefined && linkedCaseId) {
+    payload.uses_eve = Boolean(input.usesEve);
+  }
+
+  const shouldSyncTopic =
+    input.preferredLanguage !== undefined ||
+    input.secondaryLanguage !== undefined ||
+    input.usesEve !== undefined;
 
   if (Object.keys(payload).length > 0 && linkedCaseId) {
     const { error } = await sharedClient.from("cases").update(payload).eq("id", linkedCaseId);
@@ -1164,6 +1185,18 @@ export async function updateSharedCaseFields(
       .update({ date_signed_override: toDateOnly(input.dateSigned) })
       .or(`case_id.eq.${caseId},id.eq.${caseId}`);
     if (error) throw error;
+  }
+
+  if (shouldSyncTopic && linkedCaseId && (await import("@/lib/slack/config")).isSlackTopicAutoSyncEnabled()) {
+    try {
+      const refreshed = await getCaseById(caseId);
+      if (refreshed) {
+        const { syncSlackChannelTopicSummary } = await import("@/lib/slack/channel-topic");
+        await syncSlackChannelTopicSummary(refreshed);
+      }
+    } catch (error) {
+      console.error("Slack topic sync after shared field update failed", error);
+    }
   }
 }
 
@@ -3140,6 +3173,8 @@ function rowToCaseRecord(
         caseRow?.date_of_incident ?? toStringOrNull(trackerRow.date_of_incident_override),
       ),
       preferredLanguage: normalizePreferredLanguage(caseRow?.preferred_language),
+      secondaryLanguage: normalizeSecondaryLanguage(caseRow?.secondary_language),
+      usesEve: Boolean(caseRow?.uses_eve),
       createdAt: normalizeDate(caseRow?.created_at),
       updatedAt: normalizeDate(caseRow?.updated_at),
     },
@@ -3531,11 +3566,13 @@ function contactToUser(row: ContactRow): AppUser {
     role: row.role === "paralegal" ? "paralegal" : row.role === "manager" ? "manager" : "attorney",
     avatarInitials: initials(row.name ?? "Unknown"),
     active: true,
+    slackUserId: row.slack_user_id ?? null,
+    slackDisplayName: row.slack_display_name ?? null,
   };
 }
 
 function makeTemporaryContact(id: string, name: string, role: string): ContactRow {
-  return { id, name, email: null, role };
+  return { id, name, email: null, role, slack_user_id: null, slack_display_name: null };
 }
 
 function groupBy(rows: SuggestionRow[], key: string) {

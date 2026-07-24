@@ -128,6 +128,8 @@ export async function postStageConfirmationForSuggestion(
     paralegalEmail: record?.paralegal.email,
     attorneyName: record?.attorney.name,
     paralegalName: record?.paralegal.name,
+    attorneySlackUserId: record?.attorney.slackUserId,
+    paralegalSlackUserId: record?.paralegal.slackUserId,
   });
   const text = buildStageConfirmationMessage({
     suggestedStage: item.suggestedStage,

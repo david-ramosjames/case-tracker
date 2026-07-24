@@ -14,6 +14,7 @@ import {
   handleStageConfirmationReply,
   handleStageUpdateNotificationReply,
 } from "@/lib/slack/stage-confirmation";
+import { applySlackChannelTopicChange } from "@/lib/slack/topic-inbound";
 import { formatSlackThreadAppliedMessage, formatSlackThreadValidationErrors, parseSlackThreadUpdate } from "@/lib/slack/thread-update";
 import { applySlackThreadUpdate } from "@/lib/supabase/services";
 
@@ -30,6 +31,7 @@ type SlackEventPayload = {
     ts?: string;
     bot_id?: string;
     reaction?: string;
+    topic?: string;
     item?: {
       type?: string;
       channel?: string;
@@ -94,6 +96,20 @@ function isReactionAdded(event: SlackEventPayload["event"]): event is SlackReact
   );
 }
 
+type SlackTopicEvent = NonNullable<SlackEventPayload["event"]> & {
+  type: "channel_topic" | "group_topic";
+  channel: string;
+  topic: string;
+};
+
+function isChannelTopicChange(event: SlackEventPayload["event"]): event is SlackTopicEvent {
+  return Boolean(
+    (event?.type === "channel_topic" || event?.type === "group_topic") &&
+      event.channel &&
+      typeof event.topic === "string",
+  );
+}
+
 function stageDisplay(stage: string) {
   const labels: Record<string, string> = {
     Onboarding: "Onboarding",
@@ -136,6 +152,19 @@ export async function POST(request: Request) {
   }
 
   const event = payload.event;
+
+  if (isChannelTopicChange(event)) {
+    try {
+      await applySlackChannelTopicChange({
+        channelId: event.channel,
+        topic: event.topic,
+        userId: event.user,
+      });
+    } catch (error) {
+      console.error("Slack channel topic sync failed", error);
+    }
+    return NextResponse.json({ ok: true });
+  }
 
   if (isReactionAdded(event)) {
     try {

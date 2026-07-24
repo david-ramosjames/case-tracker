@@ -199,6 +199,44 @@ export async function setChannelTopic(channelId: string, topic: string) {
   }
 }
 
+/** Rename a Slack channel (requires channels:manage / groups:write). */
+export async function renameSlackChannel(channelId: string, name: string) {
+  if (!isSlackEnabled()) return false;
+
+  const channel = resolveSlackChannelParam(channelId);
+  const trimmed = name.trim().replace(/^#/, "").toLowerCase();
+  if (!trimmed) return false;
+
+  try {
+    await slackApi<{ ok: boolean }>("conversations.rename", {
+      channel,
+      name: trimmed,
+    });
+    channelNameCache = null;
+    channelIdToNameCache = null;
+    channelCacheExpiresAt = 0;
+    return true;
+  } catch (error) {
+    const message = errorMessage(error);
+    if (message.includes("name_taken") || message.includes("same_name")) {
+      return true;
+    }
+    console.warn("Slack channel rename failed", { channelId, name: trimmed, error: message });
+    return false;
+  }
+}
+
+export async function getSlackBotUserId() {
+  if (!isSlackEnabled()) return null;
+  try {
+    const payload = await slackApi<{ ok: boolean; user_id?: string }>("auth.test", {});
+    return payload.user_id ?? null;
+  } catch (error) {
+    console.warn("Slack auth.test failed", { error: errorMessage(error) });
+    return null;
+  }
+}
+
 export async function postSlackMessage(input: {
   channel: string;
   text: string;

@@ -2,6 +2,16 @@ export function isSlackEnabled() {
   return Boolean(process.env.SLACK_BOT_TOKEN?.trim());
 }
 
+/**
+ * When true, Case Tracker rewrites the full structured Slack topic on stage /
+ * language / Eve / assignment changes. Default off — use Settings admin button
+ * to push topics manually until ready.
+ */
+export function isSlackTopicAutoSyncEnabled() {
+  const raw = process.env.SLACK_TOPIC_AUTO_SYNC?.trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes";
+}
+
 export function getSlackBotToken() {
   const token = process.env.SLACK_BOT_TOKEN?.trim();
   if (!token) throw new Error("SLACK_BOT_TOKEN is not configured.");

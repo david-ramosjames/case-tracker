@@ -25,13 +25,13 @@ export const CLIENT_PREFERRED_LANGUAGE_OPTIONS = [
   { value: "es" as const, label: "Spanish" },
 ] as const;
 
-/** DocketFlow cases.preferred_language check constraint values. */
+/** DocketFlow cases.preferred_language / secondary_language check constraint values. */
 export const DOCKETFLOW_PREFERRED_LANGUAGE_BY_CODE: Record<ClientPreferredLanguage, string> = {
   en: "English",
   es: "Spanish",
 };
 
-/** Normalize DocketFlow cases.preferred_language to en | es. */
+/** Normalize DocketFlow cases.preferred_language to en | es (defaults to English). */
 export function normalizePreferredLanguage(value: string | null | undefined): ClientPreferredLanguage {
   const normalized = value?.trim().toLowerCase() ?? "";
   if (!normalized) return "en";
@@ -39,8 +39,21 @@ export function normalizePreferredLanguage(value: string | null | undefined): Cl
   return "en";
 }
 
+/** Optional secondary language — null when unset. */
+export function normalizeSecondaryLanguage(value: string | null | undefined): ClientPreferredLanguage | null {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return null;
+  return normalizePreferredLanguage(trimmed);
+}
+
 /** Map tracker language code to the value DocketFlow stores on cases.preferred_language. */
 export function toDocketFlowPreferredLanguage(value: ClientPreferredLanguage) {
+  return DOCKETFLOW_PREFERRED_LANGUAGE_BY_CODE[value];
+}
+
+/** Map optional secondary language for cases.secondary_language (null clears). */
+export function toDocketFlowSecondaryLanguage(value: ClientPreferredLanguage | null) {
+  if (value == null) return null;
   return DOCKETFLOW_PREFERRED_LANGUAGE_BY_CODE[value];
 }
 

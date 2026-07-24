@@ -189,6 +189,8 @@ export async function sendSlackMissingFieldNotices(
       paralegalEmail: record.paralegal.email,
       attorneyName: record.attorney.name,
       paralegalName: record.paralegal.name,
+      attorneySlackUserId: record.attorney.slackUserId,
+      paralegalSlackUserId: record.paralegal.slackUserId,
     });
 
     const text =

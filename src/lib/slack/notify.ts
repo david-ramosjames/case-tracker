@@ -1,9 +1,9 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
-import { syncSlackChannelTopicForStage } from "@/lib/slack/channel-topic";
+import { syncSlackChannelTopicForStage, syncSlackChannelTopicSummary } from "@/lib/slack/channel-topic";
 import { normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
 import { getSlackChannelForCaseNumber, saveReminderThread, saveStageUpdateThread } from "@/lib/slack/channels";
 import { getStageSlackOptions } from "@/lib/slack/enum-replies";
-import { SLACK_REMINDER_COOLDOWN_DAYS, isSlackEnabled } from "@/lib/slack/config";
+import { SLACK_REMINDER_COOLDOWN_DAYS, isSlackEnabled, isSlackTopicAutoSyncEnabled } from "@/lib/slack/config";
 import {
   buildSlackReminderMessage,
   getSlackReminderReasons,
@@ -58,11 +58,16 @@ export async function notifySlackCaseStageUpdated(record: CaseRecord, previousSt
   if (!context) return;
 
   try {
-    await syncSlackChannelTopicForStage({
-      channelId: context.channelId,
-      caseNumber: record.shared.caseNumber,
-      stage: record.tracker.caseStage,
-    });
+    if (isSlackTopicAutoSyncEnabled()) {
+      await syncSlackChannelTopicSummary(record);
+    } else {
+      // Legacy: only patch trailing (Status) until full topic auto-sync is enabled.
+      await syncSlackChannelTopicForStage({
+        channelId: context.channelId,
+        caseNumber: record.shared.caseNumber,
+        stage: record.tracker.caseStage,
+      });
+    }
 
     const posted = await postSlackMessage({
       channel: context.channelId,
