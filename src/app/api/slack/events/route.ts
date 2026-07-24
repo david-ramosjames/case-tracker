@@ -97,16 +97,25 @@ function isReactionAdded(event: SlackEventPayload["event"]): event is SlackReact
 }
 
 type SlackTopicEvent = NonNullable<SlackEventPayload["event"]> & {
-  type: "channel_topic" | "group_topic";
   channel: string;
   topic: string;
 };
 
+/**
+ * Topic edits arrive either as:
+ * - type `channel_topic` / `group_topic`, or more commonly
+ * - type `message` with subtype `channel_topic` / `group_topic` (when subscribed to message.channels)
+ */
 function isChannelTopicChange(event: SlackEventPayload["event"]): event is SlackTopicEvent {
-  return Boolean(
-    (event?.type === "channel_topic" || event?.type === "group_topic") &&
-      event.channel &&
-      typeof event.topic === "string",
+  if (!event?.channel || typeof event.topic !== "string") return false;
+
+  if (event.type === "channel_topic" || event.type === "group_topic") {
+    return true;
+  }
+
+  return (
+    event.type === "message" &&
+    (event.subtype === "channel_topic" || event.subtype === "group_topic")
   );
 }
 
@@ -155,11 +164,19 @@ export async function POST(request: Request) {
 
   if (isChannelTopicChange(event)) {
     try {
-      await applySlackChannelTopicChange({
+      console.info("Slack channel topic change received", {
+        type: event.type,
+        subtype: event.subtype,
+        channel: event.channel,
+        topic: event.topic.slice(0, 200),
+        user: event.user,
+      });
+      const result = await applySlackChannelTopicChange({
         channelId: event.channel,
         topic: event.topic,
         userId: event.user,
       });
+      console.info("Slack channel topic change result", result);
     } catch (error) {
       console.error("Slack channel topic sync failed", error);
     }

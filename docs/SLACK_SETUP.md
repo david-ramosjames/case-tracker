@@ -33,7 +33,7 @@ Apply `supabase/sql/006_slack_integration.sql` in the Supabase SQL editor.
 4. Subscribe to bot events:
    - `message.channels` (and `message.groups` if private case channels)
    - `reaction_added` (stage confirmation ✅)
-   - `channel_topic` / `group_topic` (topic → Case Tracker reassignment / stage / language)
+   - `channel_topic` / `group_topic` (optional dedicated events; topic edits also arrive as `message` + subtype `channel_topic` via message.channels)
 5. Reinstall the app if prompted.
 
 ### Case channel topic summary
