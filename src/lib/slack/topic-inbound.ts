@@ -113,7 +113,11 @@ export async function applySlackChannelTopicChange(input: {
   if (!topic) return { applied: false as const, reason: "empty_topic" as const };
 
   if (wasTopicWrittenByUs(input.channelId, topic)) {
-    return { applied: false as const, reason: "echo" as const };
+    const botUserId = await getSlackBotUserId();
+    // Only ignore Slack echoes of our own topic writes (bot user). Human edits always apply.
+    if (!input.userId || (botUserId && input.userId === botUserId)) {
+      return { applied: false as const, reason: "echo" as const };
+    }
   }
 
   const botUserId = await getSlackBotUserId();

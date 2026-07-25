@@ -107,7 +107,8 @@ export async function reassignCaseTeam(caseId: string, input: CaseAssignmentInpu
       responsible_attorney_contact_id: input.attorneyContactId,
       assigned_contact_ids: assignedContactIds,
       uses_eve: usesEve,
-      updated_at: new Date().toISOString(),
+      // DocketFlow cases.updated_at is bigint epoch ms — never send an ISO string.
+      updated_at: Date.now(),
     })
     .eq("id", record.shared.id);
   if (caseUpdateError) throw caseUpdateError;

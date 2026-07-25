@@ -178,7 +178,16 @@ export async function POST(request: Request) {
       });
       console.info("Slack channel topic change result", result);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       console.error("Slack channel topic sync failed", error);
+      await postSlackMessage({
+        channel: event.channel,
+        text: [
+          "Case Tracker failed while applying this topic change.",
+          `*Nothing was updated* — ${message}`,
+          "Try again, or update the case in Case Tracker directly.",
+        ].join("\n"),
+      }).catch(() => undefined);
     }
     return NextResponse.json({ ok: true });
   }
