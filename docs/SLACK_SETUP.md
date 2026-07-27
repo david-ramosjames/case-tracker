@@ -51,7 +51,7 @@ Canonical topic format (written by Case Tracker; editable in Slack):
 
 **Manual first:** Settings → Slack → enter a case # → **Update Slack topic**. Full auto-rewrite on field changes is off unless `SLACK_TOPIC_AUTO_SYNC=true`.
 
-When someone edits the topic in Slack, Case Tracker updates `cases.assigned_contact_ids` / `responsible_attorney_contact_id`, tracker attorney/paralegal snapshots, stage, languages, and Eve — then calls DocketFlow `POST /api/cases/[caseId]/reassign-calendar` so Google Calendar invites stay in sync (requires `DOCKETFLOW_INTERNAL_API_SECRET` + DocketFlow endpoint).
+When someone edits the topic in Slack, Case Tracker updates paralegal assignment (`assigned_contact_ids`), stage, languages, and Eve — then calls DocketFlow `POST /api/cases/[caseId]/reassign-calendar` when the paralegal changes (requires `DOCKETFLOW_INTERNAL_API_SECRET` + DocketFlow endpoint). **Attorney from the topic is ignored** (change attorney in Case Tracker / DocketFlow only).
 
 If verification fails with “didn't respond with the challenge”, the app was likely redirecting Slack to `/login` — ensure the latest deploy includes the public `/api/slack/*` middleware exception.
 
@@ -219,6 +219,6 @@ curl "https://YOUR_DOMAIN/api/cron/slack-reminders?force=true&syncSheet=false" \
 | ✅ / thread reply on stage prompt | Tracker stage updated |
 | Sources & Litigation saved | Confirmation message |
 | Comment / Manager note / Attorney update posted | Full note text |
-| Channel topic edited (structured format) | Reassigns attorney/paralegal via DocketFlow columns + calendar reconcile callback; updates stage / language / Eve |
+| Channel topic edited (structured format) | Updates paralegal (not attorney), stage / language / Eve; calendar reconcile when paralegal changes |
 
-Attorney and paralegal **can** be changed from a structured Slack channel topic (see above). Client name is never changed from Slack.
+Paralegal **can** be changed from a structured Slack channel topic; attorney and client name are never changed from Slack.

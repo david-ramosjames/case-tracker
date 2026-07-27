@@ -102,6 +102,7 @@ async function replyInChannel(channelId: string, text: string) {
 
 /**
  * Apply a manually edited Slack channel topic back to Case Tracker / DocketFlow.
+ * Paralegal, stage, languages, and Eve sync inbound; attorney in the topic is ignored.
  * Posts a correction message when the topic is malformed or the stage is invalid.
  */
 export async function applySlackChannelTopicChange(input: {
@@ -161,7 +162,8 @@ export async function applySlackChannelTopicChange(input: {
     .in("role", ["attorney", "paralegal"]);
 
   const contactRows = (contacts ?? []) as ContactMatchRow[];
-  const attorney = resolveTopicContact(
+  // Attorney in the topic is display-only inbound — never overwrite Case Tracker / DocketFlow attorney.
+  const topicAttorney = resolveTopicContact(
     contactRows,
     "attorney",
     parsed.attorneySlackUserId,
@@ -175,9 +177,15 @@ export async function applySlackChannelTopicChange(input: {
   );
 
   const warnings: string[] = [];
-  if ((parsed.attorneySlackUserId || parsed.attorneyHandle) && !attorney) {
+  const attorneyChangeAttempted = Boolean(
+    (parsed.attorneySlackUserId || parsed.attorneyHandle) &&
+      topicAttorney &&
+      topicAttorney.id !== record.shared.attorneyId,
+  );
+  if (attorneyChangeAttempted) {
+    const currentName = record.attorney.name?.trim() || "the current attorney";
     warnings.push(
-      `Could not match attorney ${parsed.attorneySlackUserId ? `<@${parsed.attorneySlackUserId}>` : `@${parsed.attorneyHandle}`}`,
+      `Attorney was not updated — case attorney stays *${currentName}*. Change the attorney in Case Tracker (not in the Slack topic).`,
     );
   }
   if ((parsed.paralegalSlackUserId || parsed.paralegalHandle) && !paralegal) {
@@ -198,9 +206,7 @@ export async function applySlackChannelTopicChange(input: {
     warnings.push("Primary language flag is missing or invalid. Use `:us:` or `:flag-mx:` before `(Primary)`.");
   }
 
-  const assignmentChanged =
-    Boolean(attorney && attorney.id !== record.shared.attorneyId) ||
-    Boolean(paralegal && paralegal.id !== record.shared.paralegalId);
+  const paralegalChanged = Boolean(paralegal && paralegal.id !== record.shared.paralegalId);
   const usesEveChanged = parsed.usesEve !== record.shared.usesEve;
   const languageChanged =
     (parsed.primaryLanguage != null && parsed.primaryLanguage !== record.shared.preferredLanguage) ||
@@ -208,13 +214,15 @@ export async function applySlackChannelTopicChange(input: {
   const stageChanged = Boolean(nextStage && nextStage !== record.tracker.caseStage);
 
   let reassignResult: Awaited<ReturnType<typeof reassignCaseTeam>> | null = null;
-  if (attorney && paralegal && assignmentChanged) {
+  if (paralegalChanged && paralegal && record.shared.attorneyId) {
     reassignResult = await reassignCaseTeam(caseId, {
-      attorneyContactId: attorney.id,
+      attorneyContactId: record.shared.attorneyId,
       paralegalContactId: paralegal.id,
       usesEve: parsed.usesEve,
       actorName: "Slack topic",
     });
+  } else if (paralegalChanged && !record.shared.attorneyId) {
+    warnings.push("Could not update paralegal — case has no attorney assigned in Case Tracker.");
   }
 
   if (usesEveChanged || languageChanged || reassignResult) {
@@ -241,9 +249,7 @@ export async function applySlackChannelTopicChange(input: {
   const calendarNote = formatCalendarReconcileNote(reassignResult?.calendarReconcile ?? null);
 
   const appliedParts = [
-    assignmentChanged
-      ? `Reassigned to Attorney ${attorney?.name ?? "?"} / Paralegal ${paralegal?.name ?? "?"}`
-      : null,
+    paralegalChanged ? `Paralegal → ${paralegal?.name ?? "?"}` : null,
     stageChanged && nextStage ? `Stage → ${stageDisplayForTopic(nextStage)}` : null,
     usesEveChanged ? `Eve → ${parsed.usesEve ? "Yes" : "No"}` : null,
     languageChanged
@@ -271,9 +277,12 @@ export async function applySlackChannelTopicChange(input: {
   }
 
   return {
-    applied: Boolean(assignmentChanged || stageChanged || usesEveChanged || languageChanged),
+    applied: Boolean(paralegalChanged || stageChanged || usesEveChanged || languageChanged),
     caseId,
-    assignmentChanged,
+    assignmentChanged: paralegalChanged,
+    paralegalChanged,
+    attorneyChangeAttempted,
+    attorneyIgnored: true,
     usesEveChanged,
     languageChanged,
     primaryLanguage: parsed.primaryLanguage,
