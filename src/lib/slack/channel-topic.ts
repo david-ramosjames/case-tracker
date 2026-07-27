@@ -589,7 +589,7 @@ export async function syncAllSlackChannelTopicSummaries(
         await markChannelTopicSynced(
           item.record.shared.caseNumber,
           stageLabelFromCaseStage(item.record.tracker.caseStage),
-          expectedTopic,
+          expected,
         );
       }
       if (index < mappedCases.length - 1 && TOPIC_AUDIT_DELAY_MS > 0) {
