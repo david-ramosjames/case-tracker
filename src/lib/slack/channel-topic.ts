@@ -432,7 +432,7 @@ export async function auditSlackChannelTopicSummaries(): Promise<SlackTopicAudit
 
   for (let index = 0; index < batch.length; index++) {
     const item = batch[index]!;
-    const channelId = normalizeSlackChannelId(item.mapping.slackChannelId);
+    const channelId = normalizeSlackChannelId(item.mapping.slackChannelId ?? "");
     const expectedTopic = buildExpectedCaseTopic(item.record);
     const currentTopic = channelId ? await fetchChannelTopic(channelId) : null;
     const status = channelId ? classifyTopicDrift(currentTopic, expectedTopic) : "fetch_failed";
@@ -526,7 +526,7 @@ export async function syncAllSlackChannelTopicSummaries(
     const outdated: typeof mappedCases = [];
     for (let index = 0; index < mappedCases.length; index++) {
       const item = mappedCases[index]!;
-      const channelId = normalizeSlackChannelId(item.mapping.slackChannelId);
+      const channelId = normalizeSlackChannelId(item.mapping.slackChannelId ?? "");
       if (!channelId) continue;
       const expected = buildExpectedCaseTopic(item.record);
       const current = await fetchChannelTopic(channelId);
