@@ -17,7 +17,7 @@ import {
   describeSlackThreadSharedLabels,
   parseSlackThreadUpdate,
 } from "@/lib/slack/thread-update";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createSupabaseAdminClient, fetchAllSupabaseRows } from "@/lib/supabase/admin";
 import { listQuoContactsByTrackerIds, updateQuoContactSmsPreferences } from "@/lib/supabase/quo-contacts";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildStagePatchFromConfirmation } from "@/lib/stage-triggers";
@@ -144,38 +144,44 @@ async function createSharedDataClient() {
 export async function getCases(): Promise<CaseRecord[]> {
   const [sharedClient, trackerClient] = await Promise.all([createSharedDataClient(), createTrackerClient()]);
 
-  const [
-    { data: caseRows },
-    { data: trackerRows },
-    { data: resultRows },
-    { data: disbursementRows },
-    { data: contactRows },
-    { data: suggestionRows },
-  ] = await Promise.all([
-    sharedClient
-      .from("cases")
-      .select("id,case_number,client_name,name,status,case_type,date_of_incident,preferred_language,secondary_language,uses_eve,assigned_contact_ids,created_at,updated_at")
-      .order("created_at", { ascending: false }),
-    trackerClient.from("case_tracker_entries").select("*").order("created_at", { ascending: false }),
-    trackerClient.from("case_tracker_results").select("*"),
-    trackerClient.from("case_tracker_disbursements").select("*").order("created_at", { ascending: true }),
-    sharedClient.from("contacts").select("id,name,email,role,slack_user_id,slack_display_name"),
-    trackerClient.from("case_tracker_stage_suggestions").select("*"),
+  // PostgREST defaults to max 1000 rows — page all tables that can exceed that.
+  const [caseRows, trackerRows, resultRows, disbursementRows, contactRows, suggestionRows] = await Promise.all([
+    fetchAllSupabaseRows<DocketFlowCaseRow>(
+      sharedClient,
+      "cases",
+      "id,case_number,client_name,name,status,case_type,date_of_incident,preferred_language,secondary_language,uses_eve,assigned_contact_ids,created_at,updated_at",
+      { orderBy: "created_at", ascending: false },
+    ),
+    fetchAllSupabaseRows<TrackerEntryRow>(trackerClient, "case_tracker_entries", "*", {
+      orderBy: "created_at",
+      ascending: false,
+    }),
+    fetchAllSupabaseRows<ResultRow>(trackerClient, "case_tracker_results", "*"),
+    fetchAllSupabaseRows<DisbursementRow>(trackerClient, "case_tracker_disbursements", "*", {
+      orderBy: "created_at",
+      ascending: true,
+    }),
+    fetchAllSupabaseRows<ContactRow>(
+      sharedClient,
+      "contacts",
+      "id,name,email,role,slack_user_id,slack_display_name",
+    ),
+    fetchAllSupabaseRows<SuggestionRow>(trackerClient, "case_tracker_stage_suggestions", "*"),
   ]);
 
-  const trackerIds = (trackerRows ?? [])
-    .map((row) => toStringOrNull((row as TrackerEntryRow).id))
+  const trackerIds = trackerRows
+    .map((row) => toStringOrNull(row.id))
     .filter((id): id is string => Boolean(id) && isUuid(id));
 
   const quoContactsByTrackerId = await listQuoContactsByTrackerIds(trackerIds).catch(() => new Map());
 
   return mapRecords({
-    cases: (caseRows ?? []) as DocketFlowCaseRow[],
-    trackers: (trackerRows ?? []) as TrackerEntryRow[],
-    results: (resultRows ?? []) as ResultRow[],
-    disbursements: (disbursementRows ?? []) as DisbursementRow[],
-    contacts: (contactRows ?? []) as ContactRow[],
-    suggestions: (suggestionRows ?? []) as SuggestionRow[],
+    cases: caseRows,
+    trackers: trackerRows,
+    results: resultRows,
+    disbursements: disbursementRows,
+    contacts: contactRows,
+    suggestions: suggestionRows,
     quoContactsByTrackerId,
   });
 }

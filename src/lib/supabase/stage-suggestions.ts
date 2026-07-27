@@ -4,7 +4,7 @@ import {
   buildStagePatchFromConfirmation,
   deriveExpectedLitigationForStage,
 } from "@/lib/stage-triggers";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createSupabaseAdminClient, fetchAllSupabaseRows } from "@/lib/supabase/admin";
 import {
   getCaseById,
   normalizeExpectedLitigation,
@@ -289,9 +289,13 @@ export async function findCaseBySlackChannelRef(channelRef: string) {
   if (!admin) return null;
 
   const normalized = normalizePulseChannelRef(channelRef);
-  const { data: channels } = await admin.from("case_slack_channels").select("case_number,slack_channel_name,slack_channel_id");
+  const channels = await fetchAllSupabaseRows<{
+    case_number: string;
+    slack_channel_name: string | null;
+    slack_channel_id: string | null;
+  }>(admin, "case_slack_channels", "case_number,slack_channel_name,slack_channel_id");
 
-  const match = (channels ?? []).find((row) => normalizePulseChannelRef(String(row.slack_channel_name ?? "")) === normalized);
+  const match = channels.find((row) => normalizePulseChannelRef(String(row.slack_channel_name ?? "")) === normalized);
 
   if (!match?.case_number) return null;
 

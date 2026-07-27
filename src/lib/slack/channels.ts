@@ -1,6 +1,6 @@
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { caseNumberFromPulseChannelRef, normalizePulseChannelRef } from "@/lib/slack/pulse";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createSupabaseAdminClient, fetchAllSupabaseRows } from "@/lib/supabase/admin";
 import { type CaseSlackChannel } from "@/lib/types";
 import { daysSince } from "@/lib/utils";
 
@@ -22,24 +22,24 @@ export async function loadPulseChannelContext() {
     };
   }
 
-  const { data: channels } = await admin
-    .from("case_slack_channels")
-    .select("case_number,slack_channel_name,slack_channel_id");
+  const channels = await fetchAllSupabaseRows<{
+    case_number: string;
+    slack_channel_name: string | null;
+    slack_channel_id: string | null;
+  }>(admin, "case_slack_channels", "case_number,slack_channel_name,slack_channel_id");
 
   const caseNumbers = [
-    ...new Set(
-      (channels ?? [])
-        .map((row) => cleanCaseNumber(String(row.case_number ?? "")))
-        .filter(Boolean),
-    ),
+    ...new Set(channels.map((row) => cleanCaseNumber(String(row.case_number ?? ""))).filter(Boolean)),
   ];
 
   const trackerByCaseNumber = new Map<string, { caseId: string; caseNumber: string }>();
-  if (caseNumbers.length > 0) {
+  const IN_CHUNK = 200;
+  for (let i = 0; i < caseNumbers.length; i += IN_CHUNK) {
+    const chunk = caseNumbers.slice(i, i + IN_CHUNK);
     const { data: trackers } = await admin
       .from("case_tracker_entries")
       .select("case_id,id,case_number")
-      .in("case_number", caseNumbers);
+      .in("case_number", chunk);
 
     for (const row of trackers ?? []) {
       const caseNumber = cleanCaseNumber(String(row.case_number));
@@ -53,7 +53,7 @@ export async function loadPulseChannelContext() {
   const channelIdToName = new Map<string, string>();
   const channelByCaseNumber = new Map<string, { slackChannelId: string | null; slackChannelName: string }>();
 
-  for (const row of channels ?? []) {
+  for (const row of channels) {
     const channelName = String(row.slack_channel_name ?? "");
     const normalized = normalizePulseChannelRef(channelName);
     if (!normalized) continue;
@@ -84,12 +84,14 @@ export async function loadPulseChannelContext() {
     }
   }
 
-  const { data: allTrackers } = await admin
-    .from("case_tracker_entries")
-    .select("case_id,id,case_number")
-    .not("case_number", "is", null);
+  const allTrackers = await fetchAllSupabaseRows<{
+    case_id: string | null;
+    id: string;
+    case_number: string | null;
+  }>(admin, "case_tracker_entries", "case_id,id,case_number");
 
-  for (const row of allTrackers ?? []) {
+  for (const row of allTrackers) {
+    if (row.case_number == null) continue;
     const caseNumber = cleanCaseNumber(String(row.case_number ?? ""));
     if (!caseNumber || matchByCaseNumber.has(caseNumber)) continue;
 
@@ -198,14 +200,19 @@ export async function loadSlackChannelMapByCaseNumber() {
   const admin = createSupabaseAdminClient();
   if (!admin) return new Map<string, CaseSlackChannel>();
 
-  const { data, error } = await admin.from("case_slack_channels").select("*");
-  if (error || !data) return new Map<string, CaseSlackChannel>();
-
-  const map = new Map<string, CaseSlackChannel>();
-  for (const row of data) {
-    map.set(cleanCaseNumber((row as ChannelRow).case_number), rowToChannel(row as ChannelRow));
+  try {
+    const data = await fetchAllSupabaseRows<ChannelRow>(admin, "case_slack_channels", "*", {
+      orderBy: "case_number",
+      ascending: true,
+    });
+    const map = new Map<string, CaseSlackChannel>();
+    for (const row of data) {
+      map.set(cleanCaseNumber(row.case_number), rowToChannel(row));
+    }
+    return map;
+  } catch {
+    return new Map<string, CaseSlackChannel>();
   }
-  return map;
 }
 
 export async function upsertSlackChannels(rows: Array<Omit<CaseSlackChannel, "syncedAt" | "updatedAt" | "topicSyncedAt" | "topicLastWritten">>) {

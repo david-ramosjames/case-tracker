@@ -10,7 +10,7 @@ import { postSlackMessage } from "@/lib/slack/client";
 import { isSlackEnabled, getSmsApprovalSlackChannelId } from "@/lib/slack/config";
 import { rejectSmsPendingApproval } from "@/lib/sms/approval";
 import { getSmsRecipients } from "@/lib/sms/recipients";
-import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { createSupabaseAdminClient, fetchAllSupabaseRows } from "@/lib/supabase/admin";
 import { syncTrackerQuoContacts } from "@/lib/supabase/quo-contacts";
 import { automationMatchesStageChange, automationMatchesTimeInStage } from "@/lib/sms/automation-match";
 import {
@@ -327,16 +327,17 @@ async function loadTrackerRowsForQuoSync(
   const selectCols =
     "id, case_number, case_id, client_name_snapshot, client_phone, quo_contact_id, quo_conversation_id, quo_phone_number_id";
 
-  const { data: allTrackers, error } = await admin.from("case_tracker_entries").select(selectCols);
-  if (error) throw new Error(error.message);
-
-  const { data: caseRows, error: caseError } = await admin.from("cases").select("id, case_number, client_name");
-  if (caseError) throw new Error(caseError.message);
+  const allTrackers = await fetchAllSupabaseRows<QuoSyncTrackerRow>(admin, "case_tracker_entries", selectCols);
+  const caseRows = await fetchAllSupabaseRows<{ id: string; case_number: string | null; client_name: string | null }>(
+    admin,
+    "cases",
+    "id, case_number, client_name",
+  );
 
   const caseNumberById = new Map<string, string>();
   const caseIdByNumber = new Map<string, string>();
   const clientNameByCaseId = new Map<string, string>();
-  for (const row of caseRows ?? []) {
+  for (const row of caseRows) {
     const num = cleanCaseNumber(String(row.case_number ?? ""));
     if (!num || !row.id) continue;
     caseNumberById.set(String(row.id), num);
@@ -347,7 +348,7 @@ async function loadTrackerRowsForQuoSync(
   const byId = new Map<string, QuoSyncTrackerRow>();
   let backfilled = 0;
 
-  for (const raw of (allTrackers ?? []) as QuoSyncTrackerRow[]) {
+  for (const raw of allTrackers) {
     let caseNumber = cleanCaseNumber(String(raw.case_number ?? ""));
     const caseId = raw.case_id ? String(raw.case_id) : null;
 
