@@ -341,10 +341,17 @@ export function SlackSyncCard() {
     }
   }
 
-  async function syncTopics(outdatedOnly: boolean) {
-    const confirmMessage = outdatedOnly
-      ? "Push structured Slack topics only for channels that do not match Case Tracker? This may take several minutes."
-      : "Push structured Slack topics for every case with a mapped channel? This may take several minutes.";
+  async function syncTopics(options: {
+    outdatedOnly?: boolean;
+    skipRead?: boolean;
+    neverSyncedOnly?: boolean;
+  } = {}) {
+    const { outdatedOnly = false, skipRead = false, neverSyncedOnly = false } = options;
+    const confirmMessage = neverSyncedOnly
+      ? "Force-write Slack topics for channels that have never been marked synced? Skips conversations.info (avoids rate limits). May take several minutes — run again until the backlog is cleared."
+      : outdatedOnly
+        ? "Push structured Slack topics only for channels that do not match Case Tracker? This may take several minutes."
+        : "Push structured Slack topics for every case with a mapped channel? This may take several minutes.";
     if (!window.confirm(confirmMessage)) return;
 
     setIsSyncingAllTopics(true);
@@ -355,12 +362,12 @@ export function SlackSyncCard() {
       const response = await fetch("/api/admin/slack-topic-sync-all", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ outdatedOnly }),
+        body: JSON.stringify({ outdatedOnly, skipRead, neverSyncedOnly }),
       });
       const body = (await response.json()) as SlackTopicBulkSyncResult;
       if (!response.ok) throw new Error(body.error ?? "Bulk topic sync failed.");
       setBulkSyncResult(body);
-      if (outdatedOnly) {
+      if (outdatedOnly && !skipRead) {
         // Refresh audit after fixing outdated channels.
         const auditResponse = await fetch("/api/admin/slack-topic-audit", { method: "POST" });
         if (auditResponse.ok) {
@@ -451,7 +458,8 @@ export function SlackSyncCard() {
           <p className="text-sm font-medium text-navy-950">Push structured Slack topic</p>
           <p className="text-sm text-muted-foreground">
             Writes the Case Tracker summary into case channel topics (Eve, attorney, paralegal, stage, languages).
-            Use <strong>Find outdated topics</strong> to compare live Slack topics to Case Tracker, then sync only those.
+            If Slack rate-limits <code className="text-xs">conversations.info</code>, use{" "}
+            <strong>Force write never-synced</strong> — it only calls setTopic for channels not yet marked synced.
             Full auto-sync on field changes stays off until <code className="text-xs">SLACK_TOPIC_AUTO_SYNC=true</code>.
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -474,16 +482,24 @@ export function SlackSyncCard() {
               {isAuditingTopics ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Find outdated topics
             </Button>
-            <Button variant="outline" disabled={busy} onClick={() => void syncTopics(false)}>
+            <Button variant="outline" disabled={busy} onClick={() => void syncTopics({ outdatedOnly: false })}>
               {isSyncingAllTopics ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Sync all Slack topics
+            </Button>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => void syncTopics({ neverSyncedOnly: true, skipRead: true })}
+            >
+              {isSyncingAllTopics ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Force write never-synced
             </Button>
           </div>
           {isAuditingTopics || isSyncingAllTopics ? (
             <p className="text-xs text-muted-foreground">
               {isAuditingTopics
                 ? "Comparing live Slack topics to Case Tracker — keep this tab open."
-                : "Updating case channels — keep this tab open; this can take a few minutes. Oldest / never-synced first."}
+                : "Updating case channels — keep this tab open. Force write skips conversations.info and only uses setTopic."}
             </p>
           ) : null}
         </div>
@@ -492,7 +508,7 @@ export function SlackSyncCard() {
           <TopicAuditReport
             result={auditResult}
             syncingOutdated={isSyncingAllTopics}
-            onSyncOutdated={() => void syncTopics(true)}
+            onSyncOutdated={() => void syncTopics({ outdatedOnly: true })}
           />
         ) : null}
         {bulkSyncResult ? <BulkTopicSyncReport result={bulkSyncResult} /> : null}

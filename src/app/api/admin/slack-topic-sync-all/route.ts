@@ -13,14 +13,26 @@ export async function POST(request: Request) {
     }
 
     let outdatedOnly = false;
+    let skipRead = false;
+    let neverSyncedOnly = false;
     try {
-      const body = (await request.json()) as { outdatedOnly?: boolean };
+      const body = (await request.json()) as {
+        outdatedOnly?: boolean;
+        skipRead?: boolean;
+        neverSyncedOnly?: boolean;
+      };
       outdatedOnly = Boolean(body.outdatedOnly);
+      skipRead = Boolean(body.skipRead);
+      neverSyncedOnly = Boolean(body.neverSyncedOnly);
     } catch {
       // empty body is fine — sync all
     }
 
-    const result = await syncAllSlackChannelTopicSummaries({ outdatedOnly });
+    const result = await syncAllSlackChannelTopicSummaries({
+      outdatedOnly,
+      skipRead,
+      neverSyncedOnly,
+    });
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to sync Slack topics.";

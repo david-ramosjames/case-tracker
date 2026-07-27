@@ -186,7 +186,10 @@ function topicsEquivalent(current: string | null | undefined, expected: string) 
   );
 }
 
-export async function syncSlackChannelTopicSummary(record: CaseRecord) {
+export async function syncSlackChannelTopicSummary(
+  record: CaseRecord,
+  options: { skipRead?: boolean } = {},
+) {
   const mapping = await getSlackChannelForCaseNumber(record.shared.caseNumber);
   if (!mapping?.slackChannelId) {
     return { updated: false as const, reason: "no_channel" as const };
@@ -200,17 +203,20 @@ export async function syncSlackChannelTopicSummary(record: CaseRecord) {
   const stageLabel = stageLabelFromCaseStage(record.tracker.caseStage);
   const nextTopic = buildExpectedCaseTopic(record);
 
-  const currentTopic = await fetchChannelTopic(channelId);
-  if (topicsEquivalent(currentTopic, nextTopic)) {
-    await markChannelTopicSynced(record.shared.caseNumber, stageLabel);
-    return {
-      updated: false as const,
-      reason: "already_current" as const,
-      topic: nextTopic,
-      previousTopic: currentTopic,
-      stageLabel,
-      channelId,
-    };
+  let currentTopic: string | null = null;
+  if (!options.skipRead) {
+    currentTopic = await fetchChannelTopic(channelId);
+    if (topicsEquivalent(currentTopic, nextTopic)) {
+      await markChannelTopicSynced(record.shared.caseNumber, stageLabel);
+      return {
+        updated: false as const,
+        reason: "already_current" as const,
+        topic: nextTopic,
+        previousTopic: currentTopic,
+        stageLabel,
+        channelId,
+      };
+    }
   }
 
   const set = await setChannelTopic(channelId, nextTopic);
@@ -356,6 +362,13 @@ export type SlackTopicAuditResult = {
 export type SlackTopicBulkSyncOptions = {
   /** Only rewrite channels whose live Slack topic does not match Case Tracker. */
   outdatedOnly?: boolean;
+  /**
+   * Skip conversations.info and only call setTopic.
+   * Use when Slack is rate-limiting info reads. Prefer neverSyncedOnly with this.
+   */
+  skipRead?: boolean;
+  /** Only channels that have never had topic_synced_at set (the remaining backlog). */
+  neverSyncedOnly?: boolean;
 };
 
 const BULK_TOPIC_SYNC_DELAY_MS = 350;
@@ -541,7 +554,11 @@ export async function syncAllSlackChannelTopicSummaries(
   // Prefer never-synced / oldest confirmed sync first.
   mappedCases = sortByOldestTopicSync(mappedCases);
 
-  if (options.outdatedOnly) {
+  if (options.neverSyncedOnly) {
+    mappedCases = mappedCases.filter((item) => !item.topicSyncedAt);
+  }
+
+  if (options.outdatedOnly && !options.skipRead) {
     const outdated: typeof mappedCases = [];
     for (let index = 0; index < mappedCases.length; index++) {
       const item = mappedCases[index]!;
@@ -562,6 +579,9 @@ export async function syncAllSlackChannelTopicSummaries(
     }
     mappedCases = outdated;
   }
+
+  const skipRead = Boolean(options.skipRead);
+  const writeDelayMs = skipRead ? 500 : BULK_TOPIC_SYNC_DELAY_MS;
 
   const result: SlackTopicBulkSyncResult = {
     total: 0,
@@ -593,7 +613,7 @@ export async function syncAllSlackChannelTopicSummaries(
     };
 
     try {
-      const syncResult = await syncSlackChannelTopicSummary(record);
+      const syncResult = await syncSlackChannelTopicSummary(record, { skipRead });
       if (syncResult.updated) {
         result.updated++;
         const entry: SlackTopicBulkSyncLogEntry = {
@@ -629,8 +649,8 @@ export async function syncAllSlackChannelTopicSummaries(
       result.log.push({ ...baseEntry, status: "failed", message });
     }
 
-    if (index < batch.length - 1 && BULK_TOPIC_SYNC_DELAY_MS > 0) {
-      await sleep(BULK_TOPIC_SYNC_DELAY_MS);
+    if (index < batch.length - 1 && writeDelayMs > 0) {
+      await sleep(writeDelayMs);
     }
   }
 
