@@ -1,6 +1,11 @@
 import { fetchChannelTopic, listSlackWorkspaceUsers, lookupSlackUserIdByEmail, setChannelTopic } from "@/lib/slack/client";
 import { getStageTopicLabel } from "@/lib/slack/enum-replies";
-import { updateChannelTopicStage, getSlackChannelForCaseNumber } from "@/lib/slack/channels";
+import {
+  updateChannelTopicStage,
+  getSlackChannelForCaseNumber,
+  markChannelTopicSynced,
+  loadSlackChannelMapByCaseNumber,
+} from "@/lib/slack/channels";
 import { normalizeSlackChannelId } from "@/lib/slack/client";
 import {
   buildCaseTopic,
@@ -141,6 +146,46 @@ function topicHandleForUser(user: { name: string; slackDisplayName?: string | nu
   return user.slackDisplayName?.trim() || slackHandleFromContactName(user.name);
 }
 
+export function buildExpectedCaseTopic(record: CaseRecord) {
+  return buildCaseTopic({
+    usesEve: Boolean(record.shared.usesEve),
+    attorneyHandle: topicHandleForUser({
+      name: record.attorney.name,
+      slackDisplayName: record.attorney.slackDisplayName,
+    }),
+    paralegalHandle: topicHandleForUser({
+      name: record.paralegal.name,
+      slackDisplayName: record.paralegal.slackDisplayName,
+    }),
+    attorneySlackUserId: record.attorney.slackUserId,
+    paralegalSlackUserId: record.paralegal.slackUserId,
+    stageLabel: stageLabelFromCaseStage(record.tracker.caseStage),
+    primaryLanguage: record.shared.preferredLanguage,
+    secondaryLanguage: record.shared.secondaryLanguage,
+  });
+}
+
+function topicsEquivalent(current: string | null | undefined, expected: string) {
+  if (!current?.trim()) return false;
+  if (current.trim() === expected.trim()) return true;
+
+  // Semantic compare — Slack may normalize emoji shortcodes vs unicode.
+  const a = parseCaseTopic(current);
+  const b = parseCaseTopic(expected);
+  if (a.format !== "structured" || b.format !== "structured") return false;
+
+  return (
+    a.usesEve === b.usesEve &&
+    (a.attorneySlackUserId || a.attorneyHandle)?.toLowerCase() ===
+      (b.attorneySlackUserId || b.attorneyHandle)?.toLowerCase() &&
+    (a.paralegalSlackUserId || a.paralegalHandle)?.toLowerCase() ===
+      (b.paralegalSlackUserId || b.paralegalHandle)?.toLowerCase() &&
+    (a.stageLabel ?? "").trim().toLowerCase() === (b.stageLabel ?? "").trim().toLowerCase() &&
+    a.primaryLanguage === b.primaryLanguage &&
+    a.secondaryLanguage === b.secondaryLanguage
+  );
+}
+
 export async function syncSlackChannelTopicSummary(record: CaseRecord) {
   const mapping = await getSlackChannelForCaseNumber(record.shared.caseNumber);
   if (!mapping?.slackChannelId) {
@@ -153,26 +198,11 @@ export async function syncSlackChannelTopicSummary(record: CaseRecord) {
   }
 
   const stageLabel = stageLabelFromCaseStage(record.tracker.caseStage);
-  const nextTopic = buildCaseTopic({
-    usesEve: Boolean(record.shared.usesEve),
-    attorneyHandle: topicHandleForUser({
-      name: record.attorney.name,
-      slackDisplayName: record.attorney.slackDisplayName,
-    }),
-    paralegalHandle: topicHandleForUser({
-      name: record.paralegal.name,
-      slackDisplayName: record.paralegal.slackDisplayName,
-    }),
-    attorneySlackUserId: record.attorney.slackUserId,
-    paralegalSlackUserId: record.paralegal.slackUserId,
-    stageLabel,
-    primaryLanguage: record.shared.preferredLanguage,
-    secondaryLanguage: record.shared.secondaryLanguage,
-  });
+  const nextTopic = buildExpectedCaseTopic(record);
 
   const currentTopic = await fetchChannelTopic(channelId);
-  if (currentTopic?.trim() === nextTopic.trim()) {
-    await updateChannelTopicStage(record.shared.caseNumber, stageLabel);
+  if (topicsEquivalent(currentTopic, nextTopic)) {
+    await markChannelTopicSynced(record.shared.caseNumber, stageLabel);
     return {
       updated: false as const,
       reason: "already_current" as const,
@@ -196,7 +226,7 @@ export async function syncSlackChannelTopicSummary(record: CaseRecord) {
   }
 
   rememberWrittenTopic(channelId, nextTopic);
-  await updateChannelTopicStage(record.shared.caseNumber, stageLabel);
+  await markChannelTopicSynced(record.shared.caseNumber, stageLabel);
   return {
     updated: true as const,
     topic: nextTopic,
@@ -289,19 +319,171 @@ export type SlackTopicBulkSyncResult = {
   mappedChannelCount: number;
 };
 
+export type SlackTopicAuditStatus =
+  | "current"
+  | "legacy"
+  | "mismatch"
+  | "empty"
+  | "fetch_failed"
+  | "unstructured";
+
+export type SlackTopicAuditEntry = {
+  caseNumber: string;
+  clientName: string | null;
+  channelName: string | null;
+  channelId: string | null;
+  status: SlackTopicAuditStatus;
+  topicSyncedAt: string | null;
+  currentTopic: string | null;
+  expectedTopic: string;
+};
+
+export type SlackTopicAuditResult = {
+  checked: number;
+  current: number;
+  outdated: number;
+  fetchFailed: number;
+  truncated: boolean;
+  mappedChannelCount: number;
+  skippedNoCase: number;
+  /** Outdated first (never synced / oldest), then failures. */
+  outdatedChannels: SlackTopicAuditEntry[];
+  fetchFailedChannels: SlackTopicAuditEntry[];
+};
+
+export type SlackTopicBulkSyncOptions = {
+  /** Only rewrite channels whose live Slack topic does not match Case Tracker. */
+  outdatedOnly?: boolean;
+};
+
 const BULK_TOPIC_SYNC_DELAY_MS = 350;
 /** ~2 Slack API calls per case; stay under Vercel limits for large channel lists. */
 const BULK_TOPIC_SYNC_MAX_CASES = 400;
+const TOPIC_AUDIT_DELAY_MS = 200;
+const TOPIC_AUDIT_MAX_CASES = 500;
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Admin / manual: push structured topics for every mapped case channel. */
-export async function syncAllSlackChannelTopicSummaries(): Promise<SlackTopicBulkSyncResult> {
+function sortByOldestTopicSync<T extends { topicSyncedAt: string | null; caseNumber: string }>(items: T[]) {
+  return [...items].sort((a, b) => {
+    if (!a.topicSyncedAt && b.topicSyncedAt) return -1;
+    if (a.topicSyncedAt && !b.topicSyncedAt) return 1;
+    if (a.topicSyncedAt && b.topicSyncedAt && a.topicSyncedAt !== b.topicSyncedAt) {
+      return a.topicSyncedAt.localeCompare(b.topicSyncedAt);
+    }
+    return a.caseNumber.localeCompare(b.caseNumber, undefined, { numeric: true });
+  });
+}
+
+function classifyTopicDrift(currentTopic: string | null, expectedTopic: string): SlackTopicAuditStatus {
+  if (currentTopic == null) return "fetch_failed";
+  if (!currentTopic.trim()) return "empty";
+  if (topicsEquivalent(currentTopic, expectedTopic)) return "current";
+  const parsed = parseCaseTopic(currentTopic);
+  if (parsed.format === "legacy") return "legacy";
+  if (parsed.format === "structured") return "mismatch";
+  return "unstructured";
+}
+
+/**
+ * Read-only: compare live Slack topics to what Case Tracker would write.
+ * Outdated list is sorted never-synced / oldest topic_synced_at first.
+ */
+export async function auditSlackChannelTopicSummaries(): Promise<SlackTopicAuditResult> {
   const { cleanCaseNumber } = await import("@/lib/csv/parse");
   const { getCases } = await import("@/lib/supabase/services");
-  const { loadSlackChannelMapByCaseNumber } = await import("@/lib/slack/channels");
+
+  const [cases, channelMap] = await Promise.all([getCases(), loadSlackChannelMapByCaseNumber()]);
+  const caseNumbersInTracker = new Set(cases.map((record) => cleanCaseNumber(record.shared.caseNumber)));
+
+  let skippedNoCase = 0;
+  for (const caseNumber of channelMap.keys()) {
+    if (!caseNumbersInTracker.has(caseNumber)) skippedNoCase++;
+  }
+
+  const mappedCases = cases
+    .map((record) => {
+      const key = cleanCaseNumber(record.shared.caseNumber);
+      const mapping = channelMap.get(key);
+      if (!key || !mapping?.slackChannelId?.trim()) return null;
+      return {
+        record,
+        mapping,
+        topicSyncedAt: mapping.topicSyncedAt ?? null,
+        caseNumber: record.shared.caseNumber,
+      };
+    })
+    .filter(Boolean) as Array<{
+    record: CaseRecord;
+    mapping: NonNullable<ReturnType<typeof channelMap.get>>;
+    topicSyncedAt: string | null;
+    caseNumber: string;
+  }>;
+
+  const ordered = sortByOldestTopicSync(mappedCases);
+  const truncated = ordered.length > TOPIC_AUDIT_MAX_CASES;
+  const batch = ordered.slice(0, TOPIC_AUDIT_MAX_CASES);
+
+  const outdatedChannels: SlackTopicAuditEntry[] = [];
+  const fetchFailedChannels: SlackTopicAuditEntry[] = [];
+  let current = 0;
+
+  for (let index = 0; index < batch.length; index++) {
+    const item = batch[index]!;
+    const channelId = normalizeSlackChannelId(item.mapping.slackChannelId);
+    const expectedTopic = buildExpectedCaseTopic(item.record);
+    const currentTopic = channelId ? await fetchChannelTopic(channelId) : null;
+    const status = channelId ? classifyTopicDrift(currentTopic, expectedTopic) : "fetch_failed";
+
+    const entry: SlackTopicAuditEntry = {
+      caseNumber: item.record.shared.caseNumber,
+      clientName: item.record.shared.clientName?.trim() || null,
+      channelName: item.mapping.slackChannelName?.trim() || null,
+      channelId: item.mapping.slackChannelId?.trim() || null,
+      status,
+      topicSyncedAt: item.topicSyncedAt,
+      currentTopic: currentTopic?.slice(0, 240) ?? null,
+      expectedTopic,
+    };
+
+    if (status === "current") {
+      current++;
+      // Confirm sync timestamp when we find a match and DB has never recorded one.
+      if (!item.topicSyncedAt) {
+        await markChannelTopicSynced(item.record.shared.caseNumber, stageLabelFromCaseStage(item.record.tracker.caseStage));
+      }
+    } else if (status === "fetch_failed") {
+      fetchFailedChannels.push(entry);
+    } else {
+      outdatedChannels.push(entry);
+    }
+
+    if (index < batch.length - 1 && TOPIC_AUDIT_DELAY_MS > 0) {
+      await sleep(TOPIC_AUDIT_DELAY_MS);
+    }
+  }
+
+  return {
+    checked: batch.length,
+    current,
+    outdated: outdatedChannels.length,
+    fetchFailed: fetchFailedChannels.length,
+    truncated,
+    mappedChannelCount: channelMap.size,
+    skippedNoCase,
+    outdatedChannels,
+    fetchFailedChannels,
+  };
+}
+
+/** Admin / manual: push structured topics for mapped case channels. */
+export async function syncAllSlackChannelTopicSummaries(
+  options: SlackTopicBulkSyncOptions = {},
+): Promise<SlackTopicBulkSyncResult> {
+  const { cleanCaseNumber } = await import("@/lib/csv/parse");
+  const { getCases } = await import("@/lib/supabase/services");
 
   const [cases, channelMap] = await Promise.all([getCases(), loadSlackChannelMapByCaseNumber()]);
 
@@ -318,11 +500,49 @@ export async function syncAllSlackChannelTopicSummaries(): Promise<SlackTopicBul
   }
   skippedNoCaseChannels.sort((a, b) => a.caseNumber.localeCompare(b.caseNumber, undefined, { numeric: true }));
 
-  const mappedCases = cases.filter((record) => {
-    const key = cleanCaseNumber(record.shared.caseNumber);
-    const channelId = channelMap.get(key)?.slackChannelId;
-    return Boolean(key && channelId?.trim());
-  });
+  let mappedCases = cases
+    .map((record) => {
+      const key = cleanCaseNumber(record.shared.caseNumber);
+      const mapping = channelMap.get(key);
+      if (!key || !mapping?.slackChannelId?.trim()) return null;
+      return {
+        record,
+        mapping,
+        topicSyncedAt: mapping.topicSyncedAt ?? null,
+        caseNumber: record.shared.caseNumber,
+      };
+    })
+    .filter(Boolean) as Array<{
+    record: CaseRecord;
+    mapping: NonNullable<ReturnType<typeof channelMap.get>>;
+    topicSyncedAt: string | null;
+    caseNumber: string;
+  }>;
+
+  // Prefer never-synced / oldest confirmed sync first.
+  mappedCases = sortByOldestTopicSync(mappedCases);
+
+  if (options.outdatedOnly) {
+    const outdated: typeof mappedCases = [];
+    for (let index = 0; index < mappedCases.length; index++) {
+      const item = mappedCases[index]!;
+      const channelId = normalizeSlackChannelId(item.mapping.slackChannelId);
+      if (!channelId) continue;
+      const expected = buildExpectedCaseTopic(item.record);
+      const current = await fetchChannelTopic(channelId);
+      if (!topicsEquivalent(current, expected)) {
+        outdated.push(item);
+      } else if (!item.topicSyncedAt) {
+        await markChannelTopicSynced(item.record.shared.caseNumber, stageLabelFromCaseStage(item.record.tracker.caseStage));
+      }
+      if (index < mappedCases.length - 1 && TOPIC_AUDIT_DELAY_MS > 0) {
+        await sleep(TOPIC_AUDIT_DELAY_MS);
+      }
+      // Keep scan bounded so we still have time to write.
+      if (outdated.length >= BULK_TOPIC_SYNC_MAX_CASES) break;
+    }
+    mappedCases = outdated;
+  }
 
   const result: SlackTopicBulkSyncResult = {
     total: 0,
@@ -341,16 +561,16 @@ export async function syncAllSlackChannelTopicSummaries(): Promise<SlackTopicBul
   const batch = mappedCases.slice(0, BULK_TOPIC_SYNC_MAX_CASES);
 
   for (let index = 0; index < batch.length; index++) {
-    const record = batch[index]!;
-    const key = cleanCaseNumber(record.shared.caseNumber);
-    const mapping = channelMap.get(key);
+    const item = batch[index]!;
+    const record = item.record;
+    const mapping = item.mapping;
     result.total++;
 
     const baseEntry = {
       caseNumber: record.shared.caseNumber,
       clientName: record.shared.clientName?.trim() || null,
-      channelName: mapping?.slackChannelName?.trim() || null,
-      channelId: mapping?.slackChannelId?.trim() || null,
+      channelName: mapping.slackChannelName?.trim() || null,
+      channelId: mapping.slackChannelId?.trim() || null,
     };
 
     try {

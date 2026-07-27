@@ -3,7 +3,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCaseById, updateSharedCaseFields, updateTrackerEntry } from "@/lib/supabase/services";
 import { reassignCaseTeam } from "@/lib/slack/case-reassign";
 import { postSlackMessage, getSlackBotUserId } from "@/lib/slack/client";
-import { wasTopicWrittenByUs } from "@/lib/slack/channel-topic";
+import { syncSlackChannelTopicSummary, wasTopicWrittenByUs } from "@/lib/slack/channel-topic";
 import { STAGE_TOPIC_LABELS } from "@/lib/slack/enum-replies";
 import { caseStageFromTopicLabel, parseCaseTopic } from "@/lib/slack/topic-format";
 
@@ -138,16 +138,29 @@ export async function applySlackChannelTopicChange(input: {
       topic: topic.slice(0, 200),
       format: parsed.format,
     });
-    await replyInChannel(
-      input.channelId,
-      [
-        "Slack topic is not formatted correctly for Case Tracker.",
-        "*Nothing was updated* — fix the topic and try again.",
-        "",
-        TOPIC_FORMAT_HELP,
-      ].join("\n"),
-    );
-    return { applied: false as const, reason: "unstructured" as const, caseId };
+    const rejectionLines =
+      parsed.format === "legacy"
+        ? [
+            "This channel topic is still in the *legacy* format, so Case Tracker did not update anything.",
+            "Legacy looks like: `Attorney <@U…> | Paralegal <@U…> (Treating)`",
+            "Use the full structured topic (status as its own segment + primary language flag):",
+            "",
+            TOPIC_FORMAT_HELP,
+            "",
+            "Example: `Attorney <@U…> | Paralegal <@U…> | Treating | :us: (Primary)`",
+          ]
+        : [
+            "Slack topic is not formatted correctly for Case Tracker.",
+            "*Nothing was updated* — fix the topic and try again.",
+            "",
+            TOPIC_FORMAT_HELP,
+          ];
+    await replyInChannel(input.channelId, rejectionLines.join("\n"));
+    return {
+      applied: false as const,
+      reason: parsed.format === "legacy" ? ("legacy" as const) : ("unstructured" as const),
+      caseId,
+    };
   }
 
   const record = await getCaseById(caseId);
@@ -177,17 +190,17 @@ export async function applySlackChannelTopicChange(input: {
   );
 
   const warnings: string[] = [];
-  const attorneyChangeAttempted = Boolean(
-    (parsed.attorneySlackUserId || parsed.attorneyHandle) &&
-      topicAttorney &&
-      topicAttorney.id !== record.shared.attorneyId,
-  );
-  if (attorneyChangeAttempted) {
-    const currentName = record.attorney.name?.trim() || "the current attorney";
-    warnings.push(
-      `Attorney was not updated — case attorney stays *${currentName}*. Change the attorney in Case Tracker (not in the Slack topic).`,
-    );
-  }
+  const attorneyChangeAttempted = detectAttorneyChangeAttempt({
+    parsedAttorneySlackUserId: parsed.attorneySlackUserId,
+    parsedAttorneyHandle: parsed.attorneyHandle,
+    topicAttorneyId: topicAttorney?.id ?? null,
+    caseAttorneyId: record.shared.attorneyId,
+    caseAttorneySlackUserId: record.attorney.slackUserId ?? null,
+    caseAttorneyHandle:
+      record.attorney.slackDisplayName?.trim() ||
+      record.attorney.name?.split(/\s+/)[0] ||
+      null,
+  });
   if ((parsed.paralegalSlackUserId || parsed.paralegalHandle) && !paralegal) {
     warnings.push(
       `Could not match paralegal ${parsed.paralegalSlackUserId ? `<@${parsed.paralegalSlackUserId}>` : `@${parsed.paralegalHandle}`}`,
@@ -248,6 +261,19 @@ export async function applySlackChannelTopicChange(input: {
 
   const calendarNote = formatCalendarReconcileNote(reassignResult?.calendarReconcile ?? null);
 
+  let topicRestored = false;
+  if (attorneyChangeAttempted) {
+    const refreshed = (await getCaseById(caseId)) ?? record;
+    const restore = await syncSlackChannelTopicSummary(refreshed);
+    topicRestored = Boolean(restore.updated || restore.reason === "already_current");
+    const currentName = refreshed.attorney.name?.trim() || "the current attorney";
+    warnings.unshift(
+      topicRestored
+        ? `Attorney change is *not allowed* here. Case attorney stays *${currentName}* — topic restored from Case Tracker.`
+        : `Attorney change is *not allowed* here. Case attorney stays *${currentName}* — update attorney in Case Tracker, then fix the topic.`,
+    );
+  }
+
   const appliedParts = [
     paralegalChanged ? `Paralegal → ${paralegal?.name ?? "?"}` : null,
     stageChanged && nextStage ? `Stage → ${stageDisplayForTopic(nextStage)}` : null,
@@ -266,7 +292,7 @@ export async function applySlackChannelTopicChange(input: {
     }
     if (warnings.length > 0) {
       if (lines.length > 0) lines.push("");
-      lines.push("Could not fully apply this topic change:");
+      lines.push(attorneyChangeAttempted ? "Not allowed:" : "Could not fully apply this topic change:");
       lines.push(...warnings.map((line) => `• ${line}`));
       if (invalidStage || !parsed.primaryLanguage) {
         lines.push("");
@@ -282,6 +308,7 @@ export async function applySlackChannelTopicChange(input: {
     assignmentChanged: paralegalChanged,
     paralegalChanged,
     attorneyChangeAttempted,
+    topicRestored,
     attorneyIgnored: true,
     usesEveChanged,
     languageChanged,
@@ -292,6 +319,34 @@ export async function applySlackChannelTopicChange(input: {
     warnings,
     reassignResult,
   };
+}
+
+function detectAttorneyChangeAttempt(input: {
+  parsedAttorneySlackUserId: string | null;
+  parsedAttorneyHandle: string | null;
+  topicAttorneyId: string | null;
+  caseAttorneyId: string;
+  caseAttorneySlackUserId: string | null;
+  caseAttorneyHandle: string | null;
+}) {
+  if (!input.parsedAttorneySlackUserId && !input.parsedAttorneyHandle) return false;
+
+  if (input.topicAttorneyId) {
+    return input.topicAttorneyId !== input.caseAttorneyId;
+  }
+
+  if (input.parsedAttorneySlackUserId && input.caseAttorneySlackUserId) {
+    return (
+      input.parsedAttorneySlackUserId.trim().toUpperCase() !==
+      input.caseAttorneySlackUserId.trim().toUpperCase()
+    );
+  }
+
+  if (input.parsedAttorneyHandle && input.caseAttorneyHandle) {
+    return normalizeHandle(input.parsedAttorneyHandle) !== normalizeHandle(input.caseAttorneyHandle);
+  }
+
+  return false;
 }
 
 function stageDisplayForTopic(stage: string) {

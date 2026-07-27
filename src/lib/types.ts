@@ -225,6 +225,8 @@ export type CaseSlackChannel = {
   slackChannelId: string | null;
   slackChannelName: string;
   topicStage: string | null;
+  /** When Case Tracker last wrote/confirmed the structured topic. */
+  topicSyncedAt: string | null;
   syncedAt: string;
   updatedAt: string;
 };

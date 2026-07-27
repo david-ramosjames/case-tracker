@@ -17,6 +17,9 @@
     },
     "src/app/api/admin/slack-topic-sync-all/route.ts": {
       "maxDuration": 800
+    },
+    "src/app/api/admin/slack-topic-audit/route.ts": {
+      "maxDuration": 800
     }
   }
 }

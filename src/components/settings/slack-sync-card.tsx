@@ -59,6 +59,7 @@ function BulkTopicSyncReport({ result }: { result: SlackTopicBulkSyncResult }) {
         </p>
         <p className="text-xs text-muted-foreground">
           Only channels linked to a Case Tracker case were touched. Sheet rows without a tracker case were left unchanged.
+          Runs oldest / never-synced first.
         </p>
       </div>
 
@@ -140,14 +141,123 @@ function BulkTopicSyncReport({ result }: { result: SlackTopicBulkSyncResult }) {
   );
 }
 
+type SlackTopicAuditEntry = {
+  caseNumber: string;
+  clientName: string | null;
+  channelName: string | null;
+  channelId: string | null;
+  status: "current" | "legacy" | "mismatch" | "empty" | "fetch_failed" | "unstructured";
+  topicSyncedAt: string | null;
+  currentTopic: string | null;
+  expectedTopic: string;
+};
+
+type SlackTopicAuditResult = {
+  checked?: number;
+  current?: number;
+  outdated?: number;
+  fetchFailed?: number;
+  truncated?: boolean;
+  mappedChannelCount?: number;
+  skippedNoCase?: number;
+  outdatedChannels?: SlackTopicAuditEntry[];
+  fetchFailedChannels?: SlackTopicAuditEntry[];
+  error?: string;
+};
+
+function TopicAuditReport({
+  result,
+  onSyncOutdated,
+  syncingOutdated,
+}: {
+  result: SlackTopicAuditResult;
+  onSyncOutdated: () => void;
+  syncingOutdated: boolean;
+}) {
+  const outdated = result.outdatedChannels ?? [];
+  const failed = result.fetchFailedChannels ?? [];
+
+  return (
+    <div className="space-y-3 rounded-md border border-border/70 bg-background p-3 text-sm">
+      <div className="space-y-1">
+        <p className="font-medium text-navy-950">Topic audit</p>
+        <p className="text-muted-foreground">
+          Checked {result.checked ?? 0} of {result.mappedChannelCount ?? 0} mapped channels
+          {(result.skippedNoCase ?? 0) > 0 ? ` · ${result.skippedNoCase} sheet rows have no tracker case` : ""}
+          {result.truncated ? " · scan capped (run again after syncing)" : ""}
+        </p>
+        <p>
+          <span className="text-emerald-700">{result.current ?? 0} already match</span>
+          {" · "}
+          <span className="text-amber-700">{result.outdated ?? 0} need update</span>
+          {(result.fetchFailed ?? 0) > 0 ? (
+            <>
+              {" · "}
+              <span className="text-rose-700">{result.fetchFailed} could not read</span>
+            </>
+          ) : null}
+        </p>
+        <p className="text-xs text-muted-foreground">
+          Outdated list is ordered never-synced / oldest confirmed sync first.
+        </p>
+      </div>
+
+      {outdated.length > 0 ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-medium text-navy-950">Needs update ({outdated.length})</p>
+            <Button type="button" variant="outline" size="sm" disabled={syncingOutdated} onClick={onSyncOutdated}>
+              {syncingOutdated ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Sync outdated only
+            </Button>
+          </div>
+          <ul className="max-h-72 space-y-2 overflow-y-auto rounded border border-border/60 bg-muted/20 p-2 font-mono text-xs">
+            {outdated.map((entry) => (
+              <li key={`outdated-${entry.caseNumber}-${entry.channelId}`} className="space-y-0.5">
+                <div>
+                  <span className="text-amber-700">{entry.status}</span> {channelLabel(entry)}
+                  {entry.clientName ? ` — ${entry.clientName}` : ""} ({entry.caseNumber})
+                  {entry.topicSyncedAt
+                    ? ` · last sync ${new Date(entry.topicSyncedAt).toLocaleString()}`
+                    : " · never synced"}
+                </div>
+                <div className="text-muted-foreground truncate" title={entry.currentTopic ?? ""}>
+                  now: {entry.currentTopic || "(empty)"}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="text-emerald-700">No outdated topics found in this scan.</p>
+      )}
+
+      {failed.length > 0 ? (
+        <div className="space-y-1">
+          <p className="font-medium text-rose-700">Could not read ({failed.length})</p>
+          <ul className="max-h-40 space-y-1 overflow-y-auto rounded border border-border/60 bg-muted/20 p-2 font-mono text-xs">
+            {failed.map((entry) => (
+              <li key={`fail-${entry.caseNumber}-${entry.channelId}`}>
+                {channelLabel(entry)} ({entry.caseNumber}) — bot may not be in channel
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function SlackSyncCard() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [bulkSyncResult, setBulkSyncResult] = useState<SlackTopicBulkSyncResult | null>(null);
+  const [auditResult, setAuditResult] = useState<SlackTopicAuditResult | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isSeeding, setIsSeeding] = useState(false);
   const [isUpdatingTopic, setIsUpdatingTopic] = useState(false);
   const [isSyncingAllTopics, setIsSyncingAllTopics] = useState(false);
+  const [isAuditingTopics, setIsAuditingTopics] = useState(false);
   const [topicCaseNumber, setTopicCaseNumber] = useState("");
 
   async function syncChannels() {
@@ -155,6 +265,7 @@ export function SlackSyncCard() {
     setMessage(null);
     setError(null);
     setBulkSyncResult(null);
+    setAuditResult(null);
     try {
       const response = await fetch("/api/slack/sync-channels", { method: "POST" });
       const body = (await response.json()) as {
@@ -207,24 +318,50 @@ export function SlackSyncCard() {
     }
   }
 
-  async function syncAllTopics() {
-    if (
-      !window.confirm(
-        "Push structured Slack topics for every case with a mapped channel? This may take several minutes.",
-      )
-    ) {
-      return;
+  async function runTopicAudit() {
+    setIsAuditingTopics(true);
+    setMessage(null);
+    setError(null);
+    setBulkSyncResult(null);
+    setAuditResult(null);
+    try {
+      const response = await fetch("/api/admin/slack-topic-audit", { method: "POST" });
+      const body = (await response.json()) as SlackTopicAuditResult;
+      if (!response.ok) throw new Error(body.error ?? "Topic audit failed.");
+      setAuditResult(body);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Topic audit failed.");
+    } finally {
+      setIsAuditingTopics(false);
     }
+  }
+
+  async function syncTopics(outdatedOnly: boolean) {
+    const confirmMessage = outdatedOnly
+      ? "Push structured Slack topics only for channels that do not match Case Tracker? This may take several minutes."
+      : "Push structured Slack topics for every case with a mapped channel? This may take several minutes.";
+    if (!window.confirm(confirmMessage)) return;
 
     setIsSyncingAllTopics(true);
     setMessage(null);
     setError(null);
     setBulkSyncResult(null);
     try {
-      const response = await fetch("/api/admin/slack-topic-sync-all", { method: "POST" });
+      const response = await fetch("/api/admin/slack-topic-sync-all", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ outdatedOnly }),
+      });
       const body = (await response.json()) as SlackTopicBulkSyncResult;
       if (!response.ok) throw new Error(body.error ?? "Bulk topic sync failed.");
       setBulkSyncResult(body);
+      if (outdatedOnly) {
+        // Refresh audit after fixing outdated channels.
+        const auditResponse = await fetch("/api/admin/slack-topic-audit", { method: "POST" });
+        if (auditResponse.ok) {
+          setAuditResult((await auditResponse.json()) as SlackTopicAuditResult);
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bulk topic sync failed.");
     } finally {
@@ -271,7 +408,7 @@ export function SlackSyncCard() {
     }
   }
 
-  const busy = isSyncing || isSeeding || isUpdatingTopic || isSyncingAllTopics;
+  const busy = isSyncing || isSeeding || isUpdatingTopic || isSyncingAllTopics || isAuditingTopics;
 
   return (
     <Card>
@@ -309,7 +446,7 @@ export function SlackSyncCard() {
           <p className="text-sm font-medium text-navy-950">Push structured Slack topic</p>
           <p className="text-sm text-muted-foreground">
             Writes the Case Tracker summary into case channel topics (Eve, attorney, paralegal, stage, languages).
-            Sync all only touches channels linked to a Case Tracker case; sheet rows without a tracker case are skipped.
+            Use <strong>Find outdated topics</strong> to compare live Slack topics to Case Tracker, then sync only those.
             Full auto-sync on field changes stays off until <code className="text-xs">SLACK_TOPIC_AUTO_SYNC=true</code>.
           </p>
           <div className="flex flex-wrap items-center gap-2">
@@ -328,18 +465,31 @@ export function SlackSyncCard() {
               {isUpdatingTopic ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Update Slack topic
             </Button>
-            <Button variant="outline" disabled={busy} onClick={() => void syncAllTopics()}>
+            <Button variant="outline" disabled={busy} onClick={() => void runTopicAudit()}>
+              {isAuditingTopics ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Find outdated topics
+            </Button>
+            <Button variant="outline" disabled={busy} onClick={() => void syncTopics(false)}>
               {isSyncingAllTopics ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Sync all Slack topics
             </Button>
           </div>
-          {isSyncingAllTopics ? (
+          {isAuditingTopics || isSyncingAllTopics ? (
             <p className="text-xs text-muted-foreground">
-              Updating every mapped case channel — keep this tab open; this can take a few minutes.
+              {isAuditingTopics
+                ? "Comparing live Slack topics to Case Tracker — keep this tab open."
+                : "Updating case channels — keep this tab open; this can take a few minutes. Oldest / never-synced first."}
             </p>
           ) : null}
         </div>
 
+        {auditResult ? (
+          <TopicAuditReport
+            result={auditResult}
+            syncingOutdated={isSyncingAllTopics}
+            onSyncOutdated={() => void syncTopics(true)}
+          />
+        ) : null}
         {bulkSyncResult ? <BulkTopicSyncReport result={bulkSyncResult} /> : null}
         {message ? <p className="text-sm text-emerald-700">{message}</p> : null}
         {error ? <p className="text-sm text-rose-700">{error}</p> : null}

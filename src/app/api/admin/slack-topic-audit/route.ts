@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
-import { syncAllSlackChannelTopicSummaries } from "@/lib/slack/channel-topic";
+import { auditSlackChannelTopicSummaries } from "@/lib/slack/channel-topic";
 
 export const maxDuration = 800;
 
-export async function POST(request: Request) {
+export async function POST() {
   try {
     const sessionUser = await requireApiSession();
     if (!sessionUser) return unauthorizedResponse();
@@ -12,18 +12,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Admin access required." }, { status: 403 });
     }
 
-    let outdatedOnly = false;
-    try {
-      const body = (await request.json()) as { outdatedOnly?: boolean };
-      outdatedOnly = Boolean(body.outdatedOnly);
-    } catch {
-      // empty body is fine — sync all
-    }
-
-    const result = await syncAllSlackChannelTopicSummaries({ outdatedOnly });
+    const result = await auditSlackChannelTopicSummaries();
     return NextResponse.json(result);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to sync Slack topics.";
+    const message = error instanceof Error ? error.message : "Failed to audit Slack topics.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

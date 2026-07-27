@@ -122,6 +122,7 @@ type ChannelRow = {
   slack_channel_id: string | null;
   slack_channel_name: string;
   topic_stage: string | null;
+  topic_synced_at?: string | null;
   synced_at: string;
   updated_at: string;
 };
@@ -132,6 +133,7 @@ function rowToChannel(row: ChannelRow): CaseSlackChannel {
     slackChannelId: row.slack_channel_id,
     slackChannelName: row.slack_channel_name,
     topicStage: row.topic_stage,
+    topicSyncedAt: row.topic_synced_at ?? null,
     syncedAt: row.synced_at,
     updatedAt: row.updated_at,
   };
@@ -149,6 +151,27 @@ export async function updateChannelTopicStage(caseNumber: string, topicStage: st
 
   if (error) {
     console.warn("Failed to update topic_stage in database", { caseNumber: key, error: error.message });
+    return false;
+  }
+  return true;
+}
+
+/** Mark that Case Tracker confirmed or wrote the structured Slack topic. */
+export async function markChannelTopicSynced(caseNumber: string, topicStage?: string | null) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return false;
+
+  const key = cleanCaseNumber(caseNumber);
+  const now = new Date().toISOString();
+  const payload: Record<string, string> = {
+    topic_synced_at: now,
+    updated_at: now,
+  };
+  if (topicStage?.trim()) payload.topic_stage = topicStage.trim();
+
+  const { error } = await admin.from("case_slack_channels").update(payload).eq("case_number", key);
+  if (error) {
+    console.warn("Failed to update topic_synced_at", { caseNumber: key, error: error.message });
     return false;
   }
   return true;
@@ -178,12 +201,12 @@ export async function loadSlackChannelMapByCaseNumber() {
   return map;
 }
 
-export async function upsertSlackChannels(rows: Array<Omit<CaseSlackChannel, "syncedAt" | "updatedAt">>) {
+export async function upsertSlackChannels(rows: Array<Omit<CaseSlackChannel, "syncedAt" | "updatedAt" | "topicSyncedAt">>) {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required to sync Slack channels.");
 
   // Sheet rows can repeat the same Case No; Postgres rejects duplicate keys in one upsert batch.
-  const byCaseNumber = new Map<string, Omit<CaseSlackChannel, "syncedAt" | "updatedAt">>();
+  const byCaseNumber = new Map<string, Omit<CaseSlackChannel, "syncedAt" | "updatedAt" | "topicSyncedAt">>();
   for (const row of rows) {
     byCaseNumber.set(cleanCaseNumber(row.caseNumber), row);
   }
