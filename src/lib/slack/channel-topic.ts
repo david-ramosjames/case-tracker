@@ -252,6 +252,158 @@ export async function syncSlackChannelTopicSummaryForCaseNumber(caseNumber: stri
   };
 }
 
+export type SlackTopicBulkSyncLogEntry = {
+  caseNumber: string;
+  clientName: string | null;
+  channelName: string | null;
+  channelId: string | null;
+  status: "updated" | "already_current" | "failed";
+  message?: string;
+  topic?: string | null;
+  previousTopic?: string | null;
+};
+
+export type SlackTopicBulkSyncSkippedChannel = {
+  caseNumber: string;
+  channelName: string | null;
+  channelId: string | null;
+};
+
+export type SlackTopicBulkSyncResult = {
+  /** Case channels in the sheet mapping that were processed. */
+  total: number;
+  updated: number;
+  alreadyCurrent: number;
+  setFailed: number;
+  /** Sheet rows with no matching Case Tracker case — Slack topics not touched. */
+  skippedNoCase: number;
+  skippedNoCaseChannels: SlackTopicBulkSyncSkippedChannel[];
+  /** Per-channel outcome for every processed Case Tracker case. */
+  log: SlackTopicBulkSyncLogEntry[];
+  /** Subset of log where the Slack topic was rewritten. */
+  updatedChannels: SlackTopicBulkSyncLogEntry[];
+  errors: string[];
+  /** True when stopped early to stay within server time limits. */
+  truncated: boolean;
+  /** Total rows in case_slack_channels (Google Sheet import). */
+  mappedChannelCount: number;
+};
+
+const BULK_TOPIC_SYNC_DELAY_MS = 350;
+/** ~2 Slack API calls per case; stay under Vercel limits for large channel lists. */
+const BULK_TOPIC_SYNC_MAX_CASES = 400;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Admin / manual: push structured topics for every mapped case channel. */
+export async function syncAllSlackChannelTopicSummaries(): Promise<SlackTopicBulkSyncResult> {
+  const { cleanCaseNumber } = await import("@/lib/csv/parse");
+  const { getCases } = await import("@/lib/supabase/services");
+  const { loadSlackChannelMapByCaseNumber } = await import("@/lib/slack/channels");
+
+  const [cases, channelMap] = await Promise.all([getCases(), loadSlackChannelMapByCaseNumber()]);
+
+  const caseNumbersInTracker = new Set(cases.map((record) => cleanCaseNumber(record.shared.caseNumber)));
+
+  const skippedNoCaseChannels: SlackTopicBulkSyncSkippedChannel[] = [];
+  for (const [caseNumber, channel] of channelMap) {
+    if (caseNumbersInTracker.has(caseNumber)) continue;
+    skippedNoCaseChannels.push({
+      caseNumber,
+      channelName: channel.slackChannelName?.trim() || null,
+      channelId: channel.slackChannelId?.trim() || null,
+    });
+  }
+  skippedNoCaseChannels.sort((a, b) => a.caseNumber.localeCompare(b.caseNumber, undefined, { numeric: true }));
+
+  const mappedCases = cases.filter((record) => {
+    const key = cleanCaseNumber(record.shared.caseNumber);
+    const channelId = channelMap.get(key)?.slackChannelId;
+    return Boolean(key && channelId?.trim());
+  });
+
+  const result: SlackTopicBulkSyncResult = {
+    total: 0,
+    updated: 0,
+    alreadyCurrent: 0,
+    setFailed: 0,
+    skippedNoCase: skippedNoCaseChannels.length,
+    skippedNoCaseChannels,
+    log: [],
+    updatedChannels: [],
+    errors: [],
+    truncated: mappedCases.length > BULK_TOPIC_SYNC_MAX_CASES,
+    mappedChannelCount: channelMap.size,
+  };
+
+  const batch = mappedCases.slice(0, BULK_TOPIC_SYNC_MAX_CASES);
+
+  for (let index = 0; index < batch.length; index++) {
+    const record = batch[index]!;
+    const key = cleanCaseNumber(record.shared.caseNumber);
+    const mapping = channelMap.get(key);
+    result.total++;
+
+    const baseEntry = {
+      caseNumber: record.shared.caseNumber,
+      clientName: record.shared.clientName?.trim() || null,
+      channelName: mapping?.slackChannelName?.trim() || null,
+      channelId: mapping?.slackChannelId?.trim() || null,
+    };
+
+    try {
+      const syncResult = await syncSlackChannelTopicSummary(record);
+      if (syncResult.updated) {
+        result.updated++;
+        const entry: SlackTopicBulkSyncLogEntry = {
+          ...baseEntry,
+          status: "updated",
+          topic: syncResult.topic ?? null,
+          previousTopic: syncResult.previousTopic ?? null,
+        };
+        result.log.push(entry);
+        result.updatedChannels.push(entry);
+      } else if (syncResult.reason === "already_current") {
+        result.alreadyCurrent++;
+        result.log.push({
+          ...baseEntry,
+          status: "already_current",
+          topic: syncResult.topic ?? null,
+        });
+      } else if (syncResult.reason === "set_failed") {
+        result.setFailed++;
+        const message = "Slack rejected the topic update";
+        result.errors.push(`${record.shared.caseNumber}: ${message}`);
+        result.log.push({ ...baseEntry, status: "failed", message });
+      } else {
+        result.setFailed++;
+        const message = syncResult.reason ?? "unknown";
+        result.errors.push(`${record.shared.caseNumber}: ${message}`);
+        result.log.push({ ...baseEntry, status: "failed", message });
+      }
+    } catch (error) {
+      result.setFailed++;
+      const message = error instanceof Error ? error.message : String(error);
+      result.errors.push(`${record.shared.caseNumber}: ${message}`);
+      result.log.push({ ...baseEntry, status: "failed", message });
+    }
+
+    if (index < batch.length - 1 && BULK_TOPIC_SYNC_DELAY_MS > 0) {
+      await sleep(BULK_TOPIC_SYNC_DELAY_MS);
+    }
+  }
+
+  if (result.errors.length > 20) {
+    const extra = result.errors.length - 20;
+    result.errors = result.errors.slice(0, 20);
+    result.errors.push(`…and ${extra} more error(s)`);
+  }
+
+  return result;
+}
+
 /** @deprecated Prefer syncSlackChannelTopicSummary — kept for call sites that only know stage. */
 export async function syncSlackChannelTopicForStage(input: {
   channelId: string;

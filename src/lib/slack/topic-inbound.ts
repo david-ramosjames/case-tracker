@@ -229,22 +229,27 @@ export async function applySlackChannelTopicChange(input: {
     await updateTrackerEntry(
       caseId,
       { caseStage: nextStage },
-      { actor: { userName: "Slack topic" }, changeInput: { caseStage: nextStage } },
+      {
+        actor: { userName: "Slack topic" },
+        changeInput: { caseStage: nextStage },
+        // Topic apply posts its own summary; avoid duplicate "Case stage updated" notices.
+        skipSlackNotifications: true,
+      },
     );
   }
+
+  const calendarNote = formatCalendarReconcileNote(reassignResult?.calendarReconcile ?? null);
 
   const appliedParts = [
     assignmentChanged
       ? `Reassigned to Attorney ${attorney?.name ?? "?"} / Paralegal ${paralegal?.name ?? "?"}`
       : null,
-    stageChanged ? `Stage → ${nextStage}` : null,
+    stageChanged && nextStage ? `Stage → ${stageDisplayForTopic(nextStage)}` : null,
     usesEveChanged ? `Eve → ${parsed.usesEve ? "Yes" : "No"}` : null,
     languageChanged
       ? `Language → ${parsed.primaryLanguage ?? "?"}${parsed.secondaryLanguage ? ` / ${parsed.secondaryLanguage}` : ""}`
       : null,
-    reassignResult?.calendarReconcile && !reassignResult.calendarReconcile.ok
-      ? "_Calendar invite reconcile was requested but DocketFlow did not confirm — check DocketFlow env / endpoint._"
-      : null,
+    calendarNote,
   ].filter(Boolean) as string[];
 
   if (warnings.length > 0 || appliedParts.length > 0) {
@@ -266,7 +271,7 @@ export async function applySlackChannelTopicChange(input: {
   }
 
   return {
-    applied: appliedParts.length > 0 || warnings.length === 0,
+    applied: Boolean(assignmentChanged || stageChanged || usesEveChanged || languageChanged),
     caseId,
     assignmentChanged,
     usesEveChanged,
@@ -278,4 +283,35 @@ export async function applySlackChannelTopicChange(input: {
     warnings,
     reassignResult,
   };
+}
+
+function stageDisplayForTopic(stage: string) {
+  return STAGE_TOPIC_LABELS[stage as keyof typeof STAGE_TOPIC_LABELS] ?? stage;
+}
+
+function formatCalendarReconcileNote(
+  reconcile: {
+    ok: boolean;
+    skipped?: boolean;
+    reason?: string;
+    status?: number;
+  } | null,
+) {
+  if (!reconcile || reconcile.ok) return null;
+  if (reconcile.skipped) {
+    if (reconcile.reason === "missing_docketflow_url") {
+      return "_Calendar invite reconcile skipped — `NEXT_PUBLIC_DOCKETFLOW_URL` is not set._";
+    }
+    if (reconcile.reason === "missing_shared_secret") {
+      return "_Calendar invite reconcile skipped — DocketFlow shared secret is not set._";
+    }
+    return "_Calendar invite reconcile was skipped._";
+  }
+  if (reconcile.status === 404) {
+    return "_Calendar invite reconcile failed (404) — DocketFlow `POST /api/cases/[id]/reassign-calendar` not found. Deploy that route or fix `NEXT_PUBLIC_DOCKETFLOW_URL`._";
+  }
+  if (reconcile.status) {
+    return `_Calendar invite reconcile failed (HTTP ${reconcile.status}) — check DocketFlow logs / auth secret._`;
+  }
+  return "_Calendar invite reconcile failed — check DocketFlow connectivity._";
 }

@@ -315,6 +315,8 @@ export type TrackerUpdateOptions = {
   actor?: TrackerActor;
   shared?: { status?: CaseStatus; caseType?: string; dateSigned?: string; dateOfIncident?: string | null };
   markReviewed?: boolean;
+  /** When true, skip Slack stage/reminder side effects (e.g. updates already announced from a Slack topic). */
+  skipSlackNotifications?: boolean;
   /** When saving a partial patch, pass the patch here so activity logs only list changed fields. */
   changeInput?: TrackerUpdateInput & {
     result?: SettlementResult;
@@ -490,10 +492,12 @@ export async function updateTrackerEntry(
     );
     if (existingRecord) {
       await syncDerivedSharedCaseStatus(caseId, tracker, existingRecord);
-      try {
-        await runSlackTrackerSideEffects(existingRecord, tracker, changeInput, previousStage);
-      } catch (error) {
-        console.error("Slack tracker notification failed", error);
+      if (!options.skipSlackNotifications) {
+        try {
+          await runSlackTrackerSideEffects(existingRecord, tracker, changeInput, previousStage);
+        } catch (error) {
+          console.error("Slack tracker notification failed", error);
+        }
       }
     }
     return { tracker, activity: activity ?? undefined };

@@ -14,6 +14,9 @@
     },
     "src/app/api/cron/slack-reminders/route.ts": {
       "maxDuration": 800
+    },
+    "src/app/api/admin/slack-topic-sync-all/route.ts": {
+      "maxDuration": 800
     }
   }
 }

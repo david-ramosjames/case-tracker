@@ -14,6 +14,7 @@ import {
   handleStageConfirmationReply,
   handleStageUpdateNotificationReply,
 } from "@/lib/slack/stage-confirmation";
+import { claimSlackEventId, claimTopicApplyLock } from "@/lib/slack/event-dedupe";
 import { applySlackChannelTopicChange } from "@/lib/slack/topic-inbound";
 import { formatSlackThreadAppliedMessage, formatSlackThreadValidationErrors, parseSlackThreadUpdate } from "@/lib/slack/thread-update";
 import { applySlackThreadUpdate } from "@/lib/supabase/services";
@@ -21,6 +22,7 @@ import { applySlackThreadUpdate } from "@/lib/supabase/services";
 type SlackEventPayload = {
   type?: string;
   challenge?: string;
+  event_id?: string;
   event?: {
     type?: string;
     subtype?: string;
@@ -160,9 +162,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true });
   }
 
+  if (!claimSlackEventId(payload.event_id)) {
+    return NextResponse.json({ ok: true, deduped: true });
+  }
+
   const event = payload.event;
 
   if (isChannelTopicChange(event)) {
+    if (!claimTopicApplyLock(event.channel, event.topic)) {
+      console.info("Slack channel topic change skipped (in-flight duplicate)", {
+        type: event.type,
+        subtype: event.subtype,
+        channel: event.channel,
+        event_id: payload.event_id,
+      });
+      return NextResponse.json({ ok: true, deduped: true });
+    }
     try {
       console.info("Slack channel topic change received", {
         type: event.type,
@@ -170,6 +185,7 @@ export async function POST(request: Request) {
         channel: event.channel,
         topic: event.topic.slice(0, 200),
         user: event.user,
+        event_id: payload.event_id,
       });
       const result = await applySlackChannelTopicChange({
         channelId: event.channel,
