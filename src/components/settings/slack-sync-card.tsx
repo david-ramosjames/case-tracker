@@ -150,6 +150,7 @@ type SlackTopicAuditEntry = {
   topicSyncedAt: string | null;
   currentTopic: string | null;
   expectedTopic: string;
+  error?: string | null;
 };
 
 type SlackTopicAuditResult = {
@@ -235,10 +236,14 @@ function TopicAuditReport({
       {failed.length > 0 ? (
         <div className="space-y-1">
           <p className="font-medium text-rose-700">Could not read ({failed.length})</p>
+          <p className="text-xs text-muted-foreground">
+            Often Slack rate limits during a large audit — run Find outdated again. Empty topics show under Needs
+            update, not here. Private channels still need <code className="text-[11px]">/invite @Case Tracker</code>.
+          </p>
           <ul className="max-h-40 space-y-1 overflow-y-auto rounded border border-border/60 bg-muted/20 p-2 font-mono text-xs">
             {failed.map((entry) => (
               <li key={`fail-${entry.caseNumber}-${entry.channelId}`}>
-                {channelLabel(entry)} ({entry.caseNumber}) — bot may not be in channel
+                {channelLabel(entry)} ({entry.caseNumber}) — {entry.error || "unknown Slack error"}
               </li>
             ))}
           </ul>

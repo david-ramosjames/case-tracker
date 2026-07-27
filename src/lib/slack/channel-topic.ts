@@ -1,4 +1,4 @@
-import { fetchChannelTopic, listSlackWorkspaceUsers, lookupSlackUserIdByEmail, setChannelTopic } from "@/lib/slack/client";
+import { fetchChannelTopic, fetchChannelTopicResult, listSlackWorkspaceUsers, lookupSlackUserIdByEmail, setChannelTopic } from "@/lib/slack/client";
 import { getStageTopicLabel } from "@/lib/slack/enum-replies";
 import {
   updateChannelTopicStage,
@@ -336,6 +336,8 @@ export type SlackTopicAuditEntry = {
   topicSyncedAt: string | null;
   currentTopic: string | null;
   expectedTopic: string;
+  /** Present when status is fetch_failed — Slack API error detail. */
+  error?: string | null;
 };
 
 export type SlackTopicAuditResult = {
@@ -359,7 +361,8 @@ export type SlackTopicBulkSyncOptions = {
 const BULK_TOPIC_SYNC_DELAY_MS = 350;
 /** ~2 Slack API calls per case; stay under Vercel limits for large channel lists. */
 const BULK_TOPIC_SYNC_MAX_CASES = 400;
-const TOPIC_AUDIT_DELAY_MS = 200;
+/** conversations.info is easy to rate-limit; keep audit paced. */
+const TOPIC_AUDIT_DELAY_MS = 450;
 const TOPIC_AUDIT_MAX_CASES = 500;
 
 function sleep(ms: number) {
@@ -377,14 +380,27 @@ function sortByOldestTopicSync<T extends { topicSyncedAt: string | null; caseNum
   });
 }
 
-function classifyTopicDrift(currentTopic: string | null, expectedTopic: string): SlackTopicAuditStatus {
-  if (currentTopic == null) return "fetch_failed";
-  if (!currentTopic.trim()) return "empty";
-  if (topicsEquivalent(currentTopic, expectedTopic)) return "current";
-  const parsed = parseCaseTopic(currentTopic);
+function classifyTopicDrift(
+  fetch: { ok: true; topic: string } | { ok: false; error: string },
+  expectedTopic: string,
+): SlackTopicAuditStatus {
+  if (!fetch.ok) return "fetch_failed";
+  if (!fetch.topic.trim()) return "empty";
+  if (topicsEquivalent(fetch.topic, expectedTopic)) return "current";
+  const parsed = parseCaseTopic(fetch.topic);
   if (parsed.format === "legacy") return "legacy";
   if (parsed.format === "structured") return "mismatch";
   return "unstructured";
+}
+
+function shortenSlackError(error: string) {
+  const trimmed = error.trim();
+  if (trimmed.includes("ratelimited")) return "rate limited by Slack — run audit again";
+  if (trimmed.includes("not_in_channel")) return "bot not in channel (private channels need /invite)";
+  if (trimmed.includes("channel_not_found")) return "channel not found (stale sheet ID?)";
+  if (trimmed.includes("missing_scope")) return "missing Slack API scope";
+  if (trimmed.includes("invalid_channel_id")) return "invalid channel ID";
+  return trimmed.slice(0, 120);
 }
 
 /**
@@ -434,8 +450,10 @@ export async function auditSlackChannelTopicSummaries(): Promise<SlackTopicAudit
     const item = batch[index]!;
     const channelId = normalizeSlackChannelId(item.mapping.slackChannelId ?? "");
     const expectedTopic = buildExpectedCaseTopic(item.record);
-    const currentTopic = channelId ? await fetchChannelTopic(channelId) : null;
-    const status = channelId ? classifyTopicDrift(currentTopic, expectedTopic) : "fetch_failed";
+    const fetch = channelId
+      ? await fetchChannelTopicResult(channelId)
+      : ({ ok: false, error: "invalid_channel_id" } as const);
+    const status = classifyTopicDrift(fetch, expectedTopic);
 
     const entry: SlackTopicAuditEntry = {
       caseNumber: item.record.shared.caseNumber,
@@ -444,8 +462,9 @@ export async function auditSlackChannelTopicSummaries(): Promise<SlackTopicAudit
       channelId: item.mapping.slackChannelId?.trim() || null,
       status,
       topicSyncedAt: item.topicSyncedAt,
-      currentTopic: currentTopic?.slice(0, 240) ?? null,
+      currentTopic: fetch.ok ? fetch.topic.slice(0, 240) : null,
       expectedTopic,
+      error: fetch.ok ? null : shortenSlackError(fetch.error),
     };
 
     if (status === "current") {

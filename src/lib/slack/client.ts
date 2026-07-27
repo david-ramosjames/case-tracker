@@ -133,24 +133,57 @@ export async function listSlackWorkspaceUsers() {
   return users;
 }
 
-export async function fetchChannelTopic(channelId: string) {
-  if (!isSlackEnabled()) return null;
+export type FetchChannelTopicResult =
+  | { ok: true; topic: string }
+  | { ok: false; error: string };
+
+async function readChannelTopicValue(channelId: string): Promise<string> {
+  const payload = await slackApi<{
+    ok: boolean;
+    channel?: { topic?: { value?: string } | string };
+  }>("conversations.info", {
+    channel: resolveSlackChannelParam(channelId),
+  });
+
+  const topic = payload.channel?.topic;
+  if (typeof topic === "string") return topic.trim();
+  return topic?.value?.trim() ?? "";
+}
+
+/**
+ * Fetch a channel topic. Empty topics return `{ ok: true, topic: "" }`.
+ * On `not_in_channel`, attempts `conversations.join` (public channels) then retries.
+ */
+export async function fetchChannelTopicResult(channelId: string): Promise<FetchChannelTopicResult> {
+  if (!isSlackEnabled()) return { ok: false, error: "slack_disabled" };
 
   try {
-    const payload = await slackApi<{
-      ok: boolean;
-      channel?: { topic?: { value?: string } | string };
-    }>("conversations.info", {
-      channel: resolveSlackChannelParam(channelId),
-    });
-
-    const topic = payload.channel?.topic;
-    if (typeof topic === "string") return topic.trim() || null;
-    return topic?.value?.trim() || null;
+    const topic = await readChannelTopicValue(channelId);
+    return { ok: true, topic };
   } catch (error) {
-    console.warn("Slack channel topic fetch failed", { channelId, error: errorMessage(error) });
-    return null;
+    if (!isNotInChannelError(error)) {
+      const message = errorMessage(error);
+      console.warn("Slack channel topic fetch failed", { channelId, error: message });
+      return { ok: false, error: message };
+    }
+
+    try {
+      await ensureSlackChannelMembership(resolveSlackChannelParam(channelId));
+      const topic = await readChannelTopicValue(channelId);
+      return { ok: true, topic };
+    } catch (retryError) {
+      const message = errorMessage(retryError);
+      console.warn("Slack channel topic fetch failed after join", { channelId, error: message });
+      return { ok: false, error: message };
+    }
   }
+}
+
+/** Topic text, or `null` when Slack could not be read. Empty channel topics are `""`. */
+export async function fetchChannelTopic(channelId: string) {
+  const result = await fetchChannelTopicResult(channelId);
+  if (!result.ok) return null;
+  return result.topic;
 }
 
 export async function setChannelTopic(channelId: string, topic: string) {
