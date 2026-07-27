@@ -227,6 +227,8 @@ export type CaseSlackChannel = {
   topicStage: string | null;
   /** When Case Tracker last wrote/confirmed the structured topic. */
   topicSyncedAt: string | null;
+  /** Last structured topic text written/confirmed (skip setTopic when unchanged). */
+  topicLastWritten: string | null;
   syncedAt: string;
   updatedAt: string;
 };

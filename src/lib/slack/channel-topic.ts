@@ -203,11 +203,24 @@ export async function syncSlackChannelTopicSummary(
   const stageLabel = stageLabelFromCaseStage(record.tracker.caseStage);
   const nextTopic = buildExpectedCaseTopic(record);
 
+  // Avoid Slack notifications: if we already wrote this exact topic, do not setTopic again.
+  if (mapping.topicLastWritten?.trim() === nextTopic.trim()) {
+    await markChannelTopicSynced(record.shared.caseNumber, stageLabel, nextTopic);
+    return {
+      updated: false as const,
+      reason: "already_current" as const,
+      topic: nextTopic,
+      previousTopic: mapping.topicLastWritten,
+      stageLabel,
+      channelId,
+    };
+  }
+
   let currentTopic: string | null = null;
   if (!options.skipRead) {
     currentTopic = await fetchChannelTopic(channelId);
     if (topicsEquivalent(currentTopic, nextTopic)) {
-      await markChannelTopicSynced(record.shared.caseNumber, stageLabel);
+      await markChannelTopicSynced(record.shared.caseNumber, stageLabel, nextTopic);
       return {
         updated: false as const,
         reason: "already_current" as const,
@@ -232,7 +245,7 @@ export async function syncSlackChannelTopicSummary(
   }
 
   rememberWrittenTopic(channelId, nextTopic);
-  await markChannelTopicSynced(record.shared.caseNumber, stageLabel);
+  await markChannelTopicSynced(record.shared.caseNumber, stageLabel, nextTopic);
   return {
     updated: true as const,
     topic: nextTopic,
@@ -484,7 +497,11 @@ export async function auditSlackChannelTopicSummaries(): Promise<SlackTopicAudit
       current++;
       // Confirm sync timestamp when we find a match and DB has never recorded one.
       if (!item.topicSyncedAt) {
-        await markChannelTopicSynced(item.record.shared.caseNumber, stageLabelFromCaseStage(item.record.tracker.caseStage));
+        await markChannelTopicSynced(
+          item.record.shared.caseNumber,
+          stageLabelFromCaseStage(item.record.tracker.caseStage),
+          expectedTopic,
+        );
       }
     } else if (status === "fetch_failed") {
       fetchFailedChannels.push(entry);
@@ -569,7 +586,11 @@ export async function syncAllSlackChannelTopicSummaries(
       if (!topicsEquivalent(current, expected)) {
         outdated.push(item);
       } else if (!item.topicSyncedAt) {
-        await markChannelTopicSynced(item.record.shared.caseNumber, stageLabelFromCaseStage(item.record.tracker.caseStage));
+        await markChannelTopicSynced(
+          item.record.shared.caseNumber,
+          stageLabelFromCaseStage(item.record.tracker.caseStage),
+          expectedTopic,
+        );
       }
       if (index < mappedCases.length - 1 && TOPIC_AUDIT_DELAY_MS > 0) {
         await sleep(TOPIC_AUDIT_DELAY_MS);

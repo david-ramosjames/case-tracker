@@ -277,19 +277,25 @@ export function SlackSyncCard() {
         synced?: number;
         duplicatesRemoved?: number;
         dateSignedUpdated?: number;
+        sheetDataRows?: number;
+        skippedEmpty?: number;
         error?: string;
       };
       if (!response.ok) throw new Error(body.error ?? "Sync failed.");
       const duplicateNote =
         body.duplicatesRemoved && body.duplicatesRemoved > 0
-          ? ` (${body.duplicatesRemoved} duplicate Case No rows in the sheet used the last row for each case.)`
+          ? ` ${body.duplicatesRemoved} duplicate Case No row(s) collapsed.`
+          : "";
+      const emptyNote =
+        body.skippedEmpty && body.skippedEmpty > 0
+          ? ` ${body.skippedEmpty} blank Case No/channel row(s) skipped.`
           : "";
       const dateSignedNote =
         body.dateSignedUpdated && body.dateSignedUpdated > 0
           ? ` Changed Date Signed on ${body.dateSignedUpdated} tracker case(s) from column H.`
           : "";
       setMessage(
-        `Imported ${body.synced ?? 0} case → channel mappings from Google Sheet.${duplicateNote}${dateSignedNote}`,
+        `Sheet rows: ${body.sheetDataRows ?? "?"} · imported ${body.synced ?? 0} unique case → channel mapping(s).${duplicateNote}${emptyNote}${dateSignedNote}`,
       );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed.");

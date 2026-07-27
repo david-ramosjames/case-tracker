@@ -41,6 +41,20 @@ export async function fetchGoogleSheetValues(spreadsheetId: string, range: strin
   privateKey: string;
 }) {
   const token = await getGoogleAccessToken(credentials.clientEmail, credentials.privateKey);
+
+  // Unbounded column ranges (Sheet1!A:H) — read in row chunks so large sheets aren't truncated.
+  const chunked = await fetchGoogleSheetValuesChunked(spreadsheetId, range, token, credentials.clientEmail);
+  if (chunked) return chunked;
+
+  return fetchGoogleSheetValuesOnce(spreadsheetId, range, token, credentials.clientEmail);
+}
+
+async function fetchGoogleSheetValuesOnce(
+  spreadsheetId: string,
+  range: string,
+  token: string,
+  clientEmail: string,
+) {
   const encodedRange = encodeURIComponent(range);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodedRange}`;
   const response = await fetch(url, {
@@ -54,12 +68,49 @@ export async function fetchGoogleSheetValues(spreadsheetId: string, range: strin
     const detail = body.error?.message ?? "Unable to read Google Sheet.";
     if (/permission/i.test(detail)) {
       throw new Error(
-        `${detail} Share spreadsheet ${spreadsheetId} with ${credentials.clientEmail} as Viewer, and enable the Google Sheets API in Google Cloud.`,
+        `${detail} Share spreadsheet ${spreadsheetId} with ${clientEmail} as Viewer, and enable the Google Sheets API in Google Cloud.`,
       );
     }
     throw new Error(`${detail} (spreadsheet ${spreadsheetId}, range ${range})`);
   }
   return body.values ?? [];
+}
+
+/** Parse `Sheet1!A:H` / `Sheet1!A1:H` into sheet + columns for chunked reads. */
+function parseOpenColumnRange(range: string): { sheet: string; startCol: string; endCol: string } | null {
+  const trimmed = range.trim();
+  // Sheet1!A:H or 'My Sheet'!A:H or Sheet1!A1:H (open-ended end row)
+  const match = trimmed.match(/^((?:'[^']+'|[^!]+))!([A-Za-z]+)(\d*):([A-Za-z]+)(\d*)$/);
+  if (!match) return null;
+  const [, sheet, startCol, , endCol, endRow] = match;
+  if (endRow) return null;
+  return { sheet, startCol, endCol };
+}
+
+const SHEET_READ_CHUNK_ROWS = 500;
+
+async function fetchGoogleSheetValuesChunked(
+  spreadsheetId: string,
+  range: string,
+  token: string,
+  clientEmail: string,
+): Promise<string[][] | null> {
+  const parsed = parseOpenColumnRange(range);
+  if (!parsed) return null;
+
+  const all: string[][] = [];
+  let startRow = 1;
+  // Safety cap: 20 chunks × 500 = 10k rows
+  for (let chunk = 0; chunk < 20; chunk++) {
+    const endRow = startRow + SHEET_READ_CHUNK_ROWS - 1;
+    const chunkRange = `${parsed.sheet}!${parsed.startCol}${startRow}:${parsed.endCol}${endRow}`;
+    const rows = await fetchGoogleSheetValuesOnce(spreadsheetId, chunkRange, token, clientEmail);
+    if (rows.length === 0) break;
+    all.push(...rows);
+    if (rows.length < SHEET_READ_CHUNK_ROWS) break;
+    startRow = endRow + 1;
+  }
+  return all;
 }
 
 export function findSheetColumnIndex(header: string[], matchers: Array<(cell: string) => boolean>) {

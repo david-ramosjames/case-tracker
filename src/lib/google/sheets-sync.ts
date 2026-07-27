@@ -15,6 +15,10 @@ export type SheetSyncResult = {
   duplicatesRemoved?: number;
   dateSignedUpdated?: number;
   dryRun?: boolean;
+  /** Data rows read from the sheet (excluding header). */
+  sheetDataRows?: number;
+  /** Rows skipped because case # or channel name was blank. */
+  skippedEmpty?: number;
 };
 
 export type SlackSheetSyncPreviewItem = {
@@ -45,6 +49,8 @@ async function readSlackChannelRowsFromSheet(): Promise<{
   mapped: ParsedSlackChannelRow[];
   dateSignedEntries: Array<{ caseNumber: string; dateSigned: string }>;
   duplicatesRemoved: number;
+  sheetDataRows: number;
+  skippedEmpty: number;
 }> {
   const config = getGoogleSheetsConfig();
   if (!config) {
@@ -52,7 +58,9 @@ async function readSlackChannelRowsFromSheet(): Promise<{
   }
 
   const rows = await fetchGoogleSheetValues(config.spreadsheetId, getGoogleSheetsRange(), config);
-  if (rows.length < 2) return { mapped: [], dateSignedEntries: [], duplicatesRemoved: 0 };
+  if (rows.length < 2) {
+    return { mapped: [], dateSignedEntries: [], duplicatesRemoved: 0, sheetDataRows: 0, skippedEmpty: 0 };
+  }
 
   const header = rows[0].map((cell) => cell.trim().toLowerCase());
   const caseIdx = findSheetColumnIndex(header, [
@@ -84,12 +92,17 @@ async function readSlackChannelRowsFromSheet(): Promise<{
     throw new Error('Sheet must include "Case No" and "Slack Channel" columns (see Client Contact Status / Sheet1).');
   }
 
+  const dataRows = rows.slice(1);
   const rawMapped: Array<Omit<ParsedSlackChannelRow, "dateSigned">> = [];
   const dateSignedEntries: Array<{ caseNumber: string; dateSigned: string }> = [];
-  for (const row of rows.slice(1)) {
+  let skippedEmpty = 0;
+  for (const row of dataRows) {
     const caseNumber = cleanCaseNumber(row[caseIdx] ?? "");
     const channelName = (row[channelIdx] ?? "").trim();
-    if (!caseNumber || !channelName) continue;
+    if (!caseNumber || !channelName) {
+      skippedEmpty++;
+      continue;
+    }
 
     const channelIdRaw = channelIdIdx >= 0 ? (row[channelIdIdx] ?? "").trim() : "";
     const slackChannelId = normalizeSlackChannelId(channelIdRaw);
@@ -121,6 +134,8 @@ async function readSlackChannelRowsFromSheet(): Promise<{
     mapped,
     dateSignedEntries,
     duplicatesRemoved: rawMapped.length - deduped.length,
+    sheetDataRows: dataRows.length,
+    skippedEmpty,
   };
 }
 
@@ -135,7 +150,7 @@ function dateSignedWouldChange(
 }
 
 export async function previewSlackChannelsFromGoogleSheet(): Promise<SlackSheetSyncPreviewResult> {
-  const { mapped, dateSignedEntries, duplicatesRemoved } = await readSlackChannelRowsFromSheet();
+  const { mapped, duplicatesRemoved, sheetDataRows, skippedEmpty } = await readSlackChannelRowsFromSheet();
   const existing = await loadSlackChannelMapByCaseNumber();
   const dateSignedOverrides = await loadDateSignedOverridesByCaseNumber(mapped.map((row) => row.caseNumber));
 
@@ -183,6 +198,8 @@ export async function previewSlackChannelsFromGoogleSheet(): Promise<SlackSheetS
     synced: wouldSync,
     duplicatesRemoved,
     dateSignedUpdated: 0,
+    sheetDataRows,
+    skippedEmpty,
     wouldSync,
     dateSignedWouldUpdate,
     previewItems,
@@ -204,9 +221,10 @@ export async function syncSlackChannelsFromGoogleSheetIfConfigured(options?: {
 }
 
 export async function syncSlackChannelsFromGoogleSheet() {
-  const { mapped, dateSignedEntries, duplicatesRemoved } = await readSlackChannelRowsFromSheet();
+  const { mapped, dateSignedEntries, duplicatesRemoved, sheetDataRows, skippedEmpty } =
+    await readSlackChannelRowsFromSheet();
   const { synced } = await upsertSlackChannels(mapped);
   const dateSignedUpdated =
     dateSignedEntries.length > 0 ? (await syncDateSignedFromSheet(dateSignedEntries)).updated : 0;
-  return { synced, duplicatesRemoved, dateSignedUpdated };
+  return { synced, duplicatesRemoved, dateSignedUpdated, sheetDataRows, skippedEmpty };
 }

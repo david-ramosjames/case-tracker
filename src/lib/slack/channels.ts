@@ -123,6 +123,7 @@ type ChannelRow = {
   slack_channel_name: string;
   topic_stage: string | null;
   topic_synced_at?: string | null;
+  topic_last_written?: string | null;
   synced_at: string;
   updated_at: string;
 };
@@ -134,6 +135,7 @@ function rowToChannel(row: ChannelRow): CaseSlackChannel {
     slackChannelName: row.slack_channel_name,
     topicStage: row.topic_stage,
     topicSyncedAt: row.topic_synced_at ?? null,
+    topicLastWritten: row.topic_last_written ?? null,
     syncedAt: row.synced_at,
     updatedAt: row.updated_at,
   };
@@ -157,7 +159,11 @@ export async function updateChannelTopicStage(caseNumber: string, topicStage: st
 }
 
 /** Mark that Case Tracker confirmed or wrote the structured Slack topic. */
-export async function markChannelTopicSynced(caseNumber: string, topicStage?: string | null) {
+export async function markChannelTopicSynced(
+  caseNumber: string,
+  topicStage?: string | null,
+  topicText?: string | null,
+) {
   const admin = createSupabaseAdminClient();
   if (!admin) return false;
 
@@ -168,6 +174,7 @@ export async function markChannelTopicSynced(caseNumber: string, topicStage?: st
     updated_at: now,
   };
   if (topicStage?.trim()) payload.topic_stage = topicStage.trim();
+  if (typeof topicText === "string") payload.topic_last_written = topicText;
 
   const { error } = await admin.from("case_slack_channels").update(payload).eq("case_number", key);
   if (error) {
@@ -201,12 +208,12 @@ export async function loadSlackChannelMapByCaseNumber() {
   return map;
 }
 
-export async function upsertSlackChannels(rows: Array<Omit<CaseSlackChannel, "syncedAt" | "updatedAt" | "topicSyncedAt">>) {
+export async function upsertSlackChannels(rows: Array<Omit<CaseSlackChannel, "syncedAt" | "updatedAt" | "topicSyncedAt" | "topicLastWritten">>) {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required to sync Slack channels.");
 
   // Sheet rows can repeat the same Case No; Postgres rejects duplicate keys in one upsert batch.
-  const byCaseNumber = new Map<string, Omit<CaseSlackChannel, "syncedAt" | "updatedAt" | "topicSyncedAt">>();
+  const byCaseNumber = new Map<string, Omit<CaseSlackChannel, "syncedAt" | "updatedAt" | "topicSyncedAt" | "topicLastWritten">>();
   for (const row of rows) {
     byCaseNumber.set(cleanCaseNumber(row.caseNumber), row);
   }
