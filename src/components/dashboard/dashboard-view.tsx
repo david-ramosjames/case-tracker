@@ -31,7 +31,12 @@ export function DashboardView({
   viewer: ViewerContext;
 }) {
   const metrics = getDashboardMetrics(records, settings, goals);
-  const goalProgress = getAttorneyGoalProgress(records, goals);
+  const goalProgress = getAttorneyGoalProgress(records, goals).filter((item) => {
+    if (viewer.isAttorney && viewer.contactId) {
+      return item.goal.attorneyId === viewer.contactId;
+    }
+    return true;
+  });
 
   return (
     <div className="space-y-6">

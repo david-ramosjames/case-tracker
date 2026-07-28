@@ -109,7 +109,20 @@ export function GoalsView({
         </section>
       ) : null}
 
-      {progress.map((item) => {
+      {scopedProgress.length === 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{viewer.isAttorney ? "No goals set for you yet" : "No attorney goals for the current commission year"}</CardTitle>
+            <CardDescription>
+              {viewer.isAttorney
+                ? "Ask an admin to add your fee goals in Settings → Attorney goals. Until then, this page stays empty so you do not see another attorney’s targets."
+                : "Add goals in Settings → Attorney goals for each attorney’s current commission year."}
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : null}
+
+      {scopedProgress.map((item) => {
         if (isFirmOutperformGoal(item.goal)) return null;
         const attorney = users.find((user) => user.id === item.goal.attorneyId);
         const attorneyRecords = scopedRecords.filter((record) => record.shared.attorneyId === item.goal.attorneyId);
