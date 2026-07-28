@@ -28,10 +28,22 @@ export function resolveAttorneyCommissionYearGoal(
   const attorneyGoals = getAttorneyOnlyGoals(goals);
   const startMonth = getAttorneyCommissionStartMonth(attorneyGoals, record.shared.attorneyId);
   const currentYear = getCurrentCommissionYear(startMonth);
-  return (
+  const exact =
     attorneyGoals.find(
       (goal) => goal.attorneyId === record.shared.attorneyId && goal.year === currentYear,
-    ) ?? null
+    ) ?? null;
+  if (exact) return exact;
+
+  const now = new Date();
+  return (
+    attorneyGoals
+      .filter((goal) => goal.attorneyId === record.shared.attorneyId)
+      .find((goal) => {
+        const start = new Date(goal.year, goal.commissionYearStartMonth - 1, 1);
+        const months = goal.commissionMonthCount ?? 12;
+        const end = new Date(start.getFullYear(), start.getMonth() + months, 0, 23, 59, 59, 999);
+        return now >= start && now <= end;
+      }) ?? null
   );
 }
 
@@ -48,16 +60,19 @@ export function formatAttorneyCommissionYearLabel(goal: AttorneyGoal | null) {
 
 /** Goal actuals — disburse date in commission year only. */
 export function getCommissionYearDisbursedAmounts(record: CaseRecord, goal: AttorneyGoal) {
+  const monthCount = goal.commissionMonthCount ?? 12;
   return {
     grossDisbursed: getWeightedGrossDisbursedInCommissionYear(
       record,
       goal.year,
       goal.commissionYearStartMonth,
+      monthCount,
     ),
     disbursedFees: getWeightedDisbursedFeesInCommissionYear(
       record,
       goal.year,
       goal.commissionYearStartMonth,
+      monthCount,
     ),
   };
 }

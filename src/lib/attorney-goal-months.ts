@@ -176,8 +176,11 @@ export function resolveMonthlyFeeGoals(goal: AttorneyGoal): MonthlyGoals {
 }
 
 export function inferCommissionMonthCount(goal: AttorneyGoal): CommissionPeriodMonthCount {
-  if (goal.commissionMonthCount === 13) return 13;
+  if (goal.commissionMonthCount === 14 || goal.commissionMonthCount === 13) {
+    return goal.commissionMonthCount;
+  }
   const storedCount = Object.keys(goal.monthlyGoals ?? {}).length;
+  if (storedCount >= 14) return 14;
   if (storedCount >= 13) return 13;
   return 12;
 }

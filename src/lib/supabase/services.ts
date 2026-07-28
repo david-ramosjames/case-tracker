@@ -18,6 +18,7 @@ import {
   parseSlackThreadUpdate,
 } from "@/lib/slack/thread-update";
 import { createSupabaseAdminClient, fetchAllSupabaseRows } from "@/lib/supabase/admin";
+import { normalizeCommissionMonthCount } from "@/lib/commission-year";
 import { listQuoContactsByTrackerIds, updateQuoContactSmsPreferences } from "@/lib/supabase/quo-contacts";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildStagePatchFromConfirmation } from "@/lib/stage-triggers";
@@ -2848,7 +2849,7 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
   const calendarPlugFeeGoals = input.calendarPlugFeeGoals ?? {};
 
   const commissionYearStartMonth = Math.min(12, Math.max(1, Number(input.commissionYearStartMonth ?? 1)));
-  const commissionMonthCount = Number(input.commissionMonthCount ?? 12) === 13 ? 13 : 12;
+  const commissionMonthCount = normalizeCommissionMonthCount(Number(input.commissionMonthCount ?? 12));
 
   const payload = {
     attorney_name: isFirmGoal ? FIRM_OUTPERFORM_GOAL_ATTORNEY_NAME : input.attorneyName,
@@ -2908,7 +2909,7 @@ export async function upsertAttorneyGoal(input: AttorneyGoalInput): Promise<Atto
     annualRjlFeesGoal,
     commissionThreshold: Number(data.commission_threshold ?? 0),
     commissionYearStartMonth: Number(data.commission_year_start_month ?? 1),
-    commissionMonthCount: Number(data.commission_month_count ?? 12) === 13 ? 13 : 12,
+    commissionMonthCount: normalizeCommissionMonthCount(Number(data.commission_month_count ?? 12)),
     monthlyGoals: parseMonthlyGoalsRow(data.monthly_goals),
     monthlyFeeGoals: parseMonthlyGoalsRow(data.monthly_fee_goals),
     calendarPlugGoals: parseMonthlyGoalsRow(data.calendar_plug_goals),
@@ -2980,7 +2981,7 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
       annualRjlFeesGoal: feeQ1Goal + feeQ2Goal + feeQ3Goal + feeQ4Goal,
       commissionThreshold,
       commissionYearStartMonth: Number(row.commission_year_start_month ?? 1),
-      commissionMonthCount: Number(row.commission_month_count ?? 12) === 13 ? 13 : 12,
+      commissionMonthCount: normalizeCommissionMonthCount(Number(row.commission_month_count ?? 12)),
       monthlyGoals,
       monthlyFeeGoals,
       calendarPlugGoals,

@@ -186,34 +186,40 @@ export function recordHasDisbursementInCommissionYear(
   record: Pick<CaseRecord, "tracker">,
   commissionYear: number,
   startMonth: number,
+  monthCount: number = 12,
 ) {
   const completed = getCompletedDisbursements(record.tracker);
   if (completed.length > 0) {
     return completed.some(
-      (item) => item.disburseDate && isDateInCommissionYear(item.disburseDate, commissionYear, startMonth),
+      (item) =>
+        item.disburseDate && isDateInCommissionYear(item.disburseDate, commissionYear, startMonth, monthCount),
     );
   }
 
   const legacyDate = getRecordDisburseDate(record.tracker.result);
-  return legacyDate ? isDateInCommissionYear(legacyDate, commissionYear, startMonth) : false;
+  return legacyDate ? isDateInCommissionYear(legacyDate, commissionYear, startMonth, monthCount) : false;
 }
 
 export function getWeightedGrossDisbursedInCommissionYear(
   record: Pick<CaseRecord, "tracker">,
   commissionYear: number,
   startMonth: number,
+  monthCount: number = 12,
 ) {
   const completed = getCompletedDisbursements(record.tracker);
 
   if (completed.length > 0) {
     return completed
-      .filter((item) => item.disburseDate && isDateInCommissionYear(item.disburseDate, commissionYear, startMonth))
+      .filter(
+        (item) =>
+          item.disburseDate && isDateInCommissionYear(item.disburseDate, commissionYear, startMonth, monthCount),
+      )
       .reduce((total, item) => total + getDisbursementSettlementAmount(item, record), 0);
   }
 
   const baseSettlement = record.tracker.result.settlementAmount ?? 0;
   const legacyDate = getRecordDisburseDate(record.tracker.result);
-  if (legacyDate && isDateInCommissionYear(legacyDate, commissionYear, startMonth)) {
+  if (legacyDate && isDateInCommissionYear(legacyDate, commissionYear, startMonth, monthCount)) {
     return baseSettlement;
   }
 
@@ -224,17 +230,22 @@ export function getWeightedGrossSettledInCommissionYear(
   record: Pick<CaseRecord, "tracker">,
   commissionYear: number,
   startMonth: number,
+  monthCount: number = 12,
 ) {
   const completed = getCompletedDisbursements(record.tracker);
 
   if (completed.length > 0) {
     return completed
-      .filter((item) => item.settlementDate && isDateInCommissionYear(item.settlementDate, commissionYear, startMonth))
+      .filter(
+        (item) =>
+          item.settlementDate &&
+          isDateInCommissionYear(item.settlementDate, commissionYear, startMonth, monthCount),
+      )
       .reduce((total, item) => total + getDisbursementSettlementAmount(item, record), 0);
   }
 
   const settlementDate = record.tracker.result.settlementDate;
-  if (settlementDate && isDateInCommissionYear(settlementDate, commissionYear, startMonth)) {
+  if (settlementDate && isDateInCommissionYear(settlementDate, commissionYear, startMonth, monthCount)) {
     return record.tracker.result.settlementAmount ?? 0;
   }
 
@@ -245,17 +256,22 @@ export function getWeightedFeesSettledInCommissionYear(
   record: Pick<CaseRecord, "tracker">,
   commissionYear: number,
   startMonth: number,
+  monthCount: number = 12,
 ) {
   const completed = getCompletedDisbursements(record.tracker);
 
   if (completed.length > 0) {
     return completed
-      .filter((item) => item.settlementDate && isDateInCommissionYear(item.settlementDate, commissionYear, startMonth))
+      .filter(
+        (item) =>
+          item.settlementDate &&
+          isDateInCommissionYear(item.settlementDate, commissionYear, startMonth, monthCount),
+      )
       .reduce((total, item) => total + getDisbursementAttorneyFees(item, record), 0);
   }
 
   const settlementDate = record.tracker.result.settlementDate;
-  if (settlementDate && isDateInCommissionYear(settlementDate, commissionYear, startMonth)) {
+  if (settlementDate && isDateInCommissionYear(settlementDate, commissionYear, startMonth, monthCount)) {
     return getCaseAttorneyFees(record);
   }
 
@@ -345,18 +361,22 @@ export function getWeightedDisbursedFeesInCommissionYear(
   record: Pick<CaseRecord, "tracker">,
   commissionYear: number,
   startMonth: number,
+  monthCount: number = 12,
 ) {
   const baseFees = getCaseAttorneyFees(record);
   const completed = getCompletedDisbursements(record.tracker);
 
   if (completed.length > 0) {
     return completed
-      .filter((item) => item.disburseDate && isDateInCommissionYear(item.disburseDate, commissionYear, startMonth))
+      .filter(
+        (item) =>
+          item.disburseDate && isDateInCommissionYear(item.disburseDate, commissionYear, startMonth, monthCount),
+      )
       .reduce((total, item) => total + getDisbursementAttorneyFees(item, record), 0);
   }
 
   const legacyDate = getRecordDisburseDate(record.tracker.result);
-  if (legacyDate && isDateInCommissionYear(legacyDate, commissionYear, startMonth)) {
+  if (legacyDate && isDateInCommissionYear(legacyDate, commissionYear, startMonth, monthCount)) {
     return baseFees;
   }
 

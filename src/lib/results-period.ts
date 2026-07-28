@@ -34,12 +34,14 @@ export type ResultsPeriodContext = {
   calendarYear: number;
   commissionYear: number;
   startMonth: number;
+  monthCount: number;
 };
 
 export type OutputPeriodContext = {
   mode: "calendar" | "commission";
   periodYear: number;
   startMonth: number;
+  monthCount: number;
 };
 
 type PartySlice = {
@@ -77,7 +79,7 @@ export function isDateInResultsPeriod(
 ): boolean {
   return (
     isDateInCalendarYear(dateValue, context.calendarYear) ||
-    isDateInCommissionYear(dateValue, context.commissionYear, context.startMonth)
+    isDateInCommissionYear(dateValue, context.commissionYear, context.startMonth, context.monthCount)
   );
 }
 
@@ -85,7 +87,30 @@ export function isDateInOutputPeriod(dateValue: string | null | undefined, conte
   if (context.mode === "calendar") {
     return isDateInCalendarYear(dateValue, context.periodYear);
   }
-  return isDateInCommissionYear(dateValue, context.periodYear, context.startMonth);
+  return isDateInCommissionYear(dateValue, context.periodYear, context.startMonth, context.monthCount);
+}
+
+function findActiveAttorneyGoal(
+  attorneyGoals: AttorneyGoal[],
+  attorneyId: string,
+  refDate = new Date(),
+): AttorneyGoal | null {
+  const startMonth = getAttorneyCommissionStartMonth(attorneyGoals, attorneyId);
+  const currentYear = getCurrentCommissionYear(startMonth, refDate);
+  const exact =
+    attorneyGoals.find((item) => item.attorneyId === attorneyId && item.year === currentYear) ?? null;
+  if (exact) return exact;
+
+  return (
+    attorneyGoals
+      .filter((item) => item.attorneyId === attorneyId)
+      .find((item) => {
+        const start = new Date(item.year, item.commissionYearStartMonth - 1, 1);
+        const months = item.commissionMonthCount ?? 12;
+        const end = new Date(start.getFullYear(), start.getMonth() + months, 0, 23, 59, 59, 999);
+        return refDate >= start && refDate <= end;
+      }) ?? null
+  );
 }
 
 export function resolveResultsPeriodContext(
@@ -95,17 +120,13 @@ export function resolveResultsPeriodContext(
 ): ResultsPeriodContext {
   const attorneyGoals = getAttorneyOnlyGoals(goals);
   const startMonth = getAttorneyCommissionStartMonth(attorneyGoals, record.shared.attorneyId);
-  const goal =
-    attorneyGoals.find(
-      (item) =>
-        item.attorneyId === record.shared.attorneyId &&
-        item.year === getCurrentCommissionYear(startMonth, refDate),
-    ) ?? null;
+  const goal = findActiveAttorneyGoal(attorneyGoals, record.shared.attorneyId, refDate);
 
   return {
     calendarYear: refDate.getFullYear(),
     commissionYear: goal?.year ?? getCurrentCommissionYear(startMonth, refDate),
     startMonth: goal?.commissionYearStartMonth ?? startMonth,
+    monthCount: goal?.commissionMonthCount ?? 12,
   };
 }
 
@@ -121,7 +142,7 @@ export function resolveOutputPeriodContextForRecord(
     goal?.commissionYearStartMonth ??
     getAttorneyCommissionStartMonth(attorneyGoals, record.shared.attorneyId);
 
-  return { mode, periodYear, startMonth };
+  return { mode, periodYear, startMonth, monthCount: goal?.commissionMonthCount ?? 12 };
 }
 
 function getPartyGrossSettlement(party: CaseDisbursement | null, legacy: boolean, record: CaseRecord) {

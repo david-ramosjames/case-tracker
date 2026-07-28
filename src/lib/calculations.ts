@@ -182,8 +182,9 @@ export function getCaseCompletionScore(
 function isRecordInGoalCommissionYear(record: CaseRecord, goal: AttorneyGoal) {
   const startMonth = goal.commissionYearStartMonth;
   const commissionYear = goal.year;
+  const monthCount = goal.commissionMonthCount ?? 12;
 
-  if (recordHasDisbursementInCommissionYear(record, commissionYear, startMonth)) {
+  if (recordHasDisbursementInCommissionYear(record, commissionYear, startMonth, monthCount)) {
     return true;
   }
 
@@ -403,11 +404,22 @@ export function getAttorneyCommissionQuarterRows(
 export function getCurrentCommissionYearGoals(goals: AttorneyGoal[], attorneyIds?: string[]): AttorneyGoal[] {
   const attorneyGoals = getAttorneyOnlyGoals(goals);
   const ids = attorneyIds?.length ? attorneyIds : [...new Set(attorneyGoals.map((goal) => goal.attorneyId))];
+  const now = new Date();
   return ids.flatMap((attorneyId) => {
     const startMonth = getAttorneyCommissionStartMonth(attorneyGoals, attorneyId);
-    const currentYear = getCurrentCommissionYear(startMonth);
-    const goal = attorneyGoals.find((item) => item.attorneyId === attorneyId && item.year === currentYear);
-    return goal ? [goal] : [];
+    const currentYear = getCurrentCommissionYear(startMonth, now);
+    const exact = attorneyGoals.find((item) => item.attorneyId === attorneyId && item.year === currentYear);
+    if (exact) return [exact];
+
+    // Extended (13/14-month) periods can still be active after the next label year starts.
+    const stillActive = attorneyGoals
+      .filter((item) => item.attorneyId === attorneyId)
+      .find((item) => {
+        const start = getCommissionYearStartDate(item.year, item.commissionYearStartMonth);
+        const end = getCommissionPeriodEndDate(item.year, item.commissionYearStartMonth, item.commissionMonthCount ?? 12);
+        return now >= start && now <= end;
+      });
+    return stillActive ? [stillActive] : [];
   });
 }
 

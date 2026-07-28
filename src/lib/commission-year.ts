@@ -13,14 +13,16 @@ export function getCommissionYearEndDate(commissionYear: number, startMonth: num
   return getCommissionPeriodEndDate(commissionYear, startMonth, 12);
 }
 
-export const COMMISSION_PERIOD_MONTH_OPTIONS = [12, 13] as const;
+export const COMMISSION_PERIOD_MONTH_OPTIONS = [12, 13, 14] as const;
 export type CommissionPeriodMonthCount = (typeof COMMISSION_PERIOD_MONTH_OPTIONS)[number];
 
 export function normalizeCommissionMonthCount(monthCount?: number): CommissionPeriodMonthCount {
-  return monthCount === 13 ? 13 : 12;
+  if (monthCount === 14) return 14;
+  if (monthCount === 13) return 13;
+  return 12;
 }
 
-/** Last moment of the final month in a commission period (12 or 13 months). */
+/** Last moment of the final month in a commission period (12, 13, or 14 months). */
 export function getCommissionPeriodEndDate(
   commissionYear: number,
   startMonth: number,
@@ -58,11 +60,18 @@ export function isCaseHistoricalForAttorney(
   return caseCommissionYear < currentCommissionYear;
 }
 
-export function isDateInCommissionYear(dateValue: string | null | undefined, commissionYear: number, startMonth: number) {
+export function isDateInCommissionYear(
+  dateValue: string | null | undefined,
+  commissionYear: number,
+  startMonth: number,
+  monthCount: number = 12,
+) {
   if (!dateValue) return false;
   const date = new Date(dateValue);
   if (Number.isNaN(date.getTime())) return false;
-  return getCommissionYearLabel(date, startMonth) === commissionYear;
+  const start = getCommissionYearStartDate(commissionYear, startMonth);
+  const end = getCommissionPeriodEndDate(commissionYear, startMonth, monthCount);
+  return date >= start && date <= end;
 }
 
 export function isDateInCalendarYear(dateValue: string | null | undefined, calendarYear: number) {
@@ -121,7 +130,7 @@ export type CommissionQuarterWindow = {
   end: Date;
 };
 
-/** CY Q1–Q3 are three months each; CY Q4 covers the remainder (3 or 4 months for 12/13-month periods). */
+/** CY Q1–Q3 are three months each; CY Q4 covers the remainder (3–5 months for 12/13/14-month periods). */
 export function getCommissionYearQuarterWindows(
   commissionYear: number,
   startMonth: number,
@@ -152,7 +161,10 @@ export function getCommissionQuarterForDate(
 ): CommissionYearQuarter | null {
   const date = typeof dateValue === "string" ? new Date(dateValue) : dateValue;
   if (Number.isNaN(date.getTime())) return null;
-  if (getCommissionYearLabel(date, startMonth) !== commissionYear) return null;
+
+  const periodStart = getCommissionYearStartDate(commissionYear, startMonth);
+  const periodEnd = getCommissionPeriodEndDate(commissionYear, startMonth, monthCount);
+  if (date < periodStart || date > periodEnd) return null;
 
   for (const window of getCommissionYearQuarterWindows(commissionYear, startMonth, monthCount)) {
     if (date >= window.start && date <= window.end) return window.quarter;
