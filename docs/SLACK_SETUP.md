@@ -53,6 +53,33 @@ Canonical topic format (written by Case Tracker; editable in Slack):
 
 When someone edits the topic in Slack, Case Tracker updates paralegal assignment (`assigned_contact_ids`), stage, languages, and Eve — then calls DocketFlow `POST /api/cases/[caseId]/reassign-calendar` when the paralegal changes (requires `DOCKETFLOW_INTERNAL_API_SECRET` + DocketFlow endpoint). **Attorney from the topic is ignored** (change attorney in Case Tracker / DocketFlow only).
 
+### DocketFlow → Case Tracker (contact reassignment)
+
+DocketFlow writes `cases.assigned_contact_ids` directly. That does **not** by itself rewrite Slack topics. After a successful contact reassignment, DocketFlow should call Case Tracker:
+
+```http
+POST https://rjl-case-tracker.vercel.app/api/internal/docketflow/sync-slack-topic
+Authorization: Bearer $DOCKETFLOW_INTERNAL_API_SECRET
+Content-Type: application/json
+
+{ "caseId": "<uuid>", "source": "docketflow" }
+```
+
+`caseNumber` is accepted instead of / in addition to `caseId`. Requires `SLACK_TOPIC_AUTO_SYNC=true` and `SLACK_BOT_TOKEN`. Same shared secret as calendar reconcile (`DOCKETFLOW_INTERNAL_API_SECRET`, else `CRON_SECRET`).
+
+Example (Node):
+
+```ts
+await fetch(`${CASE_TRACKER_URL}/api/internal/docketflow/sync-slack-topic`, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.DOCKETFLOW_INTERNAL_API_SECRET}`,
+  },
+  body: JSON.stringify({ caseId, source: "docketflow" }),
+});
+```
+
 If verification fails with “didn't respond with the challenge”, the app was likely redirecting Slack to `/login` — ensure the latest deploy includes the public `/api/slack/*` middleware exception.
 
 Thread replies on reminder messages can update the tracker using lines like:

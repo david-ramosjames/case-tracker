@@ -5,8 +5,8 @@ import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase/env";
 
 const PUBLIC_PATHS = ["/login", "/auth/callback", "/auth/signout"];
 
-/** Webhooks and cron must bypass session auth (Slack, schedulers). */
-const PUBLIC_API_PREFIXES = ["/api/slack/", "/api/cron/"];
+/** Webhooks and cron must bypass session auth (Slack, schedulers, DocketFlow). */
+const PUBLIC_API_PREFIXES = ["/api/slack/", "/api/cron/", "/api/internal/"];
 
 function isPublicPath(pathname: string) {
   if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))) return true;
