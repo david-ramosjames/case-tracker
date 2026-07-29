@@ -758,7 +758,68 @@ export async function resolveChannelUserMentions(input: {
   paralegalName?: string | null;
   attorneySlackUserId?: string | null;
   paralegalSlackUserId?: string | null;
+  /**
+   * Who to @-mention in Slack posts.
+   * - `team` (default): attorney + paralegal
+   * - `attorney`: attorney only (missing-field / field-update reminders)
+   */
+  mentionRoles?: "attorney" | "team";
 }) {
+  const attorneyOnly = input.mentionRoles === "attorney";
+
+  if (attorneyOnly) {
+    if (input.attorneySlackUserId?.trim()) {
+      return `<@${input.attorneySlackUserId.trim()}>`;
+    }
+
+    // Structured topics list attorney first, then paralegal.
+    const topicUserIds = extractSlackUserIdsFromTopic(input.topic);
+    if (topicUserIds[0]) {
+      return `<@${topicUserIds[0]}>`;
+    }
+
+    const ids = new Set<string>();
+    let directory: SlackUserDirectoryEntry[] | null = null;
+
+    async function getDirectory() {
+      directory ??= await loadSlackUserDirectory();
+      return directory;
+    }
+
+    if (input.topic?.trim()) {
+      const handles = extractAtHandlesFromTopic(input.topic);
+      if (handles[0]) {
+        const users = await getDirectory();
+        const userId = matchUserIdByHandle(users, handles[0]);
+        if (userId) ids.add(userId);
+      }
+    }
+
+    if (ids.size === 0 && isResolvableEmail(input.attorneyEmail)) {
+      const userId = await lookupSlackUserIdByEmail(input.attorneyEmail!);
+      if (userId) ids.add(userId);
+    }
+
+    if (ids.size === 0) {
+      const users = await getDirectory();
+      const trimmed = input.attorneyName?.trim();
+      if (trimmed) {
+        const firstName = trimmed.split(/\s+/)[0];
+        const userId = matchUserIdByHandle(users, firstName) ?? matchUserIdByHandle(users, trimmed);
+        if (userId) ids.add(userId);
+      }
+    }
+
+    if (ids.size > 0) {
+      return [...ids].map((id) => `<@${id}>`).join(" ");
+    }
+
+    const prefix = extractTopicMentionPrefix(input.topic);
+    if (!prefix) return "";
+    // Prefix may include both mentions — keep the first token only.
+    return prefix.split(/\s+/).filter(Boolean)[0] ?? "";
+  }
+
   const storedIds = [input.attorneySlackUserId, input.paralegalSlackUserId].filter(
     (id): id is string => Boolean(id?.trim()),
   );

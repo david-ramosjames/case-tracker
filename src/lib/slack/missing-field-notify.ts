@@ -191,6 +191,7 @@ export async function sendSlackMissingFieldNotices(
       paralegalName: record.paralegal.name,
       attorneySlackUserId: record.attorney.slackUserId,
       paralegalSlackUserId: record.paralegal.slackUserId,
+      mentionRoles: "attorney",
     });
 
     const text =
