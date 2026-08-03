@@ -246,23 +246,26 @@ export async function getQuoContactById(contactId: string): Promise<QuoContactRa
   };
 }
 
-/** Name-only update — re-sends existing phones/emails/company so Quo does not clear them. */
+/**
+ * Name-only update. Quo PATCH is partial — omit phones/emails so we do not
+ * resend nested field IDs (mismatched IDs return 400 "Item with ID … does not match").
+ * Setting a phone/email value to null would delete it; omitting leaves them alone.
+ */
 export async function updateQuoContactName(
   contactId: string,
   firstName: string,
   lastName: string,
-  existingFields: QuoContactDefaultFields = {},
+  _existingFields: QuoContactDefaultFields = {},
 ) {
-  const defaultFields: QuoContactDefaultFields = {
-    ...existingFields,
-    firstName,
-    lastName,
-  };
-
-  const response = await quoApiFetch(`${QUO_API_BASE}/contacts/${contactId}`, {
+  const response = await quoApiFetch(`${QUO_API_BASE}/contacts/${encodeURIComponent(contactId)}`, {
     method: "PATCH",
     headers: quoHeaders(),
-    body: JSON.stringify({ defaultFields }),
+    body: JSON.stringify({
+      defaultFields: {
+        firstName,
+        lastName,
+      },
+    }),
   });
 
   if (!response.ok) {
