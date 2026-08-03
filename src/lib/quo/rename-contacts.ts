@@ -84,34 +84,47 @@ function buildRenamedFields(
   return null;
 }
 
+type LinkedQuoContact = {
+  quoContactId: string;
+  phone: string | null;
+};
+
 /** Prefer linked Quo contact IDs from tracker / case_quo_contacts for targeted renames. */
-async function loadLinkedQuoContactIdsByCaseNumber(caseNumbers: string[]): Promise<Map<string, string[]>> {
+async function loadLinkedQuoContactsByCaseNumber(
+  caseNumbers: string[],
+): Promise<Map<string, LinkedQuoContact[]>> {
   const admin = createSupabaseAdminClient();
-  const byCase = new Map<string, string[]>();
+  const byCase = new Map<string, LinkedQuoContact[]>();
   if (!admin || caseNumbers.length === 0) return byCase;
 
   const { data: trackers, error: trackerError } = await admin
     .from("case_tracker_entries")
-    .select("id,case_number,quo_contact_id")
+    .select("id,case_number,quo_contact_id,client_phone")
     .in("case_number", caseNumbers);
   if (trackerError) throw new Error(trackerError.message);
 
   const trackerIds: string[] = [];
+  const phoneByQuoId = new Map<string, string>();
+
   for (const row of trackers ?? []) {
     const caseNumber = cleanCaseNumber(String(row.case_number ?? ""));
     if (!caseNumber) continue;
     trackerIds.push(String(row.id));
     const quoId = String(row.quo_contact_id ?? "").trim();
+    const phone = String(row.client_phone ?? "").trim() || null;
     if (!quoId) continue;
+    if (phone) phoneByQuoId.set(quoId, phone);
     const bucket = byCase.get(caseNumber) ?? [];
-    if (!bucket.includes(quoId)) bucket.push(quoId);
-    byCase.set(caseNumber, bucket);
+    if (!bucket.some((item) => item.quoContactId === quoId)) {
+      bucket.push({ quoContactId: quoId, phone });
+      byCase.set(caseNumber, bucket);
+    }
   }
 
   if (trackerIds.length > 0) {
     const { data: linked, error: linkedError } = await admin
       .from("case_quo_contacts")
-      .select("tracker_entry_id,quo_contact_id")
+      .select("tracker_entry_id,quo_contact_id,phone")
       .in("tracker_entry_id", trackerIds);
     if (linkedError) throw new Error(linkedError.message);
 
@@ -122,10 +135,17 @@ async function loadLinkedQuoContactIdsByCaseNumber(caseNumbers: string[]): Promi
     for (const row of linked ?? []) {
       const caseNumber = caseByTrackerId.get(String(row.tracker_entry_id)) ?? "";
       const quoId = String(row.quo_contact_id ?? "").trim();
+      const phone = String(row.phone ?? "").trim() || phoneByQuoId.get(quoId) || null;
       if (!caseNumber || !quoId) continue;
+      if (phone) phoneByQuoId.set(quoId, phone);
       const bucket = byCase.get(caseNumber) ?? [];
-      if (!bucket.includes(quoId)) bucket.push(quoId);
-      byCase.set(caseNumber, bucket);
+      const existing = bucket.find((item) => item.quoContactId === quoId);
+      if (existing) {
+        if (!existing.phone && phone) existing.phone = phone;
+      } else {
+        bucket.push({ quoContactId: quoId, phone });
+        byCase.set(caseNumber, bucket);
+      }
     }
   }
 
@@ -136,19 +156,34 @@ async function resolveContactsForRename(filterCaseNumbers?: string[]): Promise<{
   contacts: QuoContactRaw[];
   totalDirectoryContacts: number;
   usedDirectoryScan: boolean;
+  fallbackPhoneByQuoId: Map<string, string>;
 }> {
   const filterSet = filterCaseNumbers?.length
     ? new Set(filterCaseNumbers.map((n) => cleanCaseNumber(n)).filter(Boolean))
     : null;
+  const fallbackPhoneByQuoId = new Map<string, string>();
 
   if (!filterSet) {
     const contacts = await listAllQuoContactsRaw();
-    return { contacts, totalDirectoryContacts: contacts.length, usedDirectoryScan: true };
+    return {
+      contacts,
+      totalDirectoryContacts: contacts.length,
+      usedDirectoryScan: true,
+      fallbackPhoneByQuoId,
+    };
   }
 
-  const linkedByCase = await loadLinkedQuoContactIdsByCaseNumber([...filterSet]);
-  const quoIds = [...new Set([...linkedByCase.values()].flat())];
+  const linkedByCase = await loadLinkedQuoContactsByCaseNumber([...filterSet]);
+  const quoIds = [
+    ...new Set([...linkedByCase.values()].flatMap((items) => items.map((item) => item.quoContactId))),
+  ];
   const byId = new Map<string, QuoContactRaw>();
+
+  for (const items of linkedByCase.values()) {
+    for (const item of items) {
+      if (item.phone) fallbackPhoneByQuoId.set(item.quoContactId, item.phone);
+    }
+  }
 
   for (const quoId of quoIds) {
     try {
@@ -168,14 +203,19 @@ async function resolveContactsForRename(filterCaseNumbers?: string[]): Promise<{
       if (filterSet.has(num)) matchedCaseNumbers.add(num);
     }
     // Also count DB linkage even if display name parse fails.
-    for (const [caseNumber, ids] of linkedByCase) {
-      if (ids.includes(contact.id)) matchedCaseNumbers.add(caseNumber);
+    for (const [caseNumber, items] of linkedByCase) {
+      if (items.some((item) => item.quoContactId === contact.id)) matchedCaseNumbers.add(caseNumber);
     }
   }
 
   const missing = [...filterSet].filter((num) => !matchedCaseNumbers.has(num));
   if (missing.length === 0) {
-    return { contacts: [...byId.values()], totalDirectoryContacts: byId.size, usedDirectoryScan: false };
+    return {
+      contacts: [...byId.values()],
+      totalDirectoryContacts: byId.size,
+      usedDirectoryScan: false,
+      fallbackPhoneByQuoId,
+    };
   }
 
   // Fall back to directory scan only for case numbers we could not resolve via DB links.
@@ -186,7 +226,12 @@ async function resolveContactsForRename(filterCaseNumbers?: string[]): Promise<{
     byId.set(contact.id, contact);
   }
 
-  return { contacts: [...byId.values()], totalDirectoryContacts: directory.length, usedDirectoryScan: true };
+  return {
+    contacts: [...byId.values()],
+    totalDirectoryContacts: directory.length,
+    usedDirectoryScan: true,
+    fallbackPhoneByQuoId,
+  };
 }
 
 /**
@@ -199,10 +244,8 @@ export async function renameQuoContactsWithLanguage(filterCaseNumbers?: string[]
     : null;
   const filterSet = filterList ? new Set(filterList) : null;
 
-  const [{ contacts, totalDirectoryContacts, usedDirectoryScan }, caseLanguageMap] = await Promise.all([
-    resolveContactsForRename(filterList ?? undefined),
-    buildCaseLanguageMap(),
-  ]);
+  const [{ contacts, totalDirectoryContacts, usedDirectoryScan, fallbackPhoneByQuoId }, caseLanguageMap] =
+    await Promise.all([resolveContactsForRename(filterList ?? undefined), buildCaseLanguageMap()]);
 
   const result: RenameResult = {
     totalContacts: totalDirectoryContacts,
@@ -217,6 +260,23 @@ export async function renameQuoContactsWithLanguage(filterCaseNumbers?: string[]
   };
 
   const matchedCaseNumbers = new Set<string>();
+
+  // Enrich fallback phones from DB for any Quo IDs we will touch (including bulk directory scans).
+  const admin = createSupabaseAdminClient();
+  if (admin && contacts.length > 0) {
+    const quoIds = contacts.map((contact) => contact.id);
+    const { data: linkedPhones } = await admin
+      .from("case_quo_contacts")
+      .select("quo_contact_id,phone")
+      .in("quo_contact_id", quoIds);
+    for (const row of linkedPhones ?? []) {
+      const quoId = String(row.quo_contact_id ?? "").trim();
+      const phone = String(row.phone ?? "").trim();
+      if (quoId && phone && !fallbackPhoneByQuoId.has(quoId)) {
+        fallbackPhoneByQuoId.set(quoId, phone);
+      }
+    }
+  }
 
   for (const contact of contacts) {
     const caseNumbers = parseCaseNumbersFromQuoContactName(contact.displayName);
@@ -244,7 +304,10 @@ export async function renameQuoContactsWithLanguage(filterCaseNumbers?: string[]
     }
 
     const renamed = buildRenamedFields(contact, languageTag);
-    if (!renamed) {
+    const fallbackPhone = fallbackPhoneByQuoId.get(contact.id) ?? contact.primaryPhone ?? null;
+    const needsPhoneRestore = !contact.primaryPhone && Boolean(fallbackPhone);
+
+    if (!renamed && !needsPhoneRestore) {
       result.alreadyTagged += 1;
       result.skipped += 1;
       result.details.push(`${contact.displayName}: already has ${languageTag}`);
@@ -252,11 +315,17 @@ export async function renameQuoContactsWithLanguage(filterCaseNumbers?: string[]
     }
 
     try {
-      await updateQuoContactName(contact.id, renamed.firstName, renamed.lastName, contact.defaultFields);
-      result.renamed += 1;
-      result.details.push(
-        `${contact.displayName} → ${renamed.firstName} ${renamed.lastName}`.trim(),
-      );
+      const nextFirst = renamed?.firstName ?? contact.firstName;
+      const nextLast = renamed?.lastName ?? contact.lastName;
+      await updateQuoContactName(contact.id, nextFirst, nextLast, contact.defaultFields, {
+        fallbackPhones: fallbackPhone ? [fallbackPhone] : [],
+      });
+      if (renamed) {
+        result.renamed += 1;
+        result.details.push(`${contact.displayName} → ${nextFirst} ${nextLast}`.trim());
+      } else {
+        result.details.push(`${contact.displayName}: restored missing phone from case data`);
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       result.errors.push(`${contact.displayName}: ${msg}`);

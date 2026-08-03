@@ -247,25 +247,80 @@ export async function getQuoContactById(contactId: string): Promise<QuoContactRa
 }
 
 /**
- * Name-only update. Quo PATCH is partial — omit phones/emails so we do not
- * resend nested field IDs (mismatched IDs return 400 "Item with ID … does not match").
- * Setting a phone/email value to null would delete it; omitting leaves them alone.
+ * Build a name PATCH body that preserves phones/emails.
+ *
+ * Quo clears omitted `phoneNumbers` / `emails` on PATCH (not a true partial merge).
+ * Nested field `id`s must be omitted — stale IDs return 400 "Item with ID … does not match".
+ * Sending `{ name, value }` without ids replaces those arrays safely.
  */
+function defaultFieldsForNamePatch(
+  fields: QuoContactDefaultFields,
+  firstName: string,
+  lastName: string,
+  fallbackPhones: string[] = [],
+): QuoContactDefaultFields {
+  const phoneNumbers = (fields.phoneNumbers ?? [])
+    .filter((item) => Boolean(item.value?.trim()))
+    .map((item, index) => ({
+      name: item.name?.trim() || (index === 0 ? "primary" : `phone ${index + 1}`),
+      value: item.value!.trim(),
+    }));
+
+  if (phoneNumbers.length === 0) {
+    for (const phone of fallbackPhones) {
+      const value = normalizePhoneForComparison(phone);
+      if (!value) continue;
+      if (phoneNumbers.some((item) => normalizePhoneForComparison(item.value ?? "") === value)) continue;
+      phoneNumbers.push({
+        name: phoneNumbers.length === 0 ? "primary" : `phone ${phoneNumbers.length + 1}`,
+        value,
+      });
+    }
+  }
+
+  const emails = (fields.emails ?? [])
+    .filter((item) => Boolean(item.value?.trim()))
+    .map((item, index) => ({
+      name: item.name?.trim() || (index === 0 ? "primary" : `email ${index + 1}`),
+      value: item.value!.trim(),
+    }));
+
+  return {
+    firstName,
+    lastName,
+    ...(fields.company != null && String(fields.company).trim() ? { company: fields.company } : {}),
+    ...(fields.role != null && String(fields.role).trim() ? { role: fields.role } : {}),
+    ...(emails.length ? { emails } : {}),
+    ...(phoneNumbers.length ? { phoneNumbers } : {}),
+  };
+}
+
 export async function updateQuoContactName(
   contactId: string,
   firstName: string,
   lastName: string,
-  _existingFields: QuoContactDefaultFields = {},
+  existingFields: QuoContactDefaultFields = {},
+  options?: { fallbackPhones?: string[] },
 ) {
+  const fresh = await getQuoContactById(contactId);
+  const baseFields = fresh?.defaultFields ?? existingFields;
+  const defaultFields = defaultFieldsForNamePatch(
+    baseFields,
+    firstName,
+    lastName,
+    options?.fallbackPhones ?? [],
+  );
+
+  if (!defaultFields.phoneNumbers?.length) {
+    throw new Error(
+      `Quo rename refused for ${contactId}: no phone on contact and no fallback phone. Quo clears omitted phoneNumbers on PATCH.`,
+    );
+  }
+
   const response = await quoApiFetch(`${QUO_API_BASE}/contacts/${encodeURIComponent(contactId)}`, {
     method: "PATCH",
     headers: quoHeaders(),
-    body: JSON.stringify({
-      defaultFields: {
-        firstName,
-        lastName,
-      },
-    }),
+    body: JSON.stringify({ defaultFields }),
   });
 
   if (!response.ok) {
@@ -273,7 +328,27 @@ export async function updateQuoContactName(
     throw new Error(`Quo update contact failed (${response.status}): ${body}`);
   }
 
-  return (await response.json()) as QuoContactRow;
+  const payload = (await response.json()) as QuoContactRow & { data?: QuoContactRow };
+  const updated = payload.data ?? payload;
+  const phonesAfter = (updated.defaultFields?.phoneNumbers ?? []).filter((item) => item.value?.trim());
+  if (!phonesAfter.length) {
+    // Last-resort restore if Quo still dropped phones.
+    const restore = await quoApiFetch(`${QUO_API_BASE}/contacts/${encodeURIComponent(contactId)}`, {
+      method: "PATCH",
+      headers: quoHeaders(),
+      body: JSON.stringify({
+        defaultFields: { phoneNumbers: defaultFields.phoneNumbers },
+      }),
+    });
+    if (!restore.ok) {
+      const body = await restore.text();
+      throw new Error(
+        `Quo rename cleared phones and restore failed (${restore.status}): ${body}`,
+      );
+    }
+  }
+
+  return updated;
 }
 
 export async function resolveQuoPhoneNumberId() {
