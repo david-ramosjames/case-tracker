@@ -107,6 +107,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   const [renameCaseNumbers, setRenameCaseNumbers] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [renameMessage, setRenameMessage] = useState<string | null>(null);
 
   async function loadData() {
     setLoading(true);
@@ -322,6 +323,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     if (isAll && !window.confirm("Rename ALL Quo contacts to include language (EN/ES) before the case number?")) return;
     setRenaming(true);
     setError(null);
+    setRenameMessage(null);
     setMessage(null);
     try {
       const response = await fetch("/api/admin/quo-rename-contacts", {
@@ -331,16 +333,30 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
       });
       const body = (await response.json()) as {
         totalContacts?: number;
+        matched?: number;
         renamed?: number;
         skipped?: number;
+        alreadyTagged?: number;
+        noLanguage?: number;
+        notFound?: string[];
         errors?: string[];
+        details?: string[];
         error?: string;
       };
       if (!response.ok) throw new Error(body.error ?? "Rename failed.");
       const errorCount = body.errors?.length ?? 0;
-      setMessage(
-        `Quo rename complete: ${body.renamed ?? 0} renamed, ${body.skipped ?? 0} skipped (${body.totalContacts ?? 0} total).${errorCount ? ` ${errorCount} error(s).` : ""}`,
-      );
+      const lines = [
+        `Quo rename complete: ${body.renamed ?? 0} renamed, ${body.matched ?? 0} matched, ${body.skipped ?? 0} skipped.`,
+      ];
+      if (body.alreadyTagged) lines.push(`${body.alreadyTagged} already had the language tag.`);
+      if (body.noLanguage) lines.push(`${body.noLanguage} skipped (no preferred language on case).`);
+      if (body.notFound?.length) lines.push(`No Quo contact found for case(s): ${body.notFound.join(", ")}`);
+      if (errorCount) lines.push(`${errorCount} error(s): ${body.errors!.slice(0, 5).join(" · ")}`);
+      if (body.details?.length) {
+        lines.push(...body.details.slice(0, 12));
+        if (body.details.length > 12) lines.push(`…and ${body.details.length - 12} more.`);
+      }
+      setRenameMessage(lines.join("\n"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Rename failed.");
     } finally {
@@ -426,6 +442,11 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
               Rename all contacts
             </Button>
           </div>
+          {renameMessage ? (
+            <pre className="whitespace-pre-wrap rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm font-medium text-emerald-800">
+              {renameMessage}
+            </pre>
+          ) : null}
         </CardContent>
       </Card>
 

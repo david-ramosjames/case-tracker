@@ -20,6 +20,9 @@
     },
     "src/app/api/admin/slack-topic-audit/route.ts": {
       "maxDuration": 800
+    },
+    "src/app/api/admin/quo-rename-contacts/route.ts": {
+      "maxDuration": 300
     }
   }
 }

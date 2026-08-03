@@ -2,6 +2,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
 import { renameQuoContactsWithLanguage } from "@/lib/quo/rename-contacts";
 
+export const maxDuration = 300;
+
 export async function POST(request: NextRequest) {
   const sessionUser = await requireApiSession();
   if (!sessionUser) return unauthorizedResponse();
@@ -16,6 +18,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Quo rename failed.";
+    console.error("Quo rename contacts failed", message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

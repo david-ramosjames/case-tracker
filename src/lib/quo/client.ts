@@ -219,6 +219,33 @@ function normalizeDefaultFields(fields?: QuoContactRow["defaultFields"]): QuoCon
   };
 }
 
+/** Fetch one Quo contact by id (includes defaultFields for safe name updates). */
+export async function getQuoContactById(contactId: string): Promise<QuoContactRaw | null> {
+  const response = await quoApiFetch(`${QUO_API_BASE}/contacts/${encodeURIComponent(contactId)}`, {
+    headers: quoHeaders(),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Quo get contact failed (${response.status}): ${body}`);
+  }
+
+  const row = (await response.json()) as QuoContactRow & { data?: QuoContactRow };
+  const contact = row.data ?? row;
+  const displayName = buildDisplayName(contact);
+  if (!displayName) return null;
+  const defaultFields = normalizeDefaultFields(contact.defaultFields);
+  return {
+    id: contact.id,
+    displayName,
+    firstName: contact.defaultFields?.firstName?.trim() ?? "",
+    lastName: contact.defaultFields?.lastName?.trim() ?? "",
+    primaryPhone: pickPrimaryPhone(contact),
+    updatedAt: contact.updatedAt?.trim() || null,
+    defaultFields,
+  };
+}
+
 /** Name-only update — re-sends existing phones/emails/company so Quo does not clear them. */
 export async function updateQuoContactName(
   contactId: string,
