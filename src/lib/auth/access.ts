@@ -9,6 +9,8 @@ export type CasePipelineFilter = "Active" | "Closed" | "Historical" | "all";
 export type ViewerContext = {
   isAdmin: boolean;
   isAttorney: boolean;
+  isParalegal: boolean;
+  isLegalAssistant: boolean;
   contactId: string | null;
   canViewAllCases: boolean;
   canViewHistorical: boolean;
@@ -27,12 +29,17 @@ export function buildViewerContext(session: SessionUser, users: AppUser[]): View
   const isAdmin = isAdminRole(session.role);
   const contact = findContactForSession(users, session);
   const isAttorney = session.role === "attorney" && Boolean(contact);
+  const isParalegal = session.role === "paralegal" && Boolean(contact);
+  const isLegalAssistant = session.role === "legal_assistant" && Boolean(contact);
 
   return {
     isAdmin,
     isAttorney,
+    isParalegal,
+    isLegalAssistant,
     contactId: contact?.id ?? null,
-    canViewAllCases: isAdmin || session.role === "manager" || session.role === "paralegal",
+    // Firmwide case lists: admins + managers only.
+    canViewAllCases: isAdmin || session.role === "manager",
     canViewHistorical: isAdmin,
   };
 }
@@ -74,7 +81,7 @@ export function filterRecordsForViewer(
 ): CaseRecord[] {
   const viewer = buildViewerContext(session, users);
 
-  if (viewer.isAdmin) return records;
+  if (viewer.isAdmin || session.role === "manager") return records;
 
   if (viewer.isAttorney && viewer.contactId) {
     return records.filter((record) => {
@@ -83,7 +90,17 @@ export function filterRecordsForViewer(
     });
   }
 
-  return records;
+  if (viewer.isParalegal && viewer.contactId) {
+    return records.filter((record) => record.shared.paralegalId === viewer.contactId);
+  }
+
+  // Legal assistants have no case assignment field yet — empty until that exists.
+  if (viewer.isLegalAssistant || session.role === "legal_assistant") {
+    return [];
+  }
+
+  // Pending / unknown role: show nothing.
+  return [];
 }
 
 export function canViewerAccessCase(
@@ -93,10 +110,20 @@ export function canViewerAccessCase(
   goals: AttorneyGoal[],
 ) {
   const viewer = buildViewerContext(session, users);
-  if (viewer.isAdmin) return true;
+  if (viewer.isAdmin || session.role === "manager") return true;
+
   if (viewer.isAttorney && viewer.contactId) {
     if (record.shared.attorneyId !== viewer.contactId) return false;
     return !isRecordHiddenFromAttorney(record, viewer.contactId, goals);
   }
-  return true;
+
+  if (viewer.isParalegal && viewer.contactId) {
+    return record.shared.paralegalId === viewer.contactId;
+  }
+
+  if (viewer.isLegalAssistant || session.role === "legal_assistant") {
+    return false;
+  }
+
+  return false;
 }

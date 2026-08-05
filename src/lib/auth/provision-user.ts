@@ -3,7 +3,14 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { type UserRole } from "@/lib/types";
 
 function normalizeRole(value: string | null | undefined): UserRole | null {
-  if (value === "attorney" || value === "paralegal" || value === "manager" || value === "admin" || value === "super_admin") {
+  if (
+    value === "attorney" ||
+    value === "paralegal" ||
+    value === "legal_assistant" ||
+    value === "manager" ||
+    value === "admin" ||
+    value === "super_admin"
+  ) {
     return value;
   }
   return null;

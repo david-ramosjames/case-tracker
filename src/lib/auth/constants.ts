@@ -35,6 +35,8 @@ export function displayNameFromEmail(email: string, metadataName?: string | null
 }
 
 export function contactRoleToUserRole(role: string | null | undefined): UserRole | null {
-  if (role === "attorney" || role === "paralegal" || role === "manager") return role;
+  if (role === "attorney" || role === "paralegal" || role === "legal_assistant" || role === "manager") {
+    return role;
+  }
   return null;
 }

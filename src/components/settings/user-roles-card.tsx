@@ -116,7 +116,7 @@ export function UserRolesCard({ users: initialUsers }: { users: AppUser[] }) {
                   <TableCell className="whitespace-nowrap">{user.email}</TableCell>
                   <TableCell>
                     <Badge variant={user.role === "manager" || user.role === "admin" ? "pink" : "outline"}>
-                      {user.role}
+                      {user.role === "legal_assistant" ? "legal assistant" : user.role}
                     </Badge>
                   </TableCell>
                   <TableCell>

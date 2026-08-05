@@ -253,7 +253,13 @@ export async function getUsers(): Promise<AppUser[]> {
   const client = await createSharedDataClient();
   const { data } = await client.from("contacts").select("id,name,email,role,slack_user_id,slack_display_name").order("name");
   return ((data ?? []) as ContactRow[])
-    .filter((row) => row.role === "attorney" || row.role === "paralegal" || row.role === "manager")
+    .filter(
+      (row) =>
+        row.role === "attorney" ||
+        row.role === "paralegal" ||
+        row.role === "legal_assistant" ||
+        row.role === "manager",
+    )
     .map(contactToUser);
 }
 
@@ -487,7 +493,7 @@ export async function updateTrackerEntry(
     }
 
     const refreshedRecord = await getCaseById(caseId);
-    const tracker = refreshedRecord?.tracker ?? rowToTrackerEntry(data as TrackerEntryRow, resultRow, []);
+    let tracker = refreshedRecord?.tracker ?? rowToTrackerEntry(data as TrackerEntryRow, resultRow, []);
 
     const activity = await createActivityEntry(
       caseId,
@@ -498,7 +504,12 @@ export async function updateTrackerEntry(
       existingRecord,
     );
     if (existingRecord) {
-      await syncDerivedSharedCaseStatus(caseId, tracker, existingRecord);
+      const closedAt = await syncDerivedSharedCaseStatus(caseId, tracker, existingRecord, {
+        previousStatus: existingRecord.shared.status,
+      });
+      if (closedAt !== undefined) {
+        tracker = { ...tracker, closedAt };
+      }
       if (!options.skipSlackNotifications) {
         try {
           await runSlackTrackerSideEffects(existingRecord, tracker, changeInput, previousStage);
@@ -543,7 +554,7 @@ export async function updateTrackerEntry(
     : null;
   const tracker = rowToTrackerEntry(inserted as TrackerEntryRow, resultRow, []);
   const insertedRecord = await getCaseById(caseId);
-  await syncDerivedSharedCaseStatus(caseId, tracker, insertedRecord);
+  await syncDerivedSharedCaseStatus(caseId, tracker, insertedRecord, { previousStatus: null });
   const activity = await createActivityEntry(
     caseId,
     "Tracker created",
@@ -1022,6 +1033,9 @@ export async function resetSettlementFinancialBackfill(): Promise<SettlementFina
 
     const caseNumber = cleanCaseNumber(toStringOrNull(entry.case_number) ?? "");
     const linkedCaseId = linkedDocketFlowCaseId(entry as TrackerEntryRow);
+    const caseIdForSync = linkedCaseId ?? trackerEntryId;
+    const beforeRecord = await getCaseById(caseIdForSync);
+    const previousStatus = beforeRecord?.shared.status ?? null;
     const currentStage = normalizeStage(toStringOrNull(entry.case_stage));
     let restoredStage: CaseStage | null = null;
     let stageRestored = false;
@@ -1101,11 +1115,12 @@ export async function resetSettlementFinancialBackfill(): Promise<SettlementFina
       if (resultError) throw new Error(resultError.message);
     }
 
-    if (stageRestored) {
-      const caseId = linkedCaseId ?? trackerEntryId;
-      const refreshed = await getCaseById(caseId);
+    if (flags.financial || stageRestored) {
+      const refreshed = await getCaseById(caseIdForSync);
       if (refreshed) {
-        await syncDerivedSharedCaseStatus(caseId, refreshed.tracker, refreshed);
+        await syncDerivedSharedCaseStatus(caseIdForSync, refreshed.tracker, refreshed, {
+          previousStatus,
+        });
       }
     }
 
@@ -2122,6 +2137,9 @@ export async function clearSheetSettlementSyncForCase(input: {
   const caseNumber = cleanCaseNumber(input.caseNumber);
   const trackerEntryId = input.trackerEntryId;
   const linkedCaseId = input.caseId ?? null;
+  const refreshCaseId = linkedCaseId ?? trackerEntryId;
+  const beforeRecord = await getCaseById(refreshCaseId);
+  const previousStatus = beforeRecord?.shared.status ?? null;
   const resultFilter = linkedCaseId
     ? `tracker_entry_id.eq.${trackerEntryId},case_id.eq.${linkedCaseId}`
     : `tracker_entry_id.eq.${trackerEntryId}`;
@@ -2205,10 +2223,11 @@ export async function clearSheetSettlementSyncForCase(input: {
     }
   }
 
-  const refreshCaseId = linkedCaseId ?? trackerEntryId;
   const refreshed = await getCaseById(refreshCaseId);
   if (refreshed) {
-    await syncDerivedSharedCaseStatus(refreshCaseId, refreshed.tracker, refreshed);
+    await syncDerivedSharedCaseStatus(refreshCaseId, refreshed.tracker, refreshed, {
+      previousStatus,
+    });
   }
 
   return { cleared: true, sheetDisbursementsRemoved, stageRestored };
@@ -2255,6 +2274,8 @@ export async function syncSettlementsFromSheet(
     const resolvedCaseNumber = cleanCaseNumber(toString(trackerRow.case_number, "") || caseNumber);
     const trackerEntryId = toString(trackerRow.id, "");
     const linkedCaseId = linkedDocketFlowCaseId(trackerRow);
+    const refreshCaseId = linkedCaseId ?? trackerEntryId;
+    const previousStatus = (await getCaseById(refreshCaseId))?.shared.status ?? null;
 
     const { data: existingResultForLock } = await admin
       .from("case_tracker_results")
@@ -2491,10 +2512,11 @@ export async function syncSettlementsFromSheet(
     }
 
     if (!dryRun) {
-      const refreshCaseId = linkedCaseId ?? trackerEntryId;
       const refreshed = await getCaseById(refreshCaseId);
       if (refreshed) {
-        await syncDerivedSharedCaseStatus(refreshCaseId, refreshed.tracker, refreshed);
+        await syncDerivedSharedCaseStatus(refreshCaseId, refreshed.tracker, refreshed, {
+          previousStatus,
+        });
       }
     }
 
@@ -3392,6 +3414,7 @@ function rowToTrackerEntry(
     quoConversationId: toStringOrNull(row.quo_conversation_id),
     quoPhoneNumberId: toStringOrNull(row.quo_phone_number_id),
     quoContacts,
+    closedAt: toStringOrNull(row.closed_at),
     updatedAt: toString(row.updated_at, new Date().toISOString()),
   };
   const result = applyDerivedSettlementResult(entry.result, entry);
@@ -3602,11 +3625,19 @@ function suggestionRowToSuggestion(row: SuggestionRow): StageSuggestion {
 }
 
 function contactToUser(row: ContactRow): AppUser {
+  const role =
+    row.role === "paralegal"
+      ? "paralegal"
+      : row.role === "legal_assistant"
+        ? "legal_assistant"
+        : row.role === "manager"
+          ? "manager"
+          : "attorney";
   return {
     id: row.id,
     name: row.name ?? "Unknown",
     email: row.email ?? `${slug(row.name ?? row.id)}@ramosjameslaw.local`,
-    role: row.role === "paralegal" ? "paralegal" : row.role === "manager" ? "manager" : "attorney",
+    role,
     avatarInitials: initials(row.name ?? "Unknown"),
     active: true,
     slackUserId: row.slack_user_id ?? null,
@@ -3660,12 +3691,44 @@ function normalizeCaseStatus(value: string | null | undefined): CaseStatus {
   return normalized === "closed" || normalized === "inactive" || normalized === "disengaged" || normalized === "archived" ? "Closed" : "Active";
 }
 
-async function syncDerivedSharedCaseStatus(caseId: string, tracker: TrackerEntry, record?: CaseRecord | null) {
+async function syncDerivedSharedCaseStatus(
+  caseId: string,
+  tracker: TrackerEntry,
+  record?: CaseRecord | null,
+  options?: { previousStatus?: CaseStatus | null },
+): Promise<string | null | undefined> {
   const resolved = record ?? (await getCaseById(caseId));
-  if (!resolved || isOrphanTrackerRecord(resolved)) return;
+  const nextStatus = deriveCaseStatusFromTracker(tracker.caseStage, tracker.result);
+  const previousStatus =
+    options?.previousStatus !== undefined
+      ? options.previousStatus
+      : resolved
+        ? resolved.shared.status
+        : null;
 
-  const status = deriveCaseStatusFromTracker(tracker.caseStage, tracker.result);
-  await updateSharedCaseFields(resolved.shared.id, {}, { explicitStatus: status });
+  if (resolved && !isOrphanTrackerRecord(resolved)) {
+    await updateSharedCaseFields(resolved.shared.id, {}, { explicitStatus: nextStatus });
+  }
+
+  if (!hasPersistedTrackerEntry(tracker)) return undefined;
+
+  let closedAt: string | null | undefined;
+  if (nextStatus === "Closed" && previousStatus !== "Closed") {
+    closedAt = new Date().toISOString();
+  } else if (nextStatus === "Active" && previousStatus === "Closed") {
+    closedAt = null;
+  }
+
+  if (closedAt === undefined) return undefined;
+  if ((tracker.closedAt ?? null) === closedAt) return closedAt;
+
+  const client = createSupabaseAdminClient() ?? (await createTrackerClient());
+  const { error } = await client
+    .from("case_tracker_entries")
+    .update({ closed_at: closedAt })
+    .eq("id", tracker.id);
+  if (error) throw error;
+  return closedAt;
 }
 
 export function normalizeStage(value: string | null | undefined): CaseStage {

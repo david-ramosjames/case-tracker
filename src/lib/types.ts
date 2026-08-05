@@ -1,4 +1,4 @@
-export type UserRole = "attorney" | "paralegal" | "manager" | "admin" | "super_admin";
+export type UserRole = "attorney" | "paralegal" | "legal_assistant" | "manager" | "admin" | "super_admin";
 
 export type CaseStage =
   | "Lit"
@@ -207,6 +207,8 @@ export type TrackerEntry = {
   quoConversationId: string | null;
   quoPhoneNumberId: string | null;
   quoContacts: CaseQuoContact[];
+  /** When status became Closed; null while Active / if never tracked. */
+  closedAt: string | null;
   updatedAt: string;
 };
 
