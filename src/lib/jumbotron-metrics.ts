@@ -1,4 +1,5 @@
 import { isActivePipelineCase } from "@/lib/auth/access";
+import { isCaseFullyDisbursed } from "@/lib/case-status";
 import { isDateInCalendarYear, getRecordDisburseDate } from "@/lib/commission-year";
 import {
   getAggregatedResultFromDisbursements,
@@ -26,6 +27,7 @@ export type JumbotronMetrics = {
   averageRjlFees: JumbotronMetric;
   daysIntakeToSettlement: JumbotronMetric;
   daysSettlementToDisbursement: JumbotronMetric;
+  closedDisbursementSuccess: JumbotronMetric;
 };
 
 export type SignedCasesMonthBucket = {
@@ -103,6 +105,21 @@ export function computeJumbotronMetrics(
 
   const closedInYear = filtered.filter((record) => closedCaseInCalendarYear(record, filters.calendarYear));
 
+  const closedAllTime = filtered.filter((record) => record.shared.status === "Closed");
+  const closedDisbursedAllTime = closedAllTime.filter((record) =>
+    isCaseFullyDisbursed(record.tracker.result),
+  );
+  const closedStageCounts = closedAllTime.reduce(
+    (counts, record) => {
+      const stage = record.tracker.caseStage;
+      if (stage === "Settled" || stage === "Disengaged" || stage === "Terminated" || stage === "Referred") {
+        counts[stage] += 1;
+      }
+      return counts;
+    },
+    { Settled: 0, Disengaged: 0, Terminated: 0, Referred: 0 },
+  );
+
   const settlementAmounts = closedInYear
     .map((record) => resolveRecordFinancials(record).settlementAmount)
     .filter((amount): amount is number => amount != null && amount > 0);
@@ -128,6 +145,9 @@ export function computeJumbotronMetrics(
     .filter((days): days is number => days != null && days >= 0);
 
   const yearLabel = String(filters.calendarYear);
+  const closedCount = closedAllTime.length;
+  const disbursedCount = closedDisbursedAllTime.length;
+  const successRate = closedCount > 0 ? (disbursedCount / closedCount) * 100 : null;
 
   return {
     activeCases: {
@@ -166,6 +186,20 @@ export function computeJumbotronMetrics(
       (value) => `${Math.round(value)} days`,
       `Closed in ${yearLabel} · ${settlementToDisbursementDays.length} with settlement + disbursement dates`,
       settlementToDisbursementDays.length,
+    ),
+    closedDisbursementSuccess: metricFromNumber(
+      successRate,
+      (value) => `${Math.round(value)}%`,
+      closedCount === 0
+        ? "All-time · no closed cases in scope"
+        : [
+            `All-time · ${disbursedCount} disbursed of ${closedCount} closed`,
+            `Settled ${closedStageCounts.Settled}`,
+            `Disengaged ${closedStageCounts.Disengaged}`,
+            `Terminated ${closedStageCounts.Terminated}`,
+            `Referred ${closedStageCounts.Referred}`,
+          ].join(" · "),
+      closedCount,
     ),
   };
 }

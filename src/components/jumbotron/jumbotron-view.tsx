@@ -9,6 +9,7 @@ import {
   CircleDollarSign,
   Clock3,
   Hourglass,
+  Percent,
   SlidersHorizontal,
   Timer,
 } from "lucide-react";
@@ -61,8 +62,8 @@ export function JumbotronView({
             <CardTitle className="text-base">Filters</CardTitle>
           </div>
           <CardDescription>
-            Open-case metrics use every active pipeline case. Settlement, timing, and signed-case trend metrics respect
-            the selected calendar year.
+            Open-case metrics use every active pipeline case. Settlement and timing metrics use the selected calendar
+            year. Disbursement success is all-time (closed date history is incomplete).
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -134,6 +135,12 @@ export function JumbotronView({
           value={metrics.daysSettlementToDisbursement.value}
           detail={metrics.daysSettlementToDisbursement.detail}
           icon={ArrowRightLeft}
+        />
+        <MetricCard
+          label="Closed outcomes"
+          value={metrics.closedDisbursementSuccess.value}
+          detail={metrics.closedDisbursementSuccess.detail}
+          icon={Percent}
         />
       </div>
 
