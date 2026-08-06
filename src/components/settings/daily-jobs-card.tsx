@@ -149,7 +149,11 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
       result.skippedNoTracker && Number(result.skippedNoTracker) > 0
         ? ` ${result.skippedNoTracker} sheet case(s) had no tracker row.`
         : "";
-    return `Synced ${result.disbursementsSynced ?? 0} disbursement row(s) across ${result.casesProcessed ?? 0} case(s). Updated ${result.settlementsUpdated ?? 0} settlement field(s). Auto-settled ${result.stagesAutoSettled ?? 0} case(s).${skippedNote}`;
+    const unchangedNote =
+      result.skippedUnchanged && Number(result.skippedUnchanged) > 0
+        ? ` ${result.skippedUnchanged} unchanged case(s) skipped.`
+        : "";
+    return `Synced ${result.disbursementsSynced ?? 0} disbursement row(s) across ${result.casesProcessed ?? 0} case(s). Updated ${result.settlementsUpdated ?? 0} settlement field(s). Auto-settled ${result.stagesAutoSettled ?? 0} case(s).${skippedNote}${unchangedNote}`;
   }
 
   if (step === "treatmentPromotion" && result) {

@@ -17,6 +17,7 @@ type SyncResponse = {
   stagesAutoSettled?: number;
   skippedNoTracker?: number;
   skippedFinancialLocked?: number;
+  skippedUnchanged?: number;
   sheetCasesFound?: number;
   details?: SettlementSheetSyncCaseDetail[];
   error?: string;
@@ -81,8 +82,12 @@ export function SettlementSyncCard() {
         body.skippedFinancialLocked && body.skippedFinancialLocked > 0
           ? ` ${body.skippedFinancialLocked} case(s) skipped (financial CSV backfill is source of truth).`
           : "";
+      const unchangedNote =
+        body.skippedUnchanged && body.skippedUnchanged > 0
+          ? ` ${body.skippedUnchanged} unchanged case(s) skipped.`
+          : "";
       setMessage(
-        `Synced ${body.disbursementsSynced ?? 0} disbursement row(s) across ${body.casesProcessed ?? 0} case(s) from ${body.sheetCasesFound ?? 0} sheet case(s). Updated ${body.settlementsUpdated ?? 0} settlement/disburse fields. Auto-settled ${body.stagesAutoSettled ?? 0} case(s).${skippedNote}${lockedNote}`,
+        `Synced ${body.disbursementsSynced ?? 0} disbursement row(s) across ${body.casesProcessed ?? 0} case(s) from ${body.sheetCasesFound ?? 0} sheet case(s). Updated ${body.settlementsUpdated ?? 0} settlement/disburse fields. Auto-settled ${body.stagesAutoSettled ?? 0} case(s).${skippedNote}${lockedNote}${unchangedNote}`,
       );
       setDetails(body.details ?? []);
     } catch (err) {

@@ -190,6 +190,7 @@ export async function syncSettlementsFromGoogleSheetIfConfigured(options?: {
       stagesRestored: 0,
       skippedNoTracker: 0,
       skippedFinancialLocked: 0,
+      skippedUnchanged: 0,
       sheetCasesFound: 0,
       details: [],
     };
@@ -254,6 +255,7 @@ export async function syncSettlementsFromGoogleSheetForCaseNumber(
         stagesRestored: 0,
         skippedNoTracker: 0,
         skippedFinancialLocked: cleared.reason === "financial_locked" ? 1 : 0,
+        skippedUnchanged: 0,
         sheetCasesFound: 0,
         details: [],
         sheetRowsFound: 0,
@@ -273,6 +275,7 @@ export async function syncSettlementsFromGoogleSheetForCaseNumber(
       stagesRestored: 0,
       skippedNoTracker: 0,
       skippedFinancialLocked: 0,
+      skippedUnchanged: 0,
       sheetCasesFound: 0,
       details: [],
       sheetRowsFound: 0,

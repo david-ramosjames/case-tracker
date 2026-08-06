@@ -192,6 +192,7 @@ export function mergeDailyCronRunToAllResult(run: DailyCronRunState | null) {
         stagesRestored: 0,
         skippedNoTracker: 0,
         skippedFinancialLocked: 0,
+        skippedUnchanged: 0,
         sheetCasesFound: 0,
         details: [],
       } as const),
