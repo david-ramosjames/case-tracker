@@ -47,6 +47,8 @@ export function isClosedCase(record: Pick<CaseRecord, "shared">) {
 }
 
 /** Active pipeline cases still need periodic attorney review and Slack reminders. */
-export function caseRequiresOngoingUpdates(record: Pick<CaseRecord, "shared">) {
+export function caseRequiresOngoingUpdates(record: Pick<CaseRecord, "shared" | "tracker">) {
+  // Closed stages never need update nags — even if shared.status is stale.
+  if (CLOSED_CASE_STAGES.has(record.tracker.caseStage)) return false;
   return !isClosedCase(record);
 }

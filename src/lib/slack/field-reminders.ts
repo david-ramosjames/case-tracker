@@ -10,6 +10,7 @@ import {
 import {
   EXPECTED_DISBURSEMENT_QUARTER_LABEL,
 } from "@/lib/case-options";
+import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import {
   getExpectedLitigationSlackOptions,
   getLiabilitySlackOptions,
@@ -73,7 +74,7 @@ function expectedLitigationReminderDue(record: CaseRecord) {
 
 /** Fields that need a Slack reminder post today. */
 export function getDueFieldReminders(record: CaseRecord): FieldReminderKey[] {
-  if (!record.tracker.isActive || record.shared.status !== "Active") return [];
+  if (!record.tracker.isActive || !caseRequiresOngoingUpdates(record)) return [];
 
   const due: FieldReminderKey[] = [];
   if (liabilityReminderDue(record)) due.push("liability");

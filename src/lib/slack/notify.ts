@@ -1,4 +1,5 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
+import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { syncSlackChannelTopicForStage, syncSlackChannelTopicSummary } from "@/lib/slack/channel-topic";
 import { normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
 import { getSlackChannelForCaseNumber, saveReminderThread, saveStageUpdateThread } from "@/lib/slack/channels";
@@ -189,7 +190,7 @@ export async function sendSlackCaseReminders(
   let skipped = 0;
 
   for (const record of records) {
-    if (!options?.forceSend && (!record.tracker.isActive || record.shared.status !== "Active")) {
+    if (!options?.forceSend && (!record.tracker.isActive || !caseRequiresOngoingUpdates(record))) {
       skipped += 1;
       continue;
     }

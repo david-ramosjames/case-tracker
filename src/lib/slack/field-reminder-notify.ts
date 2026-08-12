@@ -1,4 +1,5 @@
 import { getAppOriginForNotifications } from "@/lib/auth/redirect-url";
+import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { resolveChannelUserMentions } from "@/lib/slack/channel-topic";
 import { fetchChannelTopic, normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
@@ -56,7 +57,7 @@ export async function sendSlackFieldReminders(
   const previewItems: FieldReminderPreviewItem[] = [];
 
   for (const record of records) {
-    if (!options?.forceSend && (!record.tracker.isActive || record.shared.status !== "Active")) {
+    if (!options?.forceSend && (!record.tracker.isActive || !caseRequiresOngoingUpdates(record))) {
       skipped += 1;
       if (options?.dryRun) {
         previewItems.push({
@@ -64,7 +65,7 @@ export async function sendSlackFieldReminders(
           clientName: record.shared.clientName,
           action: "skip",
           fields: [],
-          reason: "inactive case",
+          reason: record.tracker.caseStage === "Referred" ? "referred case" : "inactive case",
         });
       }
       continue;
