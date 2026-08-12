@@ -2733,7 +2733,9 @@ export async function syncSettlementsFromSheet(
 }
 
 export async function createTrackerComment(
-  input: Omit<TrackerComment, "id" | "createdAt">,
+  input: Omit<TrackerComment, "id" | "createdAt"> & {
+    notifyContactIds?: string[];
+  },
 ): Promise<{ comment: TrackerComment; activity: ActivityLogEntry | null }> {
   const client = (await createSupabaseAdminClient()) ?? (await createTrackerClient());
 
@@ -2774,10 +2776,19 @@ export async function createTrackerComment(
 
   if (record) {
     try {
+      const notifyIds = [...new Set((input.notifyContactIds ?? []).filter((id) => isUuid(id)))];
+      const mentionSlackUserIds =
+        notifyIds.length > 0
+          ? (await getUsers())
+              .filter((user) => notifyIds.includes(user.id) && user.slackUserId)
+              .map((user) => user.slackUserId!)
+          : [];
+
       await notifySlackCommentPosted(record, {
         type: input.type,
         body: input.body,
         authorName,
+        mentionSlackUserIds,
       });
     } catch (error) {
       console.error("Slack comment notification failed", error);

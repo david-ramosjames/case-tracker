@@ -114,7 +114,12 @@ export async function notifySlackTrackerSaved(record: CaseRecord, patch: Tracker
 
 export async function notifySlackCommentPosted(
   record: CaseRecord,
-  input: { type: CommentType; body: string; authorName: string },
+  input: {
+    type: CommentType;
+    body: string;
+    authorName: string;
+    mentionSlackUserIds?: string[];
+  },
 ) {
   if (!isSlackEnabled()) return;
   const slackCommentTypes = new Set<CommentType>([
@@ -123,7 +128,8 @@ export async function notifySlackCommentPosted(
     "attorney_update",
     "risk_flag",
   ]);
-  if (!slackCommentTypes.has(input.type)) return;
+  const hasMentions = (input.mentionSlackUserIds ?? []).some((id) => /^U[A-Z0-9]+$/i.test(id.trim()));
+  if (!slackCommentTypes.has(input.type) && !hasMentions) return;
 
   const context = await getSlackContextForRecord(record);
   if (!context) return;
@@ -137,14 +143,27 @@ export async function notifySlackCommentPosted(
           ? "Risk Flag"
           : "Comment";
 
+  const mentionLine = [
+    ...new Set(
+      (input.mentionSlackUserIds ?? [])
+        .map((id) => id.trim().toUpperCase())
+        .filter((id) => /^U[A-Z0-9]+$/.test(id)),
+    ),
+  ]
+    .map((id) => `<@${id}>`)
+    .join(" ");
+
   const appUrl = requireAppUrl();
   await postSlackMessage({
     channel: context.channelId,
     text: [
+      mentionLine || null,
       `*${label}* on ${record.shared.caseNumber} — ${input.authorName}`,
       input.body,
       `<${appUrl}/cases/${record.shared.id}|Open case>`,
-    ].join("\n"),
+    ]
+      .filter(Boolean)
+      .join("\n"),
   });
 }
 

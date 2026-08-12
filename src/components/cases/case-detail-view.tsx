@@ -60,6 +60,7 @@ import { getQuoClientSmsUrl } from "@/lib/quo/links";
 import { formatClientPhoneDisplay } from "@/lib/quo/phone";
 import {
   type ActivityLogEntry,
+  type AppUser,
   type CaseDisbursement,
   type CaseRecord,
   type CaseSlackChannel,
@@ -89,6 +90,7 @@ export function CaseDetailView({
   initialActivity,
   settings,
   sessionUser,
+  users,
   slackChannel,
   upcomingDocketFlowEvents,
   docketFlowCaseUrl,
@@ -98,6 +100,7 @@ export function CaseDetailView({
   initialActivity: ActivityLogEntry[];
   settings: CaseTrackerSettings;
   sessionUser: SessionUser;
+  users: AppUser[];
   slackChannel: CaseSlackChannel | null;
   upcomingDocketFlowEvents: DocketFlowScheduledEvent[];
   docketFlowCaseUrl: string | null;
@@ -111,6 +114,7 @@ export function CaseDetailView({
   const [activity, setActivity] = useState(initialActivity);
   const [newComment, setNewComment] = useState("");
   const [commentType, setCommentType] = useState<CommentType>("general_note");
+  const [notifyContactIds, setNotifyContactIds] = useState<string[]>([]);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [isOverviewEditing, setIsOverviewEditing] = useState(false);
   const [isSourcesEditing, setIsSourcesEditing] = useState(false);
@@ -179,6 +183,22 @@ export function CaseDetailView({
 
   const quarterOptions = useMemo(() => getTargetPeriodSelectOptions(tracker.targetResolutionQuarter), [tracker.targetResolutionQuarter]);
   const record = useMemo(() => ({ ...initialRecord, shared, tracker }), [initialRecord, shared, tracker]);
+  const slackNotifyUsers = useMemo(() => {
+    const withSlack = users.filter((user) => Boolean(user.slackUserId?.trim()) && user.active !== false);
+    const priority = new Set([record.shared.attorneyId, record.shared.paralegalId]);
+    return [...withSlack].sort((left, right) => {
+      const leftPriority = priority.has(left.id) ? 0 : 1;
+      const rightPriority = priority.has(right.id) ? 0 : 1;
+      if (leftPriority !== rightPriority) return leftPriority - rightPriority;
+      return left.name.localeCompare(right.name);
+    });
+  }, [record.shared.attorneyId, record.shared.paralegalId, users]);
+
+  function toggleNotifyContact(contactId: string) {
+    setNotifyContactIds((current) =>
+      current.includes(contactId) ? current.filter((id) => id !== contactId) : [...current, contactId],
+    );
+  }
   const flags = getDataQualityFlags(record, settings);
   const attorneyScore = getCaseAttorneyScore(record);
   const openStageSuggestions = getOpenStageSuggestions(record);
@@ -640,6 +660,7 @@ export function CaseDetailView({
           caseId: record.shared.id,
           type: commentType,
           body: newComment.trim(),
+          notifyContactIds,
         }),
       });
       const body = (await response.json()) as { comment?: TrackerComment; activity?: ActivityLogEntry; error?: string };
@@ -650,6 +671,7 @@ export function CaseDetailView({
         setActivity((current) => [body.activity as ActivityLogEntry, ...current]);
       }
       setNewComment("");
+      setNotifyContactIds([]);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Unable to add comment.");
     } finally {
@@ -1530,6 +1552,43 @@ export function CaseDetailView({
                 {isAddingComment ? "Adding..." : "Add"}
               </Button>
             </div>
+            {slackNotifyUsers.length > 0 ? (
+              <div className="rounded-md border bg-slate-50/80 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Notify in Slack (optional)
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-2">
+                  {slackNotifyUsers.map((user) => {
+                    const checked = notifyContactIds.includes(user.id);
+                    const isCaseTeam =
+                      user.id === record.shared.attorneyId || user.id === record.shared.paralegalId;
+                    return (
+                      <label key={user.id} className="flex cursor-pointer items-center gap-2 text-sm text-navy-950">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-input"
+                          checked={checked}
+                          onChange={() => toggleNotifyContact(user.id)}
+                          disabled={isAddingComment}
+                        />
+                        <span>
+                          {user.name}
+                          {isCaseTeam ? (
+                            <span className="ml-1 text-xs text-muted-foreground">
+                              ({user.id === record.shared.attorneyId ? "attorney" : "paralegal"})
+                            </span>
+                          ) : null}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No contacts have a Slack user ID yet — set them in Settings → User Roles to enable mentions.
+              </p>
+            )}
             {errorMessage ? <p className="text-sm text-destructive">{errorMessage}</p> : null}
             <div className="space-y-3">
               {comments.map((comment) => (

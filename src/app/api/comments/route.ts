@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
 import { createTrackerComment } from "@/lib/supabase/services";
-import { type CommentType, type TrackerComment } from "@/lib/types";
+import { type CommentType } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
@@ -12,6 +12,7 @@ export async function POST(request: Request) {
       caseId: string;
       type: CommentType;
       body: string;
+      notifyContactIds?: string[];
     };
 
     const { comment, activity } = await createTrackerComment({
@@ -20,6 +21,7 @@ export async function POST(request: Request) {
       authorName: sessionUser.name,
       type: input.type,
       body: input.body,
+      notifyContactIds: Array.isArray(input.notifyContactIds) ? input.notifyContactIds : [],
     });
 
     return NextResponse.json({ comment, activity });

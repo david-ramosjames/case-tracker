@@ -46,6 +46,7 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ cas
         initialActivity={activity}
         settings={settings}
         sessionUser={sessionUser}
+        users={users}
         slackChannel={slackChannel}
         upcomingDocketFlowEvents={upcomingDocketFlowEvents}
         docketFlowCaseUrl={docketFlowCaseUrl}
