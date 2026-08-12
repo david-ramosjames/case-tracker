@@ -10,6 +10,7 @@ export type ViewerContext = {
   isAdmin: boolean;
   isAttorney: boolean;
   isParalegal: boolean;
+  isParalegalManager: boolean;
   isLegalAssistant: boolean;
   contactId: string | null;
   canViewAllCases: boolean;
@@ -25,17 +26,23 @@ export function findContactForSession(users: AppUser[], session: SessionUser): A
   return users.find((user) => user.email.trim().toLowerCase() === email) ?? null;
 }
 
+function paralegalAssigneeIds(users: AppUser[]) {
+  return new Set(users.filter((user) => user.role === "paralegal").map((user) => user.id));
+}
+
 export function buildViewerContext(session: SessionUser, users: AppUser[]): ViewerContext {
   const isAdmin = isAdminRole(session.role);
   const contact = findContactForSession(users, session);
   const isAttorney = session.role === "attorney" && Boolean(contact);
   const isParalegal = session.role === "paralegal" && Boolean(contact);
+  const isParalegalManager = session.role === "paralegal_manager";
   const isLegalAssistant = session.role === "legal_assistant" && Boolean(contact);
 
   return {
     isAdmin,
     isAttorney,
     isParalegal,
+    isParalegalManager,
     isLegalAssistant,
     contactId: contact?.id ?? null,
     // Firmwide case lists: admins + managers only.
@@ -90,6 +97,12 @@ export function filterRecordsForViewer(
     });
   }
 
+  // Paralegal managers see every case assigned to any paralegal.
+  if (viewer.isParalegalManager) {
+    const assigneeIds = paralegalAssigneeIds(users);
+    return records.filter((record) => assigneeIds.has(record.shared.paralegalId));
+  }
+
   if (viewer.isParalegal && viewer.contactId) {
     return records.filter((record) => record.shared.paralegalId === viewer.contactId);
   }
@@ -115,6 +128,10 @@ export function canViewerAccessCase(
   if (viewer.isAttorney && viewer.contactId) {
     if (record.shared.attorneyId !== viewer.contactId) return false;
     return !isRecordHiddenFromAttorney(record, viewer.contactId, goals);
+  }
+
+  if (viewer.isParalegalManager) {
+    return paralegalAssigneeIds(users).has(record.shared.paralegalId);
   }
 
   if (viewer.isParalegal && viewer.contactId) {

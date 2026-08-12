@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { canViewOutputAndGoals } from "@/lib/auth/constants";
 import { type SessionUser } from "@/lib/auth/types";
 import { cn } from "@/lib/utils";
 
@@ -28,17 +29,27 @@ const navItems = [
   { href: "/stage-suggestions", label: "Suggestions", icon: Sparkles },
   { href: "/results", label: "Results", icon: CircleDollarSign },
   { href: "/litigation", label: "Litigation", icon: Scale },
-  { href: "/output", label: "Output", icon: BarChart3 },
+  { href: "/output", label: "Output", icon: BarChart3, attorneyGoalsOnly: true },
   { href: "/jumbotron", label: "Jumbotron", icon: Presentation },
-  { href: "/goals", label: "Goals", icon: Target },
+  { href: "/goals", label: "Goals", icon: Target, attorneyGoalsOnly: true },
   { href: "/client-sms", label: "Client SMS", icon: MessageSquare, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings, adminOnly: true },
   { href: "/faq", label: "FAQ", icon: HelpCircle, adminOnly: true },
 ];
 
+function visibleNavForSession(sessionUser: SessionUser) {
+  const isAdmin = sessionUser.role === "admin" || sessionUser.role === "super_admin";
+  const showGoals = canViewOutputAndGoals(sessionUser.role);
+  return navItems.filter((item) => {
+    if (item.adminOnly && !isAdmin) return false;
+    if (item.attorneyGoalsOnly && !showGoals) return false;
+    return true;
+  });
+}
+
 export function AppTopNav({ sessionUser }: { sessionUser: SessionUser }) {
   const pathname = usePathname();
-  const visibleNavItems = navItems.filter((item) => !item.adminOnly || sessionUser.role === "admin" || sessionUser.role === "super_admin");
+  const visibleNavItems = visibleNavForSession(sessionUser);
 
   return (
     <div className="flex min-w-0 items-center gap-4">
@@ -78,7 +89,7 @@ export function AppTopNav({ sessionUser }: { sessionUser: SessionUser }) {
 
 export function AppMobileNav({ sessionUser }: { sessionUser: SessionUser }) {
   const pathname = usePathname();
-  const visibleNavItems = navItems.filter((item) => !item.adminOnly || sessionUser.role === "admin" || sessionUser.role === "super_admin");
+  const visibleNavItems = visibleNavForSession(sessionUser);
 
   return (
     <div className="border-t bg-white lg:hidden">

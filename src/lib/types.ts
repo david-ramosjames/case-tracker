@@ -1,4 +1,11 @@
-export type UserRole = "attorney" | "paralegal" | "legal_assistant" | "manager" | "admin" | "super_admin";
+export type UserRole =
+  | "attorney"
+  | "paralegal"
+  | "paralegal_manager"
+  | "legal_assistant"
+  | "manager"
+  | "admin"
+  | "super_admin";
 
 export type CaseStage =
   | "Lit"

@@ -112,6 +112,10 @@ type ResultRow = UnknownRow;
 type DisbursementRow = UnknownRow;
 type SuggestionRow = UnknownRow;
 
+const DOCKETFLOW_CASE_COLUMNS =
+  "id,case_number,client_name,name,status,case_type,date_of_incident,preferred_language,secondary_language,uses_eve,assigned_contact_ids,created_at,updated_at";
+const CONTACT_COLUMNS = "id,name,email,role,slack_user_id,slack_display_name";
+
 const DEFAULT_SETTINGS: CaseTrackerSettings = {
   staleReviewThresholdDays: 30,
   quarterlyReviewThresholdDays: 90,
@@ -150,7 +154,7 @@ export async function getCases(): Promise<CaseRecord[]> {
     fetchAllSupabaseRows<DocketFlowCaseRow>(
       sharedClient,
       "cases",
-      "id,case_number,client_name,name,status,case_type,date_of_incident,preferred_language,secondary_language,uses_eve,assigned_contact_ids,created_at,updated_at",
+      DOCKETFLOW_CASE_COLUMNS,
       { orderBy: "created_at", ascending: false },
     ),
     fetchAllSupabaseRows<TrackerEntryRow>(trackerClient, "case_tracker_entries", "*", {
@@ -162,11 +166,7 @@ export async function getCases(): Promise<CaseRecord[]> {
       orderBy: "created_at",
       ascending: true,
     }),
-    fetchAllSupabaseRows<ContactRow>(
-      sharedClient,
-      "contacts",
-      "id,name,email,role,slack_user_id,slack_display_name",
-    ),
+    fetchAllSupabaseRows<ContactRow>(sharedClient, "contacts", CONTACT_COLUMNS),
     fetchAllSupabaseRows<SuggestionRow>(trackerClient, "case_tracker_stage_suggestions", "*"),
   ]);
 
@@ -187,10 +187,127 @@ export async function getCases(): Promise<CaseRecord[]> {
   });
 }
 
+/**
+ * Load a single case without paging the full tracker/results/disbursements tables.
+ * `caseId` may be a DocketFlow case id, a tracker entry id, or a tracker.case_id.
+ */
 export async function getCaseById(caseId: string): Promise<CaseRecord | null> {
-  const records = await getCases();
+  if (!caseId) return null;
+
+  const [sharedClient, trackerClient] = await Promise.all([createSharedDataClient(), createTrackerClient()]);
+
+  const [caseByIdRes, trackerByIdRes, trackerByCaseIdRes] = await Promise.all([
+    sharedClient.from("cases").select(DOCKETFLOW_CASE_COLUMNS).eq("id", caseId).maybeSingle(),
+    trackerClient.from("case_tracker_entries").select("*").eq("id", caseId).maybeSingle(),
+    trackerClient.from("case_tracker_entries").select("*").eq("case_id", caseId).maybeSingle(),
+  ]);
+  if (caseByIdRes.error) throw caseByIdRes.error;
+  if (trackerByIdRes.error) throw trackerByIdRes.error;
+  if (trackerByCaseIdRes.error) throw trackerByCaseIdRes.error;
+
+  let caseRow = (caseByIdRes.data as DocketFlowCaseRow | null) ?? null;
+  let trackerRow =
+    ((trackerByIdRes.data ?? trackerByCaseIdRes.data) as TrackerEntryRow | null) ?? null;
+
+  const linkedCaseId = trackerRow ? linkedDocketFlowCaseId(trackerRow) : null;
+  if (!caseRow && linkedCaseId && linkedCaseId !== caseId) {
+    const { data, error } = await sharedClient
+      .from("cases")
+      .select(DOCKETFLOW_CASE_COLUMNS)
+      .eq("id", linkedCaseId)
+      .maybeSingle();
+    if (error) throw error;
+    caseRow = (data as DocketFlowCaseRow | null) ?? null;
+  }
+
+  if (caseRow && !trackerRow) {
+    const { data, error } = await trackerClient
+      .from("case_tracker_entries")
+      .select("*")
+      .eq("case_id", caseRow.id)
+      .maybeSingle();
+    if (error) throw error;
+    trackerRow = (data as TrackerEntryRow | null) ?? null;
+  }
+
+  if (!caseRow && !trackerRow) return null;
+
+  const trackerId = trackerRow ? toStringOrNull(trackerRow.id) : null;
+  const docketCaseId = caseRow?.id ?? linkedCaseId;
+  const caseNumber = cleanCaseNumber(caseRow?.case_number ?? toString(trackerRow?.case_number, ""));
+
+  const relatedOr = [
+    trackerId && isUuid(trackerId) ? `tracker_entry_id.eq.${trackerId}` : null,
+    docketCaseId && isUuid(docketCaseId) ? `case_id.eq.${docketCaseId}` : null,
+  ].filter((part): part is string => Boolean(part));
+
+  const disbursementFilters = [
+    trackerId && isUuid(trackerId)
+      ? trackerClient.from("case_tracker_disbursements").select("*").eq("tracker_entry_id", trackerId)
+      : null,
+    caseNumber
+      ? trackerClient.from("case_tracker_disbursements").select("*").eq("case_number", caseNumber)
+      : null,
+  ].filter((query): query is NonNullable<typeof query> => Boolean(query));
+
+  const contactIds = [
+    ...new Set(
+      [
+        toStringOrNull(trackerRow?.attorney_contact_id),
+        toStringOrNull(trackerRow?.paralegal_contact_id),
+        ...(caseRow?.assigned_contact_ids ?? []),
+      ].filter((id): id is string => Boolean(id) && isUuid(id)),
+    ),
+  ];
+
+  const [resultsRes, suggestionsRes, disbursementPages, contactsRes, quoContactsByTrackerId] =
+    await Promise.all([
+      relatedOr.length > 0
+        ? trackerClient.from("case_tracker_results").select("*").or(relatedOr.join(","))
+        : Promise.resolve({ data: [] as ResultRow[], error: null }),
+      relatedOr.length > 0
+        ? trackerClient.from("case_tracker_stage_suggestions").select("*").or(relatedOr.join(","))
+        : Promise.resolve({ data: [] as SuggestionRow[], error: null }),
+      Promise.all(disbursementFilters.map((query) => query)),
+      contactIds.length > 0
+        ? sharedClient.from("contacts").select(CONTACT_COLUMNS).in("id", contactIds)
+        : Promise.resolve({ data: [] as ContactRow[], error: null }),
+      listQuoContactsByTrackerIds(
+        trackerId && isUuid(trackerId) ? [trackerId] : [],
+      ).catch(() => new Map()),
+    ]);
+
+  if (resultsRes.error) throw resultsRes.error;
+  if (suggestionsRes.error) throw suggestionsRes.error;
+  if (contactsRes.error) throw contactsRes.error;
+  for (const page of disbursementPages) {
+    if (page.error) throw page.error;
+  }
+
+  const disbursementById = new Map<string, DisbursementRow>();
+  for (const page of disbursementPages) {
+    for (const row of (page.data ?? []) as DisbursementRow[]) {
+      const id = toStringOrNull(row.id);
+      if (id) disbursementById.set(id, row);
+    }
+  }
+
+  const records = mapRecords({
+    cases: caseRow ? [caseRow] : [],
+    trackers: trackerRow ? [trackerRow] : [],
+    results: (resultsRes.data ?? []) as ResultRow[],
+    disbursements: [...disbursementById.values()],
+    contacts: (contactsRes.data ?? []) as ContactRow[],
+    suggestions: (suggestionsRes.data ?? []) as SuggestionRow[],
+    quoContactsByTrackerId,
+  });
+
   return (
-    records.find((record) => record.shared.id === caseId || record.tracker.id === caseId || record.tracker.caseId === caseId) ??
+    records.find(
+      (record) =>
+        record.shared.id === caseId || record.tracker.id === caseId || record.tracker.caseId === caseId,
+    ) ??
+    records[0] ??
     null
   );
 }
@@ -3617,11 +3734,13 @@ function contactToUser(row: ContactRow): AppUser {
   const role =
     row.role === "paralegal"
       ? "paralegal"
-      : row.role === "legal_assistant"
-        ? "legal_assistant"
-        : row.role === "manager"
-          ? "manager"
-          : "attorney";
+      : row.role === "paralegal_manager"
+        ? "paralegal_manager"
+        : row.role === "legal_assistant"
+          ? "legal_assistant"
+          : row.role === "manager"
+            ? "manager"
+            : "attorney";
   return {
     id: row.id,
     name: row.name ?? "Unknown",

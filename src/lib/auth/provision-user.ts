@@ -6,6 +6,7 @@ function normalizeRole(value: string | null | undefined): UserRole | null {
   if (
     value === "attorney" ||
     value === "paralegal" ||
+    value === "paralegal_manager" ||
     value === "legal_assistant" ||
     value === "manager" ||
     value === "admin" ||

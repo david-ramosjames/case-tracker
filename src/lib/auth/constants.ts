@@ -35,8 +35,26 @@ export function displayNameFromEmail(email: string, metadataName?: string | null
 }
 
 export function contactRoleToUserRole(role: string | null | undefined): UserRole | null {
-  if (role === "attorney" || role === "paralegal" || role === "legal_assistant" || role === "manager") {
+  if (
+    role === "attorney" ||
+    role === "paralegal" ||
+    role === "paralegal_manager" ||
+    role === "legal_assistant" ||
+    role === "manager"
+  ) {
     return role;
   }
   return null;
+}
+
+/** Paralegal staff should not see attorney commission Output / Goals. */
+export function canViewOutputAndGoals(role: UserRole | null | undefined) {
+  if (!role) return false;
+  return role !== "paralegal" && role !== "paralegal_manager" && role !== "legal_assistant";
+}
+
+export function formatUserRoleLabel(role: UserRole | string | null | undefined) {
+  if (role === "legal_assistant") return "legal assistant";
+  if (role === "paralegal_manager") return "paralegal manager";
+  return role ?? "pending";
 }

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatUserRoleLabel } from "@/lib/auth/constants";
 import { type AppUser } from "@/lib/types";
 
 type DraftRow = {
@@ -115,8 +116,16 @@ export function UserRolesCard({ users: initialUsers }: { users: AppUser[] }) {
                   <TableCell className="font-semibold whitespace-nowrap">{user.name}</TableCell>
                   <TableCell className="whitespace-nowrap">{user.email}</TableCell>
                   <TableCell>
-                    <Badge variant={user.role === "manager" || user.role === "admin" ? "pink" : "outline"}>
-                      {user.role === "legal_assistant" ? "legal assistant" : user.role}
+                    <Badge
+                      variant={
+                        user.role === "manager" ||
+                        user.role === "paralegal_manager" ||
+                        user.role === "admin"
+                          ? "pink"
+                          : "outline"
+                      }
+                    >
+                      {formatUserRoleLabel(user.role)}
                     </Badge>
                   </TableCell>
                   <TableCell>
