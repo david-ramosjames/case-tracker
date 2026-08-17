@@ -49,6 +49,18 @@ export async function fetchGoogleSheetValues(spreadsheetId: string, range: strin
   return fetchGoogleSheetValuesOnce(spreadsheetId, range, token, credentials.clientEmail);
 }
 
+const SHEET_READ_MAX_ATTEMPTS = 4;
+const SHEET_READ_RETRY_DELAYS_MS = [500, 1500, 3500];
+
+function isTransientSheetsFailure(status: number, message: string) {
+  if ([429, 500, 502, 503, 504].includes(status)) return true;
+  return /currently unavailable|backend error|rate limit|too many requests|internal error/i.test(message);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function fetchGoogleSheetValuesOnce(
   spreadsheetId: string,
   range: string,
@@ -57,23 +69,46 @@ async function fetchGoogleSheetValuesOnce(
 ) {
   const encodedRange = encodeURIComponent(range);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodedRange}`;
-  const response = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  const body = (await response.json()) as {
-    values?: string[][];
-    error?: { message?: string; status?: string };
-  };
-  if (!response.ok) {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= SHEET_READ_MAX_ATTEMPTS; attempt++) {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    let body: { values?: string[][]; error?: { message?: string; status?: string } } = {};
+    try {
+      body = (await response.json()) as typeof body;
+    } catch {
+      body = { error: { message: `HTTP ${response.status}` } };
+    }
+
+    if (response.ok) return body.values ?? [];
+
     const detail = body.error?.message ?? "Unable to read Google Sheet.";
     if (/permission/i.test(detail)) {
       throw new Error(
         `${detail} Share spreadsheet ${spreadsheetId} with ${clientEmail} as Viewer, and enable the Google Sheets API in Google Cloud.`,
       );
     }
-    throw new Error(`${detail} (spreadsheet ${spreadsheetId}, range ${range})`);
+
+    lastError = new Error(`${detail} (spreadsheet ${spreadsheetId}, range ${range})`);
+    const delay = SHEET_READ_RETRY_DELAYS_MS[attempt - 1];
+    if (!delay || !isTransientSheetsFailure(response.status, detail)) {
+      throw lastError;
+    }
+
+    console.warn("Google Sheets read retry", {
+      attempt,
+      nextAttempt: attempt + 1,
+      delayMs: delay,
+      status: response.status,
+      range,
+      message: detail,
+    });
+    await sleep(delay);
   }
-  return body.values ?? [];
+
+  throw lastError ?? new Error(`Unable to read Google Sheet (spreadsheet ${spreadsheetId}, range ${range})`);
 }
 
 /** Parse `Sheet1!A:H` / `Sheet1!A1:H` into sheet + columns for chunked reads. */
