@@ -38,7 +38,7 @@ export function AdminFaqView() {
           DocketFlow owns case identity (client, case #, assignments). Case Tracker owns pipeline forecasting,
           settlement workflow, attorney-entered fields, Slack automation, and firm output reporting.
         </p>
-        <p>Attorneys and paralegals update cases in the tracker. Admins configure goals, sheet sync, and integrations in Settings.</p>
+        <p>Attorneys, paralegals, and legal assistants update cases in the tracker. Admins configure goals, sheet sync, and integrations in Settings.</p>
       </FaqSection>
 
       <FaqSection title="App pages">
@@ -56,7 +56,7 @@ export function AdminFaqView() {
 
       <FaqSection title="Two kinds of data">
         <p className="font-medium text-navy-950">From DocketFlow (read-only in tracker)</p>
-        <BulletList items={["Case #, client name, attorney, paralegal, date signed, date of incident, case type."]} />
+        <BulletList items={["Case #, client name, attorney, paralegal, legal assistant, date signed, date of incident, case type."]} />
         <p className="font-medium text-navy-950">Entered in Case Tracker (attorney / admin)</p>
         <BulletList
           items={[

@@ -88,6 +88,7 @@ export function LitigationTable({
           record.shared.clientName,
           record.attorney.name,
           record.paralegal.name,
+          record.legalAssistant?.name ?? "",
           ...LITIGATION_EVENT_DEFINITIONS.flatMap(({ key }) => {
             const event = record.tracker.litigationEvents[key];
             return [event.date ?? "", event.status ?? ""];

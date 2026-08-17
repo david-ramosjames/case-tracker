@@ -43,14 +43,14 @@ export function extractSlackUserIdsFromTopic(topic: string | null | undefined) {
   return [...new Set(ids)];
 }
 
-/** Plain-text @handles from topics like `Attorney @Ryan | Paralegal @Lyliana`. */
+/** Plain-text @handles from topics like `Attorney @Ryan | Paralegal @Lyliana | LA @claudia`. */
 export function extractAtHandlesFromTopic(topic: string | null | undefined) {
   if (!topic?.trim()) return [];
   const handles = [...topic.matchAll(/(?:^|[\s|(,])@([A-Za-z][\w.-]*)/g)].map((match) => match[1]);
   return [...new Set(handles)];
 }
 
-/** Extract Slack user mention tokens from a channel topic (Attorney <@U…> | Paralegal <@U…>). */
+/** Extract Slack user mention tokens from a channel topic (Attorney <@U…> | Paralegal <@U…> | LA <@U…>). */
 export function formatTopicUserMentions(topic: string | null | undefined) {
   return extractSlackUserIdsFromTopic(topic)
     .map((id) => `<@${id}>`)
@@ -147,6 +147,7 @@ function topicHandleForUser(user: { name: string; slackDisplayName?: string | nu
 }
 
 export function buildExpectedCaseTopic(record: CaseRecord) {
+  const legalAssistant = record.legalAssistant;
   return buildCaseTopic({
     usesEve: Boolean(record.shared.usesEve),
     attorneyHandle: topicHandleForUser({
@@ -157,8 +158,15 @@ export function buildExpectedCaseTopic(record: CaseRecord) {
       name: record.paralegal.name,
       slackDisplayName: record.paralegal.slackDisplayName,
     }),
+    legalAssistantHandle: legalAssistant
+      ? topicHandleForUser({
+          name: legalAssistant.name,
+          slackDisplayName: legalAssistant.slackDisplayName,
+        })
+      : null,
     attorneySlackUserId: record.attorney.slackUserId,
     paralegalSlackUserId: record.paralegal.slackUserId,
+    legalAssistantSlackUserId: legalAssistant?.slackUserId,
     stageLabel: stageLabelFromCaseStage(record.tracker.caseStage),
     primaryLanguage: record.shared.preferredLanguage,
     secondaryLanguage: record.shared.secondaryLanguage,
@@ -180,6 +188,8 @@ function topicsEquivalent(current: string | null | undefined, expected: string) 
       (b.attorneySlackUserId || b.attorneyHandle)?.toLowerCase() &&
     (a.paralegalSlackUserId || a.paralegalHandle)?.toLowerCase() ===
       (b.paralegalSlackUserId || b.paralegalHandle)?.toLowerCase() &&
+    (a.legalAssistantSlackUserId || a.legalAssistantHandle || "")?.toLowerCase() ===
+      (b.legalAssistantSlackUserId || b.legalAssistantHandle || "")?.toLowerCase() &&
     (a.stageLabel ?? "").trim().toLowerCase() === (b.stageLabel ?? "").trim().toLowerCase() &&
     a.primaryLanguage === b.primaryLanguage &&
     a.secondaryLanguage === b.secondaryLanguage
@@ -715,8 +725,10 @@ export async function syncSlackChannelTopicForStage(input: {
       usesEve: parsed.usesEve,
       attorneyHandle: parsed.attorneyHandle ?? "Attorney",
       paralegalHandle: parsed.paralegalHandle ?? "Paralegal",
+      legalAssistantHandle: parsed.legalAssistantHandle,
       attorneySlackUserId: parsed.attorneySlackUserId,
       paralegalSlackUserId: parsed.paralegalSlackUserId,
+      legalAssistantSlackUserId: parsed.legalAssistantSlackUserId,
       stageLabel,
       primaryLanguage: parsed.primaryLanguage,
       secondaryLanguage: parsed.secondaryLanguage,

@@ -789,6 +789,7 @@ export function CaseDetailView({
             <div className="grid gap-4 md:grid-cols-4">
               <Info label="Attorney" value={record.attorney.name} />
               <Info label="Paralegal" value={record.paralegal.name} />
+              {record.legalAssistant ? <Info label="Legal assistant" value={record.legalAssistant.name} /> : null}
               <Info label="Date Signed" value={formatDate(record.shared.dateSigned)} />
               <Info label="Last reviewed" value={formatDate(tracker.lastReviewedAt)} />
             </div>
@@ -937,6 +938,9 @@ export function CaseDetailView({
                     <Info label="Case #" value={record.shared.caseNumber} />
                     <Info label="Client" value={record.shared.clientName} />
                     <Info label="Paralegal" value={record.paralegal.name} />
+                    {record.legalAssistant ? (
+                      <Info label="Legal assistant" value={record.legalAssistant.name} />
+                    ) : null}
                     <Info label="Date Signed" value={formatDate(record.shared.dateSigned)} />
                     <Info label="DOL" value={formatOptionalDate(record.shared.dateOfIncident) || "Not set — edit to add"} />
                     <div>
@@ -1535,7 +1539,11 @@ export function CaseDetailView({
                 value={newComment}
                 onChange={setNewComment}
                 users={users}
-                priorityContactIds={[record.shared.attorneyId, record.shared.paralegalId]}
+                priorityContactIds={[
+                  record.shared.attorneyId,
+                  record.shared.paralegalId,
+                  ...(record.shared.legalAssistantId ? [record.shared.legalAssistantId] : []),
+                ]}
                 disabled={isAddingComment}
               />
               <Button onClick={addComment} variant="pink" disabled={isAddingComment}>

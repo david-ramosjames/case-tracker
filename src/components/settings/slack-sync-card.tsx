@@ -463,7 +463,7 @@ export function SlackSyncCard() {
         <div className="rounded-md border border-border/70 bg-muted/30 p-3 space-y-2">
           <p className="text-sm font-medium text-navy-950">Push structured Slack topic</p>
           <p className="text-sm text-muted-foreground">
-            Writes the Case Tracker summary into case channel topics (Eve, attorney, paralegal, stage, languages).
+            Writes the Case Tracker summary into case channel topics (Eve, attorney, paralegal, legal assistant, stage, languages).
             If Slack rate-limits <code className="text-xs">conversations.info</code>, use{" "}
             <strong>Force write never-synced</strong> — it only calls setTopic for channels not yet marked synced.
             Full auto-sync on field changes stays off until <code className="text-xs">SLACK_TOPIC_AUTO_SYNC=true</code>.

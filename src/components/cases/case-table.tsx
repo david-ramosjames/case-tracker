@@ -144,6 +144,7 @@ export function CaseTable({
   const [search, setSearch] = useState(initialSearch);
   const [attorneyIds, setAttorneyIds] = useState<string[]>([]);
   const [paralegal, setParalegal] = useState("all");
+  const [legalAssistant, setLegalAssistant] = useState("all");
   const [stage, setStage] = useState("all");
   const [status, setStatus] = useState<CasePipelineFilter>(initialStatus);
   const [qualityFilter, setQualityFilter] = useState<CaseListQualityFilter | null>(initialQualityFilter);
@@ -156,7 +157,7 @@ export function CaseTable({
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
-  const [scrollWidth, setScrollWidth] = useState(2140);
+  const [scrollWidth, setScrollWidth] = useState(2284);
 
   const activeRecords = useMemo(
     () => workingRecords.filter((record) => isActivePipelineCase(record, goals)),
@@ -170,6 +171,7 @@ export function CaseTable({
 
   const attorneys = users.filter((user) => user.role === "attorney");
   const paralegals = users.filter((user) => user.role === "paralegal");
+  const legalAssistants = users.filter((user) => user.role === "legal_assistant");
   const quarterFilterOptions = useMemo(() => getTargetPeriodFilterOptions(), []);
   const statusFilterOptions = useMemo(() => {
     const options: Array<{ value: CasePipelineFilter; label: string }> = [
@@ -184,6 +186,7 @@ export function CaseTable({
   const activeFilterCount = [
     viewer.canViewAllCases && attorneyIds.length > 0,
     paralegal !== "all",
+    legalAssistant !== "all",
     status !== "Active",
     caseType !== "all",
     liability !== "all",
@@ -218,11 +221,21 @@ export function CaseTable({
           recordCaseNumber.includes(searchCaseNumber) ||
           (searchCaseNumber && recordCaseNumber === searchCaseNumber) ||
           record.shared.clientName.toLowerCase().includes(normalizedSearch) ||
-          record.attorney.name.toLowerCase().includes(normalizedSearch);
+          record.attorney.name.toLowerCase().includes(normalizedSearch) ||
+          record.paralegal.name.toLowerCase().includes(normalizedSearch) ||
+          (record.legalAssistant?.name.toLowerCase().includes(normalizedSearch) ?? false);
 
         if (!matchesSearch) return false;
         if (attorneyIds.length > 0 && !attorneyIds.includes(record.shared.attorneyId)) return false;
         if (paralegal !== "all" && record.shared.paralegalId !== paralegal) return false;
+        if (legalAssistant === "unassigned" && record.shared.legalAssistantId) return false;
+        if (
+          legalAssistant !== "all" &&
+          legalAssistant !== "unassigned" &&
+          record.shared.legalAssistantId !== legalAssistant
+        ) {
+          return false;
+        }
         const pinRow = isRowPinnedBySaveFeedback(record.shared.id, rowSaveStatus);
         if (stage !== "all" && record.tracker.caseStage !== stage && !pinRow) return false;
         const pipeline = getCasePipelineFilter(record, goals);
@@ -289,7 +302,7 @@ export function CaseTable({
         const cmp = aValue - bValue;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [attorneyIds, caseSize, caseType, goals, liability, paralegal, qualityFilter, quarter, rowSaveStatus, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
+  }, [attorneyIds, caseSize, caseType, goals, legalAssistant, liability, paralegal, qualityFilter, quarter, rowSaveStatus, search, settings, sortDirection, sortKey, stage, status, workingRecords]);
 
   function requestSort(nextKey: SortKey) {
     if (nextKey === sortKey) {
@@ -319,6 +332,7 @@ export function CaseTable({
   function clearFilters() {
     setAttorneyIds([]);
     setParalegal("all");
+    setLegalAssistant("all");
     setStage("all");
     setStatus("Active");
     setCaseType("all");
@@ -712,7 +726,7 @@ export function CaseTable({
               className="max-h-[calc(100vh-23rem)] min-h-[28rem] overflow-auto"
               onScroll={(event) => syncScroll(event, topScrollRef)}
             >
-          <Table ref={tableRef} className="min-w-[2140px] table-fixed">
+          <Table ref={tableRef} className="min-w-[2284px] table-fixed">
             <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
               <TableRow>
                 <SortableHead label="Score" sortKey="attorneyScore" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-0 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
@@ -738,6 +752,18 @@ export function CaseTable({
                     options={[
                       { value: "all", label: "All" },
                       ...paralegals.map((item) => ({ value: item.id, label: item.name })),
+                    ]}
+                  />
+                </TableHead>
+                <TableHead className="w-36 align-top">
+                  <HeaderFilter
+                    label="LA"
+                    value={legalAssistant}
+                    onChange={setLegalAssistant}
+                    options={[
+                      { value: "all", label: "All" },
+                      { value: "unassigned", label: "Unassigned" },
+                      ...legalAssistants.map((item) => ({ value: item.id, label: item.name })),
                     ]}
                   />
                 </TableHead>
@@ -831,6 +857,7 @@ export function CaseTable({
                     <TableCell className="sticky left-56 z-10 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.shared.clientName}</TableCell>
                     <TableCell className="sticky left-[25rem] z-10 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.attorney.name}</TableCell>
                     <TableCell>{record.paralegal.name}</TableCell>
+                    <TableCell>{record.legalAssistant?.name ?? "—"}</TableCell>
                     <TableCell>{formatDate(record.shared.dateSigned)}</TableCell>
                     <TableCell>{formatOptionalDate(record.shared.dateOfIncident)}</TableCell>
                     <TableCell>

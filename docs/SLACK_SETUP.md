@@ -41,17 +41,18 @@ Apply `supabase/sql/006_slack_integration.sql` in the Supabase SQL editor.
 Canonical topic format (written by Case Tracker; editable in Slack):
 
 ```text
-:eve-logo: Attorney @Ryan | Paralegal @Aivet | Litigation | :us: (Primary)  :flag-mx:
+:eve-logo: Attorney @Ryan | Paralegal @Jorge | LA @claudia | Litigation | :flag-mx: (Primary)
 ```
 
 - `:eve-logo:` only when `cases.uses_eve` is true
 - Handles come from `contacts.slack_display_name` (seed via Settings → Seed Slack user IDs)
+- `LA @…` is included only when the case has a legal assistant on `assigned_contact_ids`
 - Status uses tracker stage topic labels (Treating, Demand, Litigation, …)
 - Language flags: `:us:` English, `:flag-mx:` Spanish
 
 **Manual first:** Settings → Slack → enter a case # → **Update Slack topic**. Full auto-rewrite on field changes is off unless `SLACK_TOPIC_AUTO_SYNC=true`.
 
-When someone edits the topic in Slack, Case Tracker updates paralegal assignment (`assigned_contact_ids`), stage, languages, and Eve — then calls DocketFlow `POST /api/cases/[caseId]/reassign-calendar` when the paralegal changes (requires `DOCKETFLOW_INTERNAL_API_SECRET` + DocketFlow endpoint). **Attorney from the topic is ignored** (change attorney in Case Tracker / DocketFlow only).
+When someone edits the topic in Slack, Case Tracker updates paralegal and legal assistant assignment (`assigned_contact_ids`), stage, languages, and Eve — then calls DocketFlow `POST /api/cases/[caseId]/reassign-calendar` when the paralegal changes (requires `DOCKETFLOW_INTERNAL_API_SECRET` + DocketFlow endpoint). Omit the `LA @…` segment when the case has no legal assistant. **Attorney from the topic is ignored** (change attorney in Case Tracker / DocketFlow only).
 
 ### DocketFlow → Case Tracker (contact reassignment)
 
@@ -246,6 +247,6 @@ curl "https://YOUR_DOMAIN/api/cron/slack-reminders?force=true&syncSheet=false" \
 | ✅ / thread reply on stage prompt | Tracker stage updated |
 | Sources & Litigation saved | Confirmation message |
 | Comment / Manager note / Attorney update posted | Full note text |
-| Channel topic edited (structured format) | Updates paralegal (not attorney), stage / language / Eve; calendar reconcile when paralegal changes |
+| Channel topic edited (structured format) | Updates paralegal / legal assistant (not attorney), stage / language / Eve; calendar reconcile when the team changes |
 
-Paralegal **can** be changed from a structured Slack channel topic; attorney and client name are never changed from Slack.
+Paralegal and legal assistant **can** be changed from a structured Slack channel topic; attorney and client name are never changed from Slack.

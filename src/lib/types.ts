@@ -84,6 +84,8 @@ export type SharedCase = {
   clientName: string;
   attorneyId: string;
   paralegalId: string;
+  /** DocketFlow assigned_contact_ids legal assistant, typically 3rd on the team. */
+  legalAssistantId: string | null;
   status: CaseStatus;
   caseType: string;
   dateSigned: string;
@@ -262,6 +264,7 @@ export type CaseRecord = {
   tracker: TrackerEntry;
   attorney: AppUser;
   paralegal: AppUser;
+  legalAssistant: AppUser | null;
 };
 
 export type TrackerComment = {

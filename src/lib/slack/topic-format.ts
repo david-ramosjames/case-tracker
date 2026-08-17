@@ -24,9 +24,11 @@ export type CaseTopicParts = {
   usesEve: boolean;
   attorneyHandle: string;
   paralegalHandle: string;
+  legalAssistantHandle?: string | null;
   /** When set, topic uses a real Slack mention tag `<@U…>` instead of plain `@Name`. */
   attorneySlackUserId?: string | null;
   paralegalSlackUserId?: string | null;
+  legalAssistantSlackUserId?: string | null;
   stageLabel: string;
   primaryLanguage: TopicLanguageCode;
   secondaryLanguage: TopicLanguageCode | null;
@@ -36,8 +38,10 @@ export type ParsedCaseTopic = {
   usesEve: boolean;
   attorneyHandle: string | null;
   paralegalHandle: string | null;
+  legalAssistantHandle: string | null;
   attorneySlackUserId: string | null;
   paralegalSlackUserId: string | null;
+  legalAssistantSlackUserId: string | null;
   stageLabel: string | null;
   primaryLanguage: TopicLanguageCode | null;
   secondaryLanguage: TopicLanguageCode | null;
@@ -51,7 +55,7 @@ const TOPIC_PERSON_TOKEN = String.raw`(?:<@(U[A-Z0-9]+)(?:\|([^>]+))?>|@([A-Za-z
 const LANGUAGE_TOKEN = String.raw`(:us:|:flag-us:|:flag-mx:|\u{1F1FA}\u{1F1F8}|\u{1F1F2}\u{1F1FD})`;
 
 const STRUCTURED_TOPIC_BODY_PATTERN = new RegExp(
-  String.raw`^Attorney\s+${TOPIC_PERSON_TOKEN}\s*\|\s*Paralegal\s+${TOPIC_PERSON_TOKEN}\s*\|\s*([^|]+?)\s*\|\s*${LANGUAGE_TOKEN}\s*\(Primary\)(?:\s*${LANGUAGE_TOKEN})?\s*$`,
+  String.raw`^Attorney\s+${TOPIC_PERSON_TOKEN}\s*\|\s*Paralegal\s+${TOPIC_PERSON_TOKEN}(?:\s*\|\s*LA\s+${TOPIC_PERSON_TOKEN})?\s*\|\s*([^|]+?)\s*\|\s*${LANGUAGE_TOKEN}\s*\(Primary\)(?:\s*${LANGUAGE_TOKEN})?\s*$`,
   "iu",
 );
 
@@ -159,10 +163,18 @@ export function buildCaseTopic(parts: CaseTopicParts) {
     slackUserId: parts.paralegalSlackUserId,
     handle: parts.paralegalHandle,
   });
+  const legalAssistantHandle = parts.legalAssistantHandle?.trim();
+  const hasLegalAssistant = Boolean(legalAssistantHandle || parts.legalAssistantSlackUserId);
+  const legalAssistant = hasLegalAssistant
+    ? ` | LA ${formatTopicPersonMention({
+        slackUserId: parts.legalAssistantSlackUserId,
+        handle: legalAssistantHandle || "LA",
+      })}`
+    : "";
   const stage = parts.stageLabel.trim();
   const primary = topicEmojiForLanguage(parts.primaryLanguage);
   const secondary = parts.secondaryLanguage ? `  ${topicEmojiForLanguage(parts.secondaryLanguage)}` : "";
-  const body = `Attorney ${attorney} | Paralegal ${paralegal} | ${stage} | ${primary} (Primary)${secondary}`;
+  const body = `Attorney ${attorney} | Paralegal ${paralegal}${legalAssistant} | ${stage} | ${primary} (Primary)${secondary}`;
   return parts.usesEve ? `${EVE_TOPIC_EMOJI} ${body}` : body;
 }
 
@@ -171,8 +183,10 @@ export function parseCaseTopic(topic: string | null | undefined): ParsedCaseTopi
     usesEve: false,
     attorneyHandle: null,
     paralegalHandle: null,
+    legalAssistantHandle: null,
     attorneySlackUserId: null,
     paralegalSlackUserId: null,
+    legalAssistantSlackUserId: null,
     stageLabel: null,
     primaryLanguage: null,
     secondaryLanguage: null,
@@ -188,15 +202,18 @@ export function parseCaseTopic(topic: string | null | undefined): ParsedCaseTopi
   if (structured) {
     const attorney = personFromMatch(structured[1], structured[2], structured[3]);
     const paralegal = personFromMatch(structured[4], structured[5], structured[6]);
+    const legalAssistant = personFromMatch(structured[7], structured[8], structured[9]);
     return {
       usesEve,
       attorneyHandle: attorney.handle,
       paralegalHandle: paralegal.handle,
+      legalAssistantHandle: legalAssistant.handle,
       attorneySlackUserId: attorney.slackUserId,
       paralegalSlackUserId: paralegal.slackUserId,
-      stageLabel: structured[7].trim(),
-      primaryLanguage: languageCodeFromTopicEmoji(structured[8]),
-      secondaryLanguage: languageCodeFromTopicEmoji(structured[9]),
+      legalAssistantSlackUserId: legalAssistant.slackUserId,
+      stageLabel: structured[10].trim(),
+      primaryLanguage: languageCodeFromTopicEmoji(structured[11]),
+      secondaryLanguage: languageCodeFromTopicEmoji(structured[12]),
       format: "structured",
     };
   }
@@ -209,8 +226,10 @@ export function parseCaseTopic(topic: string | null | undefined): ParsedCaseTopi
       usesEve,
       attorneyHandle: attorney.handle,
       paralegalHandle: paralegal.handle,
+      legalAssistantHandle: null,
       attorneySlackUserId: attorney.slackUserId,
       paralegalSlackUserId: paralegal.slackUserId,
+      legalAssistantSlackUserId: null,
       stageLabel: legacy[7]?.trim() || null,
       primaryLanguage: null,
       secondaryLanguage: null,

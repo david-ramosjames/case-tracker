@@ -11,7 +11,9 @@ import { type CaseRecord } from "@/lib/types";
 export type CaseAssignmentInput = {
   attorneyContactId: string;
   paralegalContactId: string;
-  /** Extra assignees preserved after attorney + paralegal. */
+  /** When set, becomes the 3rd assigned contact (legal assistant). */
+  legalAssistantContactId?: string | null;
+  /** Extra assignees preserved after attorney + paralegal (+ LA). */
   extraContactIds?: string[];
   usesEve?: boolean;
   /** When true, skip DocketFlow calendar callback (e.g. dry-run). */
@@ -33,27 +35,26 @@ type ContactRow = {
 function buildAssignedContactIds(
   attorneyId: string,
   paralegalId: string,
+  legalAssistantId: string | null | undefined,
   existing: string[] | null | undefined,
   extras?: string[],
+  previousLegalAssistantId?: string | null,
 ) {
   const seen = new Set<string>();
+  const head = [attorneyId, paralegalId, legalAssistantId].filter((id): id is string => Boolean(id));
+  const dropPrevious =
+    previousLegalAssistantId && previousLegalAssistantId !== legalAssistantId
+      ? previousLegalAssistantId
+      : null;
   const next: string[] = [];
-  for (const id of [attorneyId, paralegalId, ...(extras ?? []), ...(existing ?? [])]) {
+  for (const id of [...head, ...(extras ?? []), ...(existing ?? [])]) {
     if (!id || seen.has(id)) continue;
-    // Keep attorney first, paralegal second; extras after.
-    if (id === attorneyId || id === paralegalId) {
-      if (next.includes(id)) continue;
-    }
+    if (dropPrevious && id === dropPrevious) continue;
     seen.add(id);
     next.push(id);
   }
-  // Ensure attorney is first and paralegal second even if extras somehow preceded.
-  const ordered = [
-    attorneyId,
-    paralegalId,
-    ...next.filter((id) => id !== attorneyId && id !== paralegalId),
-  ];
-  return [...new Set(ordered)];
+  const remainder = next.filter((id) => !head.includes(id));
+  return [...head, ...remainder];
 }
 
 /**
@@ -72,6 +73,7 @@ export async function reassignCaseTeam(caseId: string, input: CaseAssignmentInpu
   }
 
   const contactIds = [input.attorneyContactId, input.paralegalContactId];
+  if (input.legalAssistantContactId) contactIds.push(input.legalAssistantContactId);
   const { data: contacts, error: contactsError } = await admin
     .from("contacts")
     .select("id,name,email,role,slack_user_id,slack_display_name")
@@ -83,6 +85,9 @@ export async function reassignCaseTeam(caseId: string, input: CaseAssignmentInpu
   const paralegal = byId.get(input.paralegalContactId);
   if (!attorney) throw new Error("Attorney contact not found.");
   if (!paralegal) throw new Error("Paralegal contact not found.");
+  if (input.legalAssistantContactId && !byId.get(input.legalAssistantContactId)) {
+    throw new Error("Legal assistant contact not found.");
+  }
 
   const { data: caseRow, error: caseReadError } = await admin
     .from("cases")
@@ -92,11 +97,17 @@ export async function reassignCaseTeam(caseId: string, input: CaseAssignmentInpu
   if (caseReadError) throw caseReadError;
   if (!caseRow) throw new Error("DocketFlow case row not found.");
 
+  const nextLegalAssistantId =
+    input.legalAssistantContactId === undefined
+      ? record.shared.legalAssistantId
+      : input.legalAssistantContactId;
   const assignedContactIds = buildAssignedContactIds(
     input.attorneyContactId,
     input.paralegalContactId,
+    nextLegalAssistantId,
     (caseRow.assigned_contact_ids as string[] | null) ?? null,
     input.extraContactIds,
+    record.shared.legalAssistantId,
   );
 
   const usesEve = input.usesEve ?? Boolean(caseRow.uses_eve);
@@ -167,6 +178,7 @@ export async function reassignCaseTeam(caseId: string, input: CaseAssignmentInpu
   return {
     attorneyId: input.attorneyContactId,
     paralegalId: input.paralegalContactId,
+    legalAssistantId: nextLegalAssistantId,
     assignedContactIds,
     usesEve,
     channelRenamed,

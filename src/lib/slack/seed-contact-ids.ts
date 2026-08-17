@@ -33,7 +33,7 @@ export async function seedContactSlackIds() {
   const { data, error } = await admin
     .from("contacts")
     .select("id,name,email,role,slack_user_id,slack_display_name")
-    .in("role", ["attorney", "paralegal", "manager"]);
+    .in("role", ["attorney", "paralegal", "legal_assistant", "manager"]);
   if (error) throw error;
 
   const contacts = (data ?? []) as ContactRow[];

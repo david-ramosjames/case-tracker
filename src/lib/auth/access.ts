@@ -107,9 +107,8 @@ export function filterRecordsForViewer(
     return records.filter((record) => record.shared.paralegalId === viewer.contactId);
   }
 
-  // Legal assistants have no case assignment field yet — empty until that exists.
-  if (viewer.isLegalAssistant || session.role === "legal_assistant") {
-    return [];
+  if (viewer.isLegalAssistant && viewer.contactId) {
+    return records.filter((record) => record.shared.legalAssistantId === viewer.contactId);
   }
 
   // Pending / unknown role: show nothing.
@@ -138,8 +137,8 @@ export function canViewerAccessCase(
     return record.shared.paralegalId === viewer.contactId;
   }
 
-  if (viewer.isLegalAssistant || session.role === "legal_assistant") {
-    return false;
+  if (viewer.isLegalAssistant && viewer.contactId) {
+    return record.shared.legalAssistantId === viewer.contactId;
   }
 
   return false;

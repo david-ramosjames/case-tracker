@@ -17,7 +17,7 @@ type ContactMatchRow = {
 
 const TOPIC_FORMAT_HELP = [
   "Expected Slack topic format:",
-  "`[:eve-logo:] Attorney <@U…> | Paralegal <@U…> | <Status> | :us: or :flag-mx: (Primary) [optional second flag]`",
+  "`[:eve-logo:] Attorney <@U…> | Paralegal <@U…> | [LA <@U…> |] <Status> | :us: or :flag-mx: (Primary) [optional second flag]`",
   "",
   `Valid statuses: ${Object.values(STAGE_TOPIC_LABELS).join(" · ")}`,
   "Primary language must be marked `(Primary)` after the flag.",
@@ -27,7 +27,11 @@ function normalizeHandle(value: string) {
   return value.trim().toLowerCase().replace(/[._-]+/g, "");
 }
 
-function matchContactBySlackUserId(contacts: ContactMatchRow[], slackUserId: string | null, role: "attorney" | "paralegal") {
+function matchContactBySlackUserId(
+  contacts: ContactMatchRow[],
+  slackUserId: string | null,
+  role: "attorney" | "paralegal" | "legal_assistant",
+) {
   if (!slackUserId) return null;
   const target = slackUserId.trim().toUpperCase();
   return (
@@ -37,7 +41,11 @@ function matchContactBySlackUserId(contacts: ContactMatchRow[], slackUserId: str
   );
 }
 
-function matchContactByHandle(contacts: ContactMatchRow[], handle: string, role: "attorney" | "paralegal") {
+function matchContactByHandle(
+  contacts: ContactMatchRow[],
+  handle: string,
+  role: "attorney" | "paralegal" | "legal_assistant",
+) {
   const target = normalizeHandle(handle);
   if (!target) return null;
 
@@ -61,7 +69,7 @@ function matchContactByHandle(contacts: ContactMatchRow[], handle: string, role:
 
 function resolveTopicContact(
   contacts: ContactMatchRow[],
-  role: "attorney" | "paralegal",
+  role: "attorney" | "paralegal" | "legal_assistant",
   slackUserId: string | null,
   handle: string | null,
 ) {
@@ -102,7 +110,7 @@ async function replyInChannel(channelId: string, text: string) {
 
 /**
  * Apply a manually edited Slack channel topic back to Case Tracker / DocketFlow.
- * Paralegal, stage, languages, and Eve sync inbound; attorney in the topic is ignored.
+ * Paralegal, legal assistant, stage, languages, and Eve sync inbound; attorney in the topic is ignored.
  * Posts a correction message when the topic is malformed or the stage is invalid.
  */
 export async function applySlackChannelTopicChange(input: {
@@ -147,7 +155,7 @@ export async function applySlackChannelTopicChange(input: {
             "",
             TOPIC_FORMAT_HELP,
             "",
-            "Example: `Attorney <@U…> | Paralegal <@U…> | Treating | :us: (Primary)`",
+            "Example: `Attorney <@U…> | Paralegal <@U…> | LA <@U…> | Treating | :us: (Primary)`",
           ]
         : [
             "Slack topic is not formatted correctly for Case Tracker.",
@@ -172,7 +180,7 @@ export async function applySlackChannelTopicChange(input: {
   const { data: contacts } = await admin
     .from("contacts")
     .select("id,name,role,slack_user_id,slack_display_name")
-    .in("role", ["attorney", "paralegal"]);
+    .in("role", ["attorney", "paralegal", "legal_assistant"]);
 
   const contactRows = (contacts ?? []) as ContactMatchRow[];
   // Attorney in the topic is display-only inbound — never overwrite Case Tracker / DocketFlow attorney.
@@ -187,6 +195,12 @@ export async function applySlackChannelTopicChange(input: {
     "paralegal",
     parsed.paralegalSlackUserId,
     parsed.paralegalHandle,
+  );
+  const legalAssistant = resolveTopicContact(
+    contactRows,
+    "legal_assistant",
+    parsed.legalAssistantSlackUserId,
+    parsed.legalAssistantHandle,
   );
 
   const warnings: string[] = [];
@@ -206,6 +220,11 @@ export async function applySlackChannelTopicChange(input: {
       `Could not match paralegal ${parsed.paralegalSlackUserId ? `<@${parsed.paralegalSlackUserId}>` : `@${parsed.paralegalHandle}`}`,
     );
   }
+  if ((parsed.legalAssistantSlackUserId || parsed.legalAssistantHandle) && !legalAssistant) {
+    warnings.push(
+      `Could not match legal assistant ${parsed.legalAssistantSlackUserId ? `<@${parsed.legalAssistantSlackUserId}>` : `@${parsed.legalAssistantHandle}`}`,
+    );
+  }
 
   const nextStage = caseStageFromTopicLabel(parsed.stageLabel);
   const stageLabel = parsed.stageLabel?.trim() || "";
@@ -220,6 +239,9 @@ export async function applySlackChannelTopicChange(input: {
   }
 
   const paralegalChanged = Boolean(paralegal && paralegal.id !== record.shared.paralegalId);
+  const legalAssistantChanged = Boolean(
+    legalAssistant && legalAssistant.id !== record.shared.legalAssistantId,
+  );
   const usesEveChanged = parsed.usesEve !== record.shared.usesEve;
   const languageChanged =
     (parsed.primaryLanguage != null && parsed.primaryLanguage !== record.shared.preferredLanguage) ||
@@ -227,15 +249,21 @@ export async function applySlackChannelTopicChange(input: {
   const stageChanged = Boolean(nextStage && nextStage !== record.tracker.caseStage);
 
   let reassignResult: Awaited<ReturnType<typeof reassignCaseTeam>> | null = null;
-  if (paralegalChanged && paralegal && record.shared.attorneyId) {
-    reassignResult = await reassignCaseTeam(caseId, {
-      attorneyContactId: record.shared.attorneyId,
-      paralegalContactId: paralegal.id,
-      usesEve: parsed.usesEve,
-      actorName: "Slack topic",
-    });
-  } else if (paralegalChanged && !record.shared.attorneyId) {
-    warnings.push("Could not update paralegal — case has no attorney assigned in Case Tracker.");
+  if ((paralegalChanged || legalAssistantChanged) && record.shared.attorneyId) {
+    const nextParalegalId = paralegal?.id ?? record.shared.paralegalId;
+    if (!nextParalegalId) {
+      warnings.push("Could not update assignment — case has no paralegal in Case Tracker.");
+    } else {
+      reassignResult = await reassignCaseTeam(caseId, {
+        attorneyContactId: record.shared.attorneyId,
+        paralegalContactId: nextParalegalId,
+        legalAssistantContactId: legalAssistantChanged ? legalAssistant?.id : undefined,
+        usesEve: parsed.usesEve,
+        actorName: "Slack topic",
+      });
+    }
+  } else if ((paralegalChanged || legalAssistantChanged) && !record.shared.attorneyId) {
+    warnings.push("Could not update assignment — case has no attorney assigned in Case Tracker.");
   }
 
   if (usesEveChanged || languageChanged || reassignResult) {
@@ -276,6 +304,7 @@ export async function applySlackChannelTopicChange(input: {
 
   const appliedParts = [
     paralegalChanged ? `Paralegal → ${paralegal?.name ?? "?"}` : null,
+    legalAssistantChanged ? `Legal assistant → ${legalAssistant?.name ?? "?"}` : null,
     stageChanged && nextStage ? `Stage → ${stageDisplayForTopic(nextStage)}` : null,
     usesEveChanged ? `Eve → ${parsed.usesEve ? "Yes" : "No"}` : null,
     languageChanged
@@ -303,10 +332,11 @@ export async function applySlackChannelTopicChange(input: {
   }
 
   return {
-    applied: Boolean(paralegalChanged || stageChanged || usesEveChanged || languageChanged),
+    applied: Boolean(paralegalChanged || legalAssistantChanged || stageChanged || usesEveChanged || languageChanged),
     caseId,
-    assignmentChanged: paralegalChanged,
+    assignmentChanged: Boolean(paralegalChanged || legalAssistantChanged),
     paralegalChanged,
+    legalAssistantChanged,
     attorneyChangeAttempted,
     topicRestored,
     attorneyIgnored: true,

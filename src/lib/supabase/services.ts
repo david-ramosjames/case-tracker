@@ -3336,6 +3336,7 @@ function rowToCaseRecord(
     contacts.find((contact) => contact.id === toStringOrNull(trackerRow.paralegal_contact_id)) ??
     assignedContacts.find((contact) => contact.role === "paralegal") ??
     makeTemporaryContact("unassigned-paralegal", toString(trackerRow.paralegal_name, "Unassigned Paralegal"), "paralegal");
+  const legalAssistantContact = assignedLegalAssistant(caseRow?.assigned_contact_ids, contacts);
   const sharedId = caseRow?.id ?? toString(trackerRow.id, "unlinked-case");
   const tracker = rowToTrackerEntry(trackerRow, resultRow, suggestionRows, disbursementRows, quoContacts);
 
@@ -3346,6 +3347,7 @@ function rowToCaseRecord(
       clientName: caseRow?.client_name ?? caseRow?.name ?? toString(trackerRow.client_name_snapshot, "Unknown client"),
       attorneyId: attorneyContact.id,
       paralegalId: paralegalContact.id,
+      legalAssistantId: legalAssistantContact?.id ?? null,
       status: deriveCaseStatusFromTracker(tracker.caseStage, tracker.result),
       caseType: caseTypeFromCasesTable(
         caseRow ? caseRow.case_type : toStringOrNull(trackerRow.case_type),
@@ -3363,7 +3365,18 @@ function rowToCaseRecord(
     tracker,
     attorney: contactToUser(attorneyContact),
     paralegal: contactToUser(paralegalContact),
+    legalAssistant: legalAssistantContact ? contactToUser(legalAssistantContact) : null,
   };
+}
+
+function assignedLegalAssistant(assignedIds: string[] | null | undefined, contacts: ContactRow[]): ContactRow | null {
+  if (!assignedIds?.length) return null;
+  const byId = new Map(contacts.map((contact) => [contact.id, contact]));
+  for (const id of assignedIds) {
+    const contact = byId.get(id);
+    if (contact?.role === "legal_assistant") return contact;
+  }
+  return null;
 }
 
 function trackerFieldsFromRow(row: TrackerEntryRow) {
