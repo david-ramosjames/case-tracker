@@ -30,7 +30,7 @@ const navItems = [
   { href: "/results", label: "Results", icon: CircleDollarSign },
   { href: "/litigation", label: "Litigation", icon: Scale },
   { href: "/output", label: "Output", icon: BarChart3, attorneyGoalsOnly: true },
-  { href: "/jumbotron", label: "Jumbotron", icon: Presentation },
+  { href: "/jumbotron", label: "Jumbotron", icon: Presentation, attorneyGoalsOnly: true },
   { href: "/goals", label: "Goals", icon: Target, attorneyGoalsOnly: true },
   { href: "/client-sms", label: "Client SMS", icon: MessageSquare, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings, adminOnly: true },
