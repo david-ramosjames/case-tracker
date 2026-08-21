@@ -1,4 +1,5 @@
 import { cleanCaseNumber } from "@/lib/csv/parse";
+import { normalizeSlackChannelId } from "@/lib/slack/client";
 import { caseNumberFromPulseChannelRef, normalizePulseChannelRef } from "@/lib/slack/pulse";
 import { createSupabaseAdminClient, fetchAllSupabaseRows } from "@/lib/supabase/admin";
 import { type CaseSlackChannel } from "@/lib/types";
@@ -194,6 +195,46 @@ export async function getSlackChannelForCaseNumber(caseNumber: string): Promise<
   const { data, error } = await admin.from("case_slack_channels").select("*").eq("case_number", key).maybeSingle();
   if (error || !data) return null;
   return rowToChannel(data as ChannelRow);
+}
+
+/**
+ * When the Google sheet has a channel name but blank Slack Channel ID (column G),
+ * resolve the ID from Slack and persist it so topic sync / posts can work.
+ */
+export async function ensureSlackChannelId(mapping: CaseSlackChannel): Promise<CaseSlackChannel> {
+  const existingId = mapping.slackChannelId?.trim() || null;
+  if (existingId && normalizeSlackChannelId(existingId)) {
+    return { ...mapping, slackChannelId: normalizeSlackChannelId(existingId) };
+  }
+
+  const channelName = mapping.slackChannelName?.trim();
+  if (!channelName) return mapping;
+
+  const { resolveSlackChannelId } = await import("@/lib/slack/client");
+  const resolvedId = await resolveSlackChannelId(channelName);
+  if (!resolvedId) return mapping;
+
+  const admin = createSupabaseAdminClient();
+  if (admin) {
+    const key = cleanCaseNumber(mapping.caseNumber);
+    const { error } = await admin
+      .from("case_slack_channels")
+      .update({
+        slack_channel_id: resolvedId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("case_number", key);
+    if (error) {
+      console.warn("Failed to persist resolved Slack channel ID", {
+        caseNumber: key,
+        channelName,
+        resolvedId,
+        error: error.message,
+      });
+    }
+  }
+
+  return { ...mapping, slackChannelId: resolvedId };
 }
 
 export async function loadSlackChannelMapByCaseNumber() {

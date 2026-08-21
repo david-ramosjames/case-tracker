@@ -66,7 +66,7 @@ Content-Type: application/json
 { "caseId": "<uuid>", "source": "docketflow" }
 ```
 
-`caseNumber` is accepted instead of / in addition to `caseId`. Requires `SLACK_TOPIC_AUTO_SYNC=true` and `SLACK_BOT_TOKEN`. Same shared secret as calendar reconcile (`DOCKETFLOW_INTERNAL_API_SECRET`, else `CRON_SECRET`).
+`caseNumber` is accepted instead of / in addition to `caseId`. Requires `SLACK_BOT_TOKEN`. The endpoint always tries to **invite the attorney, paralegal, and legal assistant** into the mapped case channel when their `contacts.slack_user_id` (or email lookup) is known. Topic rewrite still requires `SLACK_TOPIC_AUTO_SYNC=true`. Same shared secret as calendar reconcile (`DOCKETFLOW_INTERNAL_API_SECRET`, else `CRON_SECRET`).
 
 Example (Node):
 

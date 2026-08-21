@@ -3,6 +3,7 @@ import { getStageTopicLabel } from "@/lib/slack/enum-replies";
 import {
   updateChannelTopicStage,
   getSlackChannelForCaseNumber,
+  ensureSlackChannelId,
   markChannelTopicSynced,
   loadSlackChannelMapByCaseNumber,
 } from "@/lib/slack/channels";
@@ -200,9 +201,18 @@ export async function syncSlackChannelTopicSummary(
   record: CaseRecord,
   options: { skipRead?: boolean } = {},
 ) {
-  const mapping = await getSlackChannelForCaseNumber(record.shared.caseNumber);
-  if (!mapping?.slackChannelId) {
+  const mappingRaw = await getSlackChannelForCaseNumber(record.shared.caseNumber);
+  if (!mappingRaw) {
     return { updated: false as const, reason: "no_channel" as const };
+  }
+
+  const mapping = await ensureSlackChannelId(mappingRaw);
+  if (!mapping.slackChannelId) {
+    return {
+      updated: false as const,
+      reason: "missing_channel_id" as const,
+      channelName: mapping.slackChannelName || null,
+    };
   }
 
   const channelId = normalizeSlackChannelId(mapping.slackChannelId);
@@ -282,11 +292,25 @@ export async function syncSlackChannelTopicSummaryForCaseNumber(caseNumber: stri
   }
 
   const result = await syncSlackChannelTopicSummary(record);
-  if (result.reason === "no_channel" || result.reason === "invalid_channel") {
+  if (result.reason === "no_channel") {
     return {
       ok: false as const,
       reason: result.reason,
       error: `No Slack channel mapped for case ${record.shared.caseNumber}.`,
+    };
+  }
+  if (result.reason === "missing_channel_id") {
+    return {
+      ok: false as const,
+      reason: result.reason,
+      error: `Case ${record.shared.caseNumber} has Slack channel name “${result.channelName ?? "?"}” but no Slack Channel ID. Add column G in Client Contact Status (or wait for name lookup), then try again.`,
+    };
+  }
+  if (result.reason === "invalid_channel") {
+    return {
+      ok: false as const,
+      reason: result.reason,
+      error: `Slack channel ID for case ${record.shared.caseNumber} is invalid.`,
     };
   }
   if (result.reason === "set_failed") {

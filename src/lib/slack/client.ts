@@ -50,6 +50,63 @@ function isNotInChannelError(error: unknown) {
   return errorMessage(error).includes("not_in_channel");
 }
 
+function normalizeSlackUserId(value: string | null | undefined) {
+  const trimmed = value?.trim() ?? "";
+  if (!trimmed) return null;
+  return /^U[A-Z0-9]+$/i.test(trimmed) ? trimmed.toUpperCase() : null;
+}
+
+function isBenignSlackInviteError(message: string) {
+  return (
+    message.includes("already_in_channel") ||
+    message.includes("cant_invite_self") ||
+    message.includes("user_not_found") ||
+    message.includes("deleted_user") ||
+    message.includes("restricted_action")
+  );
+}
+
+/**
+ * Add workspace members to a case channel. Skips users already in the channel.
+ * Requires channels:manage (public) and groups:write (private).
+ */
+export async function inviteSlackUsersToChannel(channelId: string, userIds: string[]) {
+  if (!isSlackEnabled()) {
+    return { invited: [] as string[], skipped: true as const, reason: "slack_disabled" as const };
+  }
+
+  const users = [
+    ...new Set(userIds.map((userId) => normalizeSlackUserId(userId)).filter((userId): userId is string => Boolean(userId))),
+  ];
+  if (users.length === 0) {
+    return { invited: [] as string[], skipped: true as const, reason: "no_slack_user_ids" as const };
+  }
+
+  const channel = resolveSlackChannelParam(channelId);
+  await ensureSlackChannelMembership(channel);
+
+  const invited: string[] = [];
+  const failed: string[] = [];
+
+  for (const userId of users) {
+    try {
+      await slackApi<{ ok: boolean }>("conversations.invite", { channel, users: userId });
+      invited.push(userId);
+    } catch (error) {
+      const message = errorMessage(error);
+      if (isBenignSlackInviteError(message)) continue;
+      if (message.includes("missing_scope")) {
+        console.warn("Slack channel invite skipped: add channels:manage and groups:write", { channelId });
+        return { invited, skipped: true as const, reason: "missing_scope" as const, failed: users };
+      }
+      console.warn("Slack channel invite failed", { channelId, userId, error: message });
+      failed.push(userId);
+    }
+  }
+
+  return { invited, failed, skipped: false as const };
+}
+
 /** Join public channels before posting. Private channels must invite the bot manually. */
 async function ensureSlackChannelMembership(channelId: string) {
   try {

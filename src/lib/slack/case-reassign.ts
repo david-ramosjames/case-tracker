@@ -2,6 +2,7 @@ import { cleanCaseNumber } from "@/lib/csv/parse";
 import { requestDocketFlowCalendarReconcile } from "@/lib/docketflow/calendar-reconcile";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCaseById, isOrphanTrackerRecord } from "@/lib/supabase/services";
+import { inviteCaseTeamToSlackChannel } from "@/lib/slack/channel-members";
 import { renameSlackChannel } from "@/lib/slack/client";
 import { getSlackChannelForCaseNumber, updateChannelTopicStage } from "@/lib/slack/channels";
 import { syncSlackChannelTopicSummary } from "@/lib/slack/channel-topic";
@@ -137,6 +138,7 @@ export async function reassignCaseTeam(caseId: string, input: CaseAssignmentInpu
 
   let channelRenamed = false;
   let nextChannelName: string | null = null;
+  let channelInvite: Awaited<ReturnType<typeof inviteCaseTeamToSlackChannel>> | null = null;
   const mapping = await getSlackChannelForCaseNumber(record.shared.caseNumber);
   if (input.renameSlackChannel !== false && mapping?.slackChannelId) {
     const desiredName = buildCaseSlackChannelName({
@@ -161,6 +163,15 @@ export async function reassignCaseTeam(caseId: string, input: CaseAssignmentInpu
   }
 
   const refreshed = (await getCaseById(caseId)) as CaseRecord;
+  if (mapping?.slackChannelId) {
+    channelInvite = await inviteCaseTeamToSlackChannel({
+      channelId: mapping.slackChannelId,
+      attorney: refreshed.attorney,
+      paralegal: refreshed.paralegal,
+      legalAssistant: refreshed.legalAssistant,
+    });
+  }
+
   let topicResult: Awaited<ReturnType<typeof syncSlackChannelTopicSummary>> | null = null;
   const { isSlackTopicAutoSyncEnabled } = await import("@/lib/slack/config");
   if (isSlackTopicAutoSyncEnabled()) {
@@ -183,6 +194,7 @@ export async function reassignCaseTeam(caseId: string, input: CaseAssignmentInpu
     usesEve,
     channelRenamed,
     nextChannelName,
+    channelInvite,
     topic: topicResult,
     calendarReconcile,
   };
