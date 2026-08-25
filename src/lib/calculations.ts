@@ -552,6 +552,17 @@ export function getFirmOutputMetrics(
       ? sumAttorneyFeeGoalsInCalendarYear([firmOutperformGoal], calendarYear)
       : 0;
 
+  const attorneyCommissionGross = sum(attorneyScopedGoals.map((goal) => goal.annualGrossGoal));
+  const attorneyCommissionFees = sum(attorneyScopedGoals.map((goal) => goal.annualRjlFeesGoal));
+
+  // Commission-year mode is only used when an attorney is selected on Output.
+  // Never substitute the firm Outperform target for that attorney's own goals —
+  // Jan–Dec attorneys should match calendar year when their commission year is Jan–Dec.
+  const usesFirmOutperformTarget =
+    periodMode === "calendar" &&
+    ((firmCalendarGoalMode === "outperform" && outperformCalendarGross > 0) ||
+      firmCalendarGoalMode === "combined");
+
   const annualGrossGoal =
     periodMode === "calendar"
       ? firmCalendarGoalMode === "combined"
@@ -559,7 +570,7 @@ export function getFirmOutputMetrics(
         : firmCalendarGoalMode === "outperform" && outperformCalendarGross > 0
           ? outperformCalendarGross
           : attorneyCalendarGross
-      : firmOutperformGoal?.annualGrossGoal ?? sum(attorneyScopedGoals.map((goal) => goal.annualGrossGoal));
+      : attorneyCommissionGross;
 
   const annualRjlFeesGoal =
     periodMode === "calendar"
@@ -568,15 +579,18 @@ export function getFirmOutputMetrics(
         : firmCalendarGoalMode === "outperform" && outperformCalendarFees > 0
           ? outperformCalendarFees
           : attorneyCalendarFees
-      : firmOutperformGoal?.annualRjlFeesGoal ?? sum(attorneyScopedGoals.map((goal) => goal.annualRjlFeesGoal));
+      : attorneyCommissionFees;
 
   const yearElapsed =
     periodMode === "calendar"
       ? getCalendarYearElapsedPercentage(calendarYear, refDate)
-      : firmOutperformGoal != null
-        ? getCommissionYearElapsedPercentage(firmOutperformGoal, refDate)
-        : attorneyScopedGoals.length === 1
-          ? getCommissionYearElapsedPercentage(attorneyScopedGoals[0], refDate)
+      : attorneyScopedGoals.length === 1
+        ? getCommissionYearElapsedPercentage(attorneyScopedGoals[0], refDate)
+        : attorneyScopedGoals.length > 1
+          ? attorneyScopedGoals.reduce(
+              (total, goal) => total + getCommissionYearElapsedPercentage(goal, refDate),
+              0,
+            ) / attorneyScopedGoals.length
           : getYearElapsedPercentage(refDate);
 
   const pacingGrossGoal = Math.round(annualGrossGoal * (yearElapsed / 100));
@@ -585,7 +599,7 @@ export function getFirmOutputMetrics(
   const { grossSettled, grossDisbursed, feesSettled, feesDisbursed, completedDisbursements } = sumOutputActuals(
     records,
     periodMode,
-    periodMode === "calendar" ? calendarYear : commissionGoalYear ?? firmOutperformGoal?.year ?? calendarYear,
+    periodMode === "calendar" ? calendarYear : commissionGoalYear ?? attorneyScopedGoals[0]?.year ?? calendarYear,
     goalsByAttorney,
     getAttorneyOnlyGoals(allGoals),
   );
@@ -607,7 +621,7 @@ export function getFirmOutputMetrics(
   const planGross = sum(planRecords.map((record) => record.tracker.minimumValue));
   const planFees = sum(planRecords.map((record) => getProjectedFeeValue(record)));
 
-  const commissionAnchorGoal = firmOutperformGoal ?? attorneyScopedGoals[0] ?? null;
+  const commissionAnchorGoal = attorneyScopedGoals[0] ?? null;
   const scopedRecords =
     periodMode === "commission" && commissionAnchorGoal != null
       ? records.filter((record) => isRecordInGoalCommissionYear(record, commissionAnchorGoal))
@@ -629,10 +643,11 @@ export function getFirmOutputMetrics(
       planGross,
       planFees,
       completedDisbursements,
-      firmOutperformGoal: firmOutperformGoal != null,
+      firmOutperformGoal: usesFirmOutperformTarget,
       firmCalendarGoalMode: periodMode === "calendar" ? firmCalendarGoalMode : null,
       periodMode,
-      periodYear: periodMode === "calendar" ? calendarYear : commissionGoalYear ?? firmOutperformGoal?.year ?? calendarYear,
+      periodYear:
+        periodMode === "calendar" ? calendarYear : commissionGoalYear ?? attorneyScopedGoals[0]?.year ?? calendarYear,
     },
     caseStatuses: getCaseStatusRollup(records, getAttorneyOnlyGoals(allGoals)),
     grossQuarterRows: getQuarterRows(scopedRecords, annualGrossGoal, "gross", attorneyScopedGoals),

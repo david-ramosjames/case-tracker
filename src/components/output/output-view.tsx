@@ -212,7 +212,7 @@ export function OutputView({
       }
       return "goal (sum of monthly targets in this calendar year)";
     }
-    return results.firmOutperformGoal ? "Outperform goal" : "gross disbursements goal";
+    return results.firmOutperformGoal ? "Outperform goal" : "attorney annual goal";
   }, [firmCalendarGoalMode, isFirmScope, periodMode, results.firmOutperformGoal]);
 
   const rjlFeesGoalDetailSuffix = useMemo(() => {
@@ -228,7 +228,7 @@ export function OutputView({
       }
       return "RJL fees goal (sum of monthly targets in this calendar year)";
     }
-    return results.firmOutperformGoal ? "Outperform RJL fees goal" : "RJL fees disbursed goal";
+    return results.firmOutperformGoal ? "Outperform RJL fees goal" : "attorney annual RJL fees goal";
   }, [firmCalendarGoalMode, isFirmScope, periodMode, results.firmOutperformGoal]);
 
   const selectedScopeLabel = useMemo(() => {
