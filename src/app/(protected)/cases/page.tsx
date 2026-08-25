@@ -8,12 +8,12 @@ export const dynamic = "force-dynamic";
 
 function parsePipelineStatus(
   value: string | undefined,
-  qualityFilter: ReturnType<typeof parseCaseListQualityFilter>,
+  _qualityFilter: ReturnType<typeof parseCaseListQualityFilter>,
 ): CasePipelineFilter {
   if (value === "all" || value === "Active" || value === "Closed" || value === "Historical") {
     return value;
   }
-  return qualityFilter ? "all" : "Active";
+  return "Active";
 }
 
 export default async function CasesPage({

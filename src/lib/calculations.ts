@@ -218,10 +218,10 @@ export function getDashboardMetrics(
         .filter((record) => record.tracker.caseStage === "Settled" && !record.tracker.result.checkDisbursedAt)
         .map((record) => record.tracker.result.settlementAmount),
     ),
-    casesMissingRequiredFields: records.filter((record) => isMissingInfo(record, settings)).length,
-    casesNotReviewedRecently: records.filter((record) => isStale(record, settings)).length,
-    casesNeedingQuarterlyCheckIn: records.filter(needsQuarterlyCheckIn).length,
-    casesWithOutdatedValidation: records.filter((record) => getOutdatedValidationFields(record).length > 0).length,
+    casesMissingRequiredFields: activeRecords.filter((record) => isMissingInfo(record, settings)).length,
+    casesNotReviewedRecently: activeRecords.filter((record) => isStale(record, settings)).length,
+    casesNeedingQuarterlyCheckIn: activeRecords.filter(needsQuarterlyCheckIn).length,
+    casesWithOutdatedValidation: activeRecords.filter((record) => getOutdatedValidationFields(record).length > 0).length,
     stageSuggestionsOpen: records.reduce((total, record) => total + getOpenStageSuggestions(record).length, 0),
   };
 }

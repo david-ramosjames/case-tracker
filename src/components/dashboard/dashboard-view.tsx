@@ -70,28 +70,28 @@ export function DashboardView({
           detail="Needs collection follow-through"
         />
         <MetricCard
-          href="/cases?filter=missing-fields&status=all"
+          href="/cases?filter=missing-fields&status=Active"
           icon={AlertTriangle}
           label="Missing required fields"
           value={String(metrics.casesMissingRequiredFields)}
           detail="Value, fee, quarter, source, confidence"
         />
         <MetricCard
-          href="/cases?filter=stale-review&status=all"
+          href="/cases?filter=stale-review&status=Active"
           icon={TimerReset}
           label="Not reviewed recently"
           value={String(metrics.casesNotReviewedRecently)}
           detail={`More than ${settings.staleReviewThresholdDays} days old`}
         />
         <MetricCard
-          href="/cases?filter=quarterly-check-in&status=all"
+          href="/cases?filter=quarterly-check-in&status=Active"
           icon={ClipboardCheck}
           label="Quarterly check-ins due"
           value={String(metrics.casesNeedingQuarterlyCheckIn)}
           detail="Expected disbursement quarter, minimum value"
         />
         <MetricCard
-          href="/cases?filter=validation-overdue&status=all"
+          href="/cases?filter=validation-overdue&status=Active"
           icon={TimerReset}
           label="Validation overdue"
           value={String(metrics.casesWithOutdatedValidation)}

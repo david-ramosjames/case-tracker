@@ -11,16 +11,20 @@ export default async function JumbotronPage() {
   const sessionUser = await requireSessionUser();
   if (!canViewOutputAndGoals(sessionUser.role)) redirect("/cases");
 
-  const { records, goals, users } = await loadViewerCaseBundle();
+  const { records, goals, users, viewer } = await loadViewerCaseBundle();
 
   return (
     <>
       <PageHeader
         eyebrow="Insights"
         title="Jumbotron"
-        description="Firm-wide case insights with attorney and case-type filters. Open metrics reflect the active pipeline; closed metrics use the selected calendar year."
+        description={
+          viewer.isAttorney
+            ? "Your case insights by case type and calendar year. Open metrics reflect your active pipeline; closed metrics use the selected calendar year."
+            : "Firm-wide case insights with attorney and case-type filters. Open metrics reflect the active pipeline; closed metrics use the selected calendar year."
+        }
       />
-      <JumbotronView records={records} goals={goals} users={users} />
+      <JumbotronView records={records} goals={goals} users={users} viewer={viewer} />
     </>
   );
 }

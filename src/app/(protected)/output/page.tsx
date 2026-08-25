@@ -11,16 +11,20 @@ export default async function OutputPage() {
   const sessionUser = await requireSessionUser();
   if (!canViewOutputAndGoals(sessionUser.role)) redirect("/cases");
 
-  const { records, goals, users } = await loadViewerCaseBundle();
+  const { records, goals, users, viewer } = await loadViewerCaseBundle();
 
   return (
     <>
       <PageHeader
         eyebrow="Output"
-        title="Firm results and pacing"
-        description="Roll up case statuses, settled versus disbursed results, completed disbursements, and commission threshold. Filter by attorney or firm total."
+        title={viewer.isAttorney ? "Your results and pacing" : "Firm results and pacing"}
+        description={
+          viewer.isAttorney
+            ? "Roll up your case statuses, settled versus disbursed results, completed disbursements, and commission threshold."
+            : "Roll up case statuses, settled versus disbursed results, completed disbursements, and commission threshold. Filter by attorney or firm total."
+        }
       />
-      <OutputView records={records} goals={goals} users={users} />
+      <OutputView records={records} goals={goals} users={users} viewer={viewer} />
     </>
   );
 }

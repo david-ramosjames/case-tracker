@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { type ViewerContext } from "@/lib/auth/access";
 import {
   getCurrentCommissionYearGoals,
   getFirmOutputMetrics,
@@ -51,21 +52,40 @@ export function OutputView({
   records,
   goals,
   users,
+  viewer,
 }: {
   records: CaseRecord[];
   goals: AttorneyGoal[];
   users: AppUser[];
+  viewer: ViewerContext;
 }) {
-  const [scopeValue, setScopeValue] = useState(DEFAULT_FIRM_SCOPE);
-  const [periodMode, setPeriodMode] = useState<OutputPeriodMode>("calendar");
+  const lockedAttorneyId = viewer.isAttorney ? viewer.contactId : null;
+  const [scopeValue, setScopeValue] = useState(() =>
+    lockedAttorneyId ? attorneyScopeValue(lockedAttorneyId) : DEFAULT_FIRM_SCOPE,
+  );
+  const [periodMode, setPeriodMode] = useState<OutputPeriodMode>(lockedAttorneyId ? "commission" : "calendar");
   const [periodYear, setPeriodYear] = useState(() => new Date().getFullYear());
 
-  const scope = useMemo(() => parseOutputScope(scopeValue), [scopeValue]);
+  useEffect(() => {
+    if (!lockedAttorneyId) return;
+    setScopeValue(attorneyScopeValue(lockedAttorneyId));
+  }, [lockedAttorneyId]);
+
+  const scope = useMemo(() => {
+    const parsed = parseOutputScope(scopeValue);
+    if (lockedAttorneyId) {
+      return { kind: "attorney" as const, attorneyId: lockedAttorneyId };
+    }
+    return parsed;
+  }, [lockedAttorneyId, scopeValue]);
   const isFirmScope = scope.kind === "firm";
   const selectedAttorneyId = scope.kind === "attorney" ? scope.attorneyId : null;
   const firmCalendarGoalMode = scope.kind === "firm" ? scope.goalMode : undefined;
 
   const attorneys = users.filter((user) => user.role === "attorney");
+  const attorneyOptions = lockedAttorneyId
+    ? attorneys.filter((user) => user.id === lockedAttorneyId)
+    : attorneys;
   const attorneyOnlyGoals = useMemo(() => getAttorneyOnlyGoals(goals), [goals]);
   const yearOptions = useMemo(() => getGoalYearOptions(), []);
 
@@ -213,12 +233,14 @@ export function OutputView({
 
   const selectedScopeLabel = useMemo(() => {
     if (scope.kind === "attorney") {
-      return attorneys.find((user) => user.id === scope.attorneyId)?.name ?? "Attorney";
+      return attorneyOptions.find((user) => user.id === scope.attorneyId)?.name
+        ?? attorneys.find((user) => user.id === scope.attorneyId)?.name
+        ?? "Attorney";
     }
     if (scope.goalMode === "attorneys") return "Total attorney";
     if (scope.goalMode === "combined") return "Total Firm (attorney + outperform)";
     return "Firm Outperformance";
-  }, [attorneys, scope]);
+  }, [attorneyOptions, attorneys, scope]);
 
   return (
     <div className="space-y-6">
@@ -238,16 +260,25 @@ export function OutputView({
             </Button>
           </div>
           <div className={`mt-3 grid gap-3 ${selectedAttorneyId ? "sm:grid-cols-2 lg:grid-cols-3 lg:max-w-4xl" : "sm:grid-cols-2 lg:max-w-2xl"}`}>
-            <Select value={scopeValue} onChange={(event) => setScopeValue(event.target.value)} aria-label="View">
-              {attorneys.map((item) => (
-                <option key={item.id} value={attorneyScopeValue(item.id)}>
-                  {item.name}
-                </option>
-              ))}
-              <option value="firm:attorneys">Total attorney</option>
-              <option value="firm:outperform">Firm Outperformance</option>
-              <option value="firm:combined">Total Firm (attorney + outperform)</option>
-            </Select>
+            {lockedAttorneyId ? (
+              <div
+                className="flex h-10 items-center rounded-md border border-input bg-muted/40 px-3 text-sm font-medium text-navy-950"
+                aria-label="View"
+              >
+                {selectedScopeLabel}
+              </div>
+            ) : (
+              <Select value={outputScopeToValue(scope)} onChange={(event) => setScopeValue(event.target.value)} aria-label="View">
+                {attorneyOptions.map((item) => (
+                  <option key={item.id} value={attorneyScopeValue(item.id)}>
+                    {item.name}
+                  </option>
+                ))}
+                <option value="firm:attorneys">Total attorney</option>
+                <option value="firm:outperform">Firm Outperformance</option>
+                <option value="firm:combined">Total Firm (attorney + outperform)</option>
+              </Select>
+            )}
             <Select
               value={String(periodYear)}
               onChange={(event) => setPeriodYear(Number(event.target.value))}

@@ -18,6 +18,7 @@ import { SignedCasesTrendChart } from "@/components/jumbotron/signed-cases-trend
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Select } from "@/components/ui/select";
+import { type ViewerContext } from "@/lib/auth/access";
 import { CASE_TYPE_OPTIONS, getGoalYearOptions } from "@/lib/case-options";
 import { computeJumbotronMetrics, computeSignedCasesByMonth } from "@/lib/jumbotron-metrics";
 import { type AppUser, type AttorneyGoal, type CaseRecord } from "@/lib/types";
@@ -26,25 +27,31 @@ export function JumbotronView({
   records,
   goals,
   users,
+  viewer,
 }: {
   records: CaseRecord[];
   goals: AttorneyGoal[];
   users: AppUser[];
+  viewer: ViewerContext;
 }) {
+  const lockedAttorneyId = viewer.isAttorney ? viewer.contactId : null;
   const [attorneyIds, setAttorneyIds] = useState<string[]>([]);
   const [caseTypes, setCaseTypes] = useState<string[]>([]);
   const [calendarYear, setCalendarYear] = useState(() => new Date().getFullYear());
 
   const attorneys = users.filter((user) => user.role === "attorney");
+  const attorneyOptions = lockedAttorneyId
+    ? attorneys.filter((user) => user.id === lockedAttorneyId)
+    : attorneys;
   const yearOptions = useMemo(() => getGoalYearOptions(), []);
 
   const filters = useMemo(
     () => ({
-      attorneyIds,
+      attorneyIds: lockedAttorneyId ? [lockedAttorneyId] : attorneyIds,
       caseTypes,
       calendarYear,
     }),
-    [attorneyIds, caseTypes, calendarYear],
+    [attorneyIds, caseTypes, calendarYear, lockedAttorneyId],
   );
 
   const metrics = useMemo(() => computeJumbotronMetrics(records, goals, filters), [records, goals, filters]);
@@ -67,12 +74,21 @@ export function JumbotronView({
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          <HeaderMultiFilter
-            label="Attorneys"
-            selected={attorneyIds}
-            onChange={setAttorneyIds}
-            options={attorneys.map((attorney) => ({ value: attorney.id, label: attorney.name }))}
-          />
+          {lockedAttorneyId ? (
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Attorney</span>
+              <div className="flex h-8 items-center rounded-md border border-input bg-muted/40 px-2 text-xs font-medium text-navy-950">
+                {attorneyOptions[0]?.name ?? "You"}
+              </div>
+            </div>
+          ) : (
+            <HeaderMultiFilter
+              label="Attorneys"
+              selected={attorneyIds}
+              onChange={setAttorneyIds}
+              options={attorneyOptions.map((attorney) => ({ value: attorney.id, label: attorney.name }))}
+            />
+          )}
           <HeaderMultiFilter
             label="Case types"
             selected={caseTypes}

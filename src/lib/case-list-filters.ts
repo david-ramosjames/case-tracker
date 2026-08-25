@@ -1,5 +1,6 @@
 import { getOutdatedValidationFields } from "@/lib/attorney-score";
 import { isMissingInfo, isStale, needsQuarterlyCheckIn } from "@/lib/calculations";
+import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { type CaseRecord, type CaseTrackerSettings } from "@/lib/types";
 
 export const CASE_LIST_QUALITY_FILTERS = [
@@ -41,7 +42,8 @@ export function matchesCaseListQualityFilter(
 ) {
   switch (filter) {
     case "missing-fields":
-      return isMissingInfo(record, settings);
+      // Closed / referred cases should not be flagged for missing forecast fields.
+      return caseRequiresOngoingUpdates(record) && isMissingInfo(record, settings);
     case "stale-review":
       return isStale(record, settings);
     case "quarterly-check-in":
