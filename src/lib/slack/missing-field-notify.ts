@@ -20,7 +20,7 @@ function completenessFieldExampleLine(fieldId: CompletenessFieldId) {
     case "caseType":
       return "Type: Auto Accident";
     case "liability":
-      return "Liability: Clear";
+      return "Liability: Accepted";
     case "quarter":
       return "Expected disbursement quarter: 2026 Q3";
     case "minimumValue":

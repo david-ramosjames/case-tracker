@@ -80,7 +80,7 @@ export function AdminFaqView() {
         <BulletList
           items={[
             "40% completeness — eight fields filled in (case type, liability, quarter, minimum, referral fee, policy limits, expected lit, sources).",
-            "60% freshness — liability (only when Pending), quarter, minimum, and policy limits confirmed within 90 days.",
+            "60% freshness — quarter, minimum, and policy limits confirmed within 90 days (liability counts once set to Accepted, Denied, or Disputed).",
             "Shown on each case, cases table, and dashboard attorney rollups.",
           ]}
         />
@@ -103,7 +103,7 @@ export function AdminFaqView() {
         <p className="font-medium text-navy-950">Per-field reminders (one post per field)</p>
         <BulletList
           items={[
-            "Liability — only when value is Pending; every 90 days.",
+            "Liability — set once to Accepted, Denied, or Disputed (no recurring Slack reminder).",
             "Expected disbursement quarter, minimum value, policy limits — every 90 days.",
             "Expected lit — every 90 days unless the case is or was Litigation (then locked to Lit).",
             "Each post shows Case Tracker Score and which fields still need attention.",

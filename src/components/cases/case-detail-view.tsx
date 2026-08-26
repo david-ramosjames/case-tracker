@@ -26,7 +26,7 @@ import {
   CLOSING_STATUS_OPTIONS,
   DISBURSED_STATUS_OPTIONS,
   coerceExpectedLitigationForStage,
-  LIABILITY_OPTIONS,
+  liabilitySelectOptions,
   RELEASE_STATUS_OPTIONS,
   getTargetPeriodSelectOptions,
   toStandardTargetPeriodLabel,
@@ -1114,7 +1114,7 @@ export function CaseDetailView({
                     <AttorneyField fieldId="liability" record={record}>
                       <Select value={tracker.liability ?? ""} onChange={(event) => updateField("liability", event.target.value || null)}>
                         <option value="">Select liability</option>
-                        {LIABILITY_OPTIONS.map((liability) => (
+                        {liabilitySelectOptions(tracker.liability).map((liability) => (
                           <option key={liability} value={liability}>
                             {liability}
                           </option>

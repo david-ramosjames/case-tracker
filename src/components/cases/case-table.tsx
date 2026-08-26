@@ -22,6 +22,7 @@ import {
   matchesTargetPeriodFilter,
   notSetFilterOption,
   LIABILITY_OPTIONS,
+  liabilitySelectOptions,
   getTargetPeriodFilterOptions,
   getTargetPeriodSelectOptions,
   toStandardTargetPeriodLabel,
@@ -881,7 +882,7 @@ export function CaseTable({
                     <TableCell>
                       <InlineSelect value={record.tracker.liability ?? ""} onChange={(value) => updateTrackerField(record.shared.id, "liability", value || null)}>
                         <option value="">Not set</option>
-                        {LIABILITY_OPTIONS.map((option) => (
+                        {liabilitySelectOptions(record.tracker.liability).map((option) => (
                           <option key={option} value={option}>{option}</option>
                         ))}
                       </InlineSelect>

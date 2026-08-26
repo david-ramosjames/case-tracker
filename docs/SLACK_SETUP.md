@@ -170,7 +170,7 @@ Each overdue field gets **its own Slack post** in the case channel (not one bund
 
 | Field | Reminder rule |
 |-------|----------------|
-| **Liability** | Only when value is `Pending` — confirm every 90 days |
+| **Liability** | Must be `Accepted`, `Denied`, or `Disputed` (no 90-day reconfirm once set) |
 | **Expected disbursement quarter** | When you expect the case to disburse — missing or not confirmed in 90 days |
 | **Minimum value** | Missing or not confirmed in 90 days |
 | **Policy limits** | Missing or not confirmed in 90 days |
@@ -178,7 +178,7 @@ Each overdue field gets **its own Slack post** in the case channel (not one bund
 
 **Confirm unchanged:** react ✅ or reply `confirmed` / `yes` in the thread.
 
-**Update value:** reply in thread, e.g. `Expected disbursement quarter: Q3-26` (or shorthand `Quarter: Q3-26`), `Minimum: 85000`, `Liability: Accepted 100%`, `Policy limits: 100000`, `Expected lit: Pre-lit`. The bot confirms what was saved.
+**Update value:** reply in thread, e.g. `Expected disbursement quarter: Q3-26` (or shorthand `Quarter: Q3-26`), `Minimum: 85000`, `Liability: Accepted`, `Policy limits: 100000`, `Expected lit: Pre-lit`. The bot confirms what was saved.
 
 **Result quarter** on the Results tab is separate — it is auto-set from the actual disburse date on the settlements sheet.
 

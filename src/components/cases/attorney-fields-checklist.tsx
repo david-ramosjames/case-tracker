@@ -15,7 +15,7 @@ import {
   type AttorneyFieldStatus,
   type AttorneySourcedFieldId,
 } from "@/lib/attorney-sourced-fields";
-import { LIABILITY_OPTIONS } from "@/lib/case-options";
+import { liabilitySelectOptions } from "@/lib/case-options";
 import type { CaseRecord, TrackerEntry } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
@@ -136,7 +136,7 @@ function AttorneyFieldInput({
           onChange={(event) => onUpdateField("liability", event.target.value || null)}
         >
           <option value="">Select liability</option>
-          {LIABILITY_OPTIONS.map((option) => (
+          {liabilitySelectOptions(tracker.liability).map((option) => (
             <option key={option} value={option}>
               {option}
             </option>

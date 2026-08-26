@@ -132,7 +132,16 @@ export function caseTypeSelectOptions(currentValue?: string | null): string[] {
   return [normalized, ...CASE_TYPE_OPTIONS];
 }
 
-export const LIABILITY_OPTIONS = ["Accepted 100%", "50/50", "Pending", "Denied - Dispute", "Denied", "N/A"] as const;
+export const LIABILITY_OPTIONS = ["Accepted", "Denied", "Disputed"] as const;
+
+/** Dropdown options for liability, including the current value when it is a legacy label. */
+export function liabilitySelectOptions(currentValue?: string | null): string[] {
+  const trimmed = currentValue?.trim() ?? "";
+  if (!trimmed || LIABILITY_OPTIONS.includes(trimmed as (typeof LIABILITY_OPTIONS)[number])) {
+    return [...LIABILITY_OPTIONS];
+  }
+  return [trimmed, ...LIABILITY_OPTIONS];
+}
 
 export const CASE_SIZE_OPTIONS = ["$0-30k", "$30k-$100k", ">$100k", "N/A"] as const;
 

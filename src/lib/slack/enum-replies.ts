@@ -94,12 +94,10 @@ export function parseStrictLiability(raw: string): (typeof LIABILITY_OPTIONS)[nu
   const trimmed = raw.trim();
   const exact = LIABILITY_OPTIONS.find((option) => option.toLowerCase() === trimmed.toLowerCase());
   if (exact) return exact;
-  if (/^pending$/i.test(trimmed)) return "Pending";
+  // Legacy labels / common shorthand → canonical values
+  if (/^accepted(\s*100\s*%?)?$/i.test(trimmed)) return "Accepted";
   if (/^denied$/i.test(trimmed)) return "Denied";
-  if (/^n\/a$/i.test(trimmed)) return "N/A";
-  if (/^accepted\s*100\s*%?$/i.test(trimmed)) return "Accepted 100%";
-  if (/^50\s*\/\s*50$/i.test(trimmed)) return "50/50";
-  if (/^denied\s*-\s*dispute$/i.test(trimmed)) return "Denied - Dispute";
+  if (/^(disputed|dispute|denied\s*-\s*dispute)$/i.test(trimmed)) return "Disputed";
   return null;
 }
 
