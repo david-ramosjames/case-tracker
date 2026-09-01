@@ -11,8 +11,9 @@ import {
   hasCompletenessField,
   type CompletenessFieldId,
 } from "@/lib/attorney-score";
+import { getSlackFieldAlertSkipReason } from "@/lib/slack/field-alert-guards";
 import { getIncompleteCompletenessLabels } from "@/lib/slack/field-reminders";
-import { type CaseRecord } from "@/lib/types";
+import { type CaseRecord, type CaseTrackerSettings } from "@/lib/types";
 import { daysSince } from "@/lib/utils";
 
 function completenessFieldExampleLine(fieldId: CompletenessFieldId) {
@@ -97,12 +98,25 @@ export type MissingFieldPreviewItem = {
 
 export async function sendSlackMissingFieldNotices(
   records: CaseRecord[],
-  options?: { force?: boolean; forceSend?: boolean; dryRun?: boolean },
+  options?: {
+    force?: boolean;
+    forceSend?: boolean;
+    dryRun?: boolean;
+    settings?: Pick<
+      CaseTrackerSettings,
+      "slackFieldAlertGraceDays" | "attorneySlackFieldAlertsDisabled"
+    >;
+  },
 ) {
   if (!isSlackEnabled()) return { posted: 0, skipped: 0, dryRun: Boolean(options?.dryRun), previewItems: [] as MissingFieldPreviewItem[] };
 
   const appUrl = getAppOriginForNotifications();
   if (!appUrl) throw new Error("Set NEXT_PUBLIC_SITE_URL for Slack links.");
+
+  const alertSettings = options?.settings ?? {
+    slackFieldAlertGraceDays: 7,
+    attorneySlackFieldAlertsDisabled: [],
+  };
 
   const channelMap = await loadSlackChannelMapByCaseNumber();
   let posted = 0;
@@ -134,6 +148,21 @@ export async function sendSlackMissingFieldNotices(
           action: "skip",
           missingFields: [],
           reason: "no missing fields",
+        });
+      }
+      continue;
+    }
+
+    const alertSkipReason = getSlackFieldAlertSkipReason(record, alertSettings);
+    if (!options?.forceSend && alertSkipReason) {
+      skipped += 1;
+      if (options?.dryRun) {
+        previewItems.push({
+          caseNumber: record.shared.caseNumber,
+          clientName: record.shared.clientName,
+          action: "skip",
+          missingFields: missing,
+          reason: alertSkipReason,
         });
       }
       continue;

@@ -336,6 +336,10 @@ export type CaseTrackerSettings = {
   oneTimeRequiredFields: Array<keyof TrackerEntry | keyof SharedCase>;
   quarterlyRequiredFields: Array<keyof TrackerEntry>;
   expectedLitigationStatuses: ExpectedLitigationStatus[];
+  /** Days after date signed before missing-field / field-reminder Slack posts. */
+  slackFieldAlertGraceDays: number;
+  /** Attorney contact IDs that should not receive Slack field-input alerts on their cases. */
+  attorneySlackFieldAlertsDisabled: string[];
 };
 
 export type CaseTrackerSnapshot = {

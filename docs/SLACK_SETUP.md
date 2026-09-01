@@ -184,6 +184,13 @@ Each overdue field gets **its own Slack post** in the case channel (not one bund
 
 Field posts respect a **3-day cooldown** per field (`FIELD_REMINDER_COOLDOWN_DAYS`) so the same field is not reposted daily while waiting for a reply.
 
+**Alert throttling (Settings → Slack field alerts):**
+
+- No missing-field or field-reminder posts during the first **7 days** after date signed (configurable grace period).
+- Admins can turn off field-input alerts per attorney (e.g. cases assigned to Laura). Stage confirmations and other Slack workflows are unaffected.
+
+Apply `supabase/sql/058_slack_field_alert_settings.sql` for the default settings row.
+
 ## 6. Stage confirmation workflow (#daily-pulse)
 
 Apply `supabase/sql/017_stage_confirmation_workflow.sql` in the Supabase SQL editor.

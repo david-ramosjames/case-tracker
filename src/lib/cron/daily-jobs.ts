@@ -7,7 +7,7 @@ import { sendSlackMissingFieldNotices } from "@/lib/slack/missing-field-notify";
 import { processDailyPulseRecap } from "@/lib/slack/stage-confirmation";
 import { promoteOnboardingToTreatment } from "@/lib/slack/stage-workflow";
 import { syncQuoPhonesToTrackerIfConfigured, processSmsTimeInStageAutomations, autoRejectStaleSmsPendingApprovals } from "@/lib/sms/workflow";
-import { getCases } from "@/lib/supabase/services";
+import { getCases, getSettings } from "@/lib/supabase/services";
 import { errorMessage } from "@/lib/utils";
 
 export type DailyJobStep =
@@ -52,23 +52,31 @@ function filterRecordsForCaseNumber(records: Awaited<ReturnType<typeof getCases>
 
 async function runMissingFields(options: DailyJobOptions) {
   const force = options.force ?? true;
-  const records = filterRecordsForCaseNumber(await getCases(), options.caseNumber);
+  const [records, settings] = await Promise.all([
+    filterRecordsForCaseNumber(await getCases(), options.caseNumber),
+    getSettings(),
+  ]);
 
   return sendSlackMissingFieldNotices(records, {
     force,
     forceSend: force && Boolean(options.caseNumber?.trim()),
     dryRun: options.dryRun,
+    settings,
   });
 }
 
 async function runFieldReminders(options: DailyJobOptions) {
   const force = options.force ?? true;
-  const records = filterRecordsForCaseNumber(await getCases(), options.caseNumber);
+  const [records, settings] = await Promise.all([
+    filterRecordsForCaseNumber(await getCases(), options.caseNumber),
+    getSettings(),
+  ]);
 
   return sendSlackFieldReminders(records, {
     force,
     forceSend: force && Boolean(options.caseNumber?.trim()),
     dryRun: options.dryRun,
+    settings,
   });
 }
 

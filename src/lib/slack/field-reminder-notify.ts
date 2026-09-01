@@ -5,6 +5,7 @@ import { resolveChannelUserMentions } from "@/lib/slack/channel-topic";
 import { fetchChannelTopic, normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
 import { loadSlackChannelMapByCaseNumber } from "@/lib/slack/channels";
 import { isSlackEnabled } from "@/lib/slack/config";
+import { getSlackFieldAlertSkipReason } from "@/lib/slack/field-alert-guards";
 import {
   FIELD_REMINDER_COOLDOWN_DAYS,
   buildFieldReminderMessage,
@@ -15,7 +16,7 @@ import {
   dismissFieldReminder,
   getOpenFieldReminder,
 } from "@/lib/supabase/field-reminders";
-import { type CaseRecord } from "@/lib/types";
+import { type CaseRecord, type CaseTrackerSettings } from "@/lib/types";
 import { daysSince } from "@/lib/utils";
 
 function getSlackContextForRecord(
@@ -43,12 +44,26 @@ export type FieldReminderPreviewItem = {
 
 export async function sendSlackFieldReminders(
   records: CaseRecord[],
-  options?: { force?: boolean; forceSend?: boolean; caseNumber?: string; dryRun?: boolean },
+  options?: {
+    force?: boolean;
+    forceSend?: boolean;
+    caseNumber?: string;
+    dryRun?: boolean;
+    settings?: Pick<
+      CaseTrackerSettings,
+      "slackFieldAlertGraceDays" | "attorneySlackFieldAlertsDisabled"
+    >;
+  },
 ) {
   if (!isSlackEnabled()) return { posted: 0, skipped: 0, fields: 0, dryRun: Boolean(options?.dryRun), previewItems: [] as FieldReminderPreviewItem[] };
 
   const appUrl = getAppOriginForNotifications();
   if (!appUrl) throw new Error("Set NEXT_PUBLIC_SITE_URL for Slack links.");
+
+  const alertSettings = options?.settings ?? {
+    slackFieldAlertGraceDays: 7,
+    attorneySlackFieldAlertsDisabled: [],
+  };
 
   const channelMap = await loadSlackChannelMapByCaseNumber();
   let posted = 0;
@@ -66,6 +81,21 @@ export async function sendSlackFieldReminders(
           action: "skip",
           fields: [],
           reason: record.tracker.caseStage === "Referred" ? "referred case" : "inactive case",
+        });
+      }
+      continue;
+    }
+
+    const alertSkipReason = getSlackFieldAlertSkipReason(record, alertSettings);
+    if (!options?.forceSend && alertSkipReason) {
+      skipped += 1;
+      if (options?.dryRun) {
+        previewItems.push({
+          caseNumber: record.shared.caseNumber,
+          clientName: record.shared.clientName,
+          action: "skip",
+          fields: [],
+          reason: alertSkipReason,
         });
       }
       continue;

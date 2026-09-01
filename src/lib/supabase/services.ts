@@ -112,6 +112,8 @@ type ResultRow = UnknownRow;
 type DisbursementRow = UnknownRow;
 type SuggestionRow = UnknownRow;
 
+import { DEFAULT_SLACK_FIELD_ALERT_GRACE_DAYS } from "@/lib/slack/field-alert-guards";
+
 const DOCKETFLOW_CASE_COLUMNS =
   "id,case_number,client_name,name,status,case_type,date_of_incident,preferred_language,secondary_language,uses_eve,assigned_contact_ids,created_at,updated_at";
 const CONTACT_COLUMNS = "id,name,email,role,slack_user_id,slack_display_name";
@@ -136,6 +138,8 @@ const DEFAULT_SETTINGS: CaseTrackerSettings = {
   confidenceLevels: ["Low", "Medium", "High"],
   expectedLitigationStatuses: [...EXPECTED_LITIGATION_OPTIONS],
   paralegalLimitedEditEnabled: false,
+  slackFieldAlertGraceDays: DEFAULT_SLACK_FIELD_ALERT_GRACE_DAYS,
+  attorneySlackFieldAlertsDisabled: [],
 };
 
 async function createTrackerClient() {
@@ -3143,11 +3147,44 @@ export async function getSettings(): Promise<CaseTrackerSettings> {
   const { data } = await client.from("case_tracker_settings").select("key,value");
   const settings = new Map(((data ?? []) as Array<{ key: string; value: unknown }>).map((row) => [row.key, row.value]));
   const thresholds = asObject(settings.get("review_thresholds"));
+  const slackFieldAlerts = asObject(settings.get("slack_field_alerts"));
 
   return {
     ...DEFAULT_SETTINGS,
     staleReviewThresholdDays: Number(thresholds.stale_review_days ?? DEFAULT_SETTINGS.staleReviewThresholdDays),
     quarterlyReviewThresholdDays: Number(thresholds.quarterly_check_in_days ?? DEFAULT_SETTINGS.quarterlyReviewThresholdDays),
+    slackFieldAlertGraceDays: Number(
+      slackFieldAlerts.grace_days ?? DEFAULT_SETTINGS.slackFieldAlertGraceDays,
+    ),
+    attorneySlackFieldAlertsDisabled: asStringArray(slackFieldAlerts.disabled_attorney_ids),
+  };
+}
+
+export async function updateSlackFieldAlertSettings(input: {
+  graceDays: number;
+  disabledAttorneyIds: string[];
+}): Promise<Pick<CaseTrackerSettings, "slackFieldAlertGraceDays" | "attorneySlackFieldAlertsDisabled">> {
+  if (!Number.isFinite(input.graceDays) || input.graceDays < 0) {
+    throw new Error("Grace period must be a non-negative number of days.");
+  }
+
+  const client = await createTrackerClient();
+  const value = {
+    grace_days: Math.round(input.graceDays),
+    disabled_attorney_ids: [...new Set(input.disabledAttorneyIds.filter(Boolean))],
+  };
+
+  const { error } = await client.from("case_tracker_settings").upsert({
+    key: "slack_field_alerts",
+    value,
+    description: "Slack missing-field and field-reminder alert rules.",
+  });
+
+  if (error) throw error;
+
+  return {
+    slackFieldAlertGraceDays: value.grace_days,
+    attorneySlackFieldAlertsDisabled: value.disabled_attorney_ids,
   };
 }
 
@@ -4021,6 +4058,11 @@ function toBoolean(value: unknown, fallback: boolean): boolean {
 
 function asObject(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
 }
 
 function initials(name: string) {
