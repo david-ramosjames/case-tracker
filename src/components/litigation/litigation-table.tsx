@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Eye, Loader2 } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, type RefObject, type UIEvent } from "react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import {
   LitigationEventDateInput,
@@ -10,9 +10,11 @@ import {
   updateLitigationEvent,
 } from "@/components/litigation/litigation-event-fields";
 import { type ViewerContext } from "@/lib/auth/access";
+import { matchesOptionalFieldFilter, notSetFilterOption } from "@/lib/case-options";
 import { compareCaseNumbers } from "@/lib/csv/parse";
 import {
   LITIGATION_EVENT_DEFINITIONS,
+  LITIGATION_EVENT_STATUS_OPTIONS,
   isLitigationTabCase,
 } from "@/lib/litigation-events";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +34,21 @@ import {
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useEffect, useMemo, useRef, useState } from "react";
+
+type EventStatusFilters = Record<LitigationEventKey, string>;
+
+const EMPTY_EVENT_STATUS_FILTERS: EventStatusFilters = {
+  plaintiffDeposition: "all",
+  defendantDeposition: "all",
+  mediation: "all",
+  trial: "all",
+};
+
+const EVENT_STATUS_FILTER_OPTIONS = [
+  { value: "all", label: "All" },
+  notSetFilterOption(),
+  ...LITIGATION_EVENT_STATUS_OPTIONS.map((status) => ({ value: status, label: status })),
+];
 
 type RowSaveStatus = "saving" | "saved";
 
@@ -71,6 +88,11 @@ export function LitigationTable({
   const [search, setSearch] = useState("");
   const [caseStatus, setCaseStatus] = useState<"all" | CaseStatus>("Active");
   const [attorneyIds, setAttorneyIds] = useState<string[]>([]);
+  const [eventStatusFilters, setEventStatusFilters] = useState<EventStatusFilters>(EMPTY_EVENT_STATUS_FILTERS);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const tableScrollRef = useRef<HTMLDivElement>(null);
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [scrollWidth, setScrollWidth] = useState(1400);
 
   const attorneys = useMemo(() => users.filter((user) => user.role === "attorney" && user.active), [users]);
 
@@ -81,6 +103,12 @@ export function LitigationTable({
         if (caseStatus !== "all" && record.shared.status !== caseStatus) return false;
         if (viewer.canViewAllCases && attorneyIds.length > 0 && !attorneyIds.includes(record.shared.attorneyId)) {
           return false;
+        }
+        for (const { key } of LITIGATION_EVENT_DEFINITIONS) {
+          const filter = eventStatusFilters[key];
+          if (filter !== "all" && !matchesOptionalFieldFilter(filter, record.tracker.litigationEvents[key].status)) {
+            return false;
+          }
         }
         if (!needle) return true;
         const haystack = [
@@ -99,7 +127,33 @@ export function LitigationTable({
         return haystack.includes(needle);
       })
       .sort((a, b) => compareCaseNumbers(a.shared.caseNumber, b.shared.caseNumber));
-  }, [attorneyIds, caseStatus, search, viewer.canViewAllCases, workingRecords]);
+  }, [attorneyIds, caseStatus, eventStatusFilters, search, viewer.canViewAllCases, workingRecords]);
+
+  useEffect(() => {
+    function updateScrollWidth() {
+      setScrollWidth(tableRef.current?.scrollWidth ?? 1400);
+    }
+
+    updateScrollWidth();
+    window.addEventListener("resize", updateScrollWidth);
+    return () => window.removeEventListener("resize", updateScrollWidth);
+  }, [filteredRecords.length, viewer.canViewAllCases]);
+
+  function syncScroll(event: UIEvent<HTMLDivElement>, targetRef: RefObject<HTMLDivElement | null>) {
+    if (targetRef.current && targetRef.current.scrollLeft !== event.currentTarget.scrollLeft) {
+      targetRef.current.scrollLeft = event.currentTarget.scrollLeft;
+    }
+  }
+
+  function setEventStatusFilter(key: LitigationEventKey, value: string) {
+    setEventStatusFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function clearFilters() {
+    setCaseStatus("Active");
+    setAttorneyIds([]);
+    setEventStatusFilters(EMPTY_EVENT_STATUS_FILTERS);
+  }
 
   useEffect(() => {
     recordsRef.current = workingRecords;
@@ -264,7 +318,14 @@ export function LitigationTable({
     updateLitigationEvents(caseId, (events) => updateLitigationEvent(events, key, patch));
   }
 
-  const activeFilterCount = [caseStatus !== "Active", viewer.canViewAllCases && attorneyIds.length > 0].filter(Boolean).length;
+  const activeEventStatusFilters = LITIGATION_EVENT_DEFINITIONS.filter(
+    ({ key }) => eventStatusFilters[key] !== "all",
+  ).length;
+  const activeFilterCount = [
+    caseStatus !== "Active",
+    viewer.canViewAllCases && attorneyIds.length > 0,
+    activeEventStatusFilters > 0,
+  ].filter(Boolean).length;
 
   return (
     <Card>
@@ -279,7 +340,7 @@ export function LitigationTable({
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="outline">{filteredRecords.length} lit case(s)</Badge>
             {activeFilterCount > 0 ? (
-              <Button variant="ghost" size="sm" onClick={() => { setCaseStatus("Active"); setAttorneyIds([]); }}>
+              <Button variant="ghost" size="sm" onClick={clearFilters}>
                 Clear filters
               </Button>
             ) : null}
@@ -288,122 +349,155 @@ export function LitigationTable({
 
         {saveMessage ? <p className="text-sm text-red-600">{saveMessage}</p> : null}
 
-        <div className="overflow-x-auto rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="sticky left-0 z-10 bg-white">Case</TableHead>
-                <TableHead>Client</TableHead>
-                {viewer.canViewAllCases ? (
-                  <TableHead>
-                    <HeaderMultiFilter
-                      label="Attorney"
-                      selected={attorneyIds}
-                      options={attorneys.map((attorney) => ({ value: attorney.id, label: attorney.name }))}
-                      onChange={setAttorneyIds}
-                    />
-                  </TableHead>
-                ) : null}
-                <TableHead>
-                  <HeaderFilter
-                    label="Status"
-                    value={caseStatus}
-                    options={[
-                      { value: "all", label: "All" },
-                      { value: "Active", label: "Open" },
-                      { value: "Closed", label: "Closed" },
-                    ]}
-                    onChange={(value) => setCaseStatus(value as "all" | CaseStatus)}
-                  />
-                </TableHead>
-                {LITIGATION_EVENT_DEFINITIONS.map((event) => (
-                  <TableHead key={event.key} colSpan={2} className="min-w-[280px] border-l text-center">
-                    {event.label}
-                  </TableHead>
-                ))}
-                <TableHead className="w-12" />
-              </TableRow>
-              <TableRow>
-                <TableHead className="sticky left-0 z-10 bg-white" />
-                <TableHead />
-                {viewer.canViewAllCases ? <TableHead /> : null}
-                <TableHead />
-                {LITIGATION_EVENT_DEFINITIONS.map((event) => (
-                  <Fragment key={`${event.key}-subheads`}>
-                    <TableHead className="border-l text-xs text-muted-foreground">Date</TableHead>
-                    <TableHead className="text-xs text-muted-foreground">Status</TableHead>
-                  </Fragment>
-                ))}
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredRecords.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8 + LITIGATION_EVENT_DEFINITIONS.length * 2} className="py-10 text-center text-muted-foreground">
-                    No litigation-stage cases match your filters.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredRecords.map((record) => {
-                  const caseId = record.shared.id;
-                  const saveStatus = rowSaveStatus[caseId];
-                  const saveError = rowSaveErrors[caseId];
-                  const pinned = isRowPinnedBySaveFeedback(caseId, rowSaveStatus);
-
-                  return (
-                    <TableRow key={caseId} className={cn(pinned && "bg-slate-50/80")}>
-                      <TableCell className="sticky left-0 z-10 bg-white">
-                        <div className="flex items-center gap-2">
-                          <CaseNumberLink caseNumber={record.shared.caseNumber} caseId={caseId} />
-                          {saveStatus === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
-                        </div>
-                      </TableCell>
-                      <TableCell className="font-medium text-navy-950">{record.shared.clientName}</TableCell>
-                      {viewer.canViewAllCases ? <TableCell>{record.attorney.name}</TableCell> : null}
-                      <TableCell>
-                        <Badge variant={record.shared.status === "Active" ? "success" : "outline"}>
-                          {record.shared.status === "Active" ? "Open" : "Closed"}
-                        </Badge>
-                      </TableCell>
-                      {LITIGATION_EVENT_DEFINITIONS.map((event) => {
-                        const current = record.tracker.litigationEvents[event.key];
-                        return (
-                          <Fragment key={`${caseId}-${event.key}`}>
-                            <TableCell className="border-l align-top">
-                              <LitigationEventDateInput
-                                value={current.date}
-                                onChange={(date) => updateEventField(caseId, event.key, { date })}
-                              />
-                            </TableCell>
-                            <TableCell className="align-top">
-                              <LitigationEventStatusSelect
-                                value={current.status}
-                                onChange={(status) =>
-                                  updateEventField(caseId, event.key, { status: status as LitigationEventStatus | null })
-                                }
-                              />
-                            </TableCell>
-                          </Fragment>
-                        );
-                      })}
-                      <TableCell className="align-top">
-                        <Button variant="ghost" size="sm" asChild>
-                          <Link href={`/cases/${caseId}`} aria-label={`Open case ${record.shared.caseNumber}`}>
-                            <Eye className="h-4 w-4" />
-                          </Link>
-                        </Button>
-                        {saveError ? <p className="mt-1 text-xs text-red-600">{saveError}</p> : null}
-                        {!saveError && saveStatus === "saved" ? (
-                          <p className="mt-1 text-xs text-emerald-600">Saved</p>
-                        ) : null}
+        <div className="rounded-lg border bg-white">
+          <div className="border-b bg-muted/40 px-4 py-2">
+            <div
+              ref={topScrollRef}
+              className="overflow-x-auto rounded-full border bg-white"
+              onScroll={(event) => syncScroll(event, tableScrollRef)}
+            >
+              <div style={{ width: scrollWidth, height: 12 }} />
+            </div>
+          </div>
+          <div className="relative">
+            <div className="pointer-events-none absolute right-0 top-0 z-30 h-full w-12 bg-gradient-to-l from-white to-transparent" />
+            <div
+              ref={tableScrollRef}
+              className="max-h-[calc(100vh-23rem)] min-h-[28rem] overflow-auto"
+              onScroll={(event) => syncScroll(event, topScrollRef)}
+            >
+              <Table ref={tableRef} className="min-w-[1200px]">
+                <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
+                  <TableRow>
+                    <TableHead className="sticky left-0 z-30 bg-slate-50">Case</TableHead>
+                    <TableHead>Client</TableHead>
+                    {viewer.canViewAllCases ? (
+                      <TableHead>
+                        <HeaderMultiFilter
+                          label="Attorney"
+                          selected={attorneyIds}
+                          options={attorneys.map((attorney) => ({ value: attorney.id, label: attorney.name }))}
+                          onChange={setAttorneyIds}
+                        />
+                      </TableHead>
+                    ) : null}
+                    <TableHead>
+                      <HeaderFilter
+                        label="Status"
+                        value={caseStatus}
+                        options={[
+                          { value: "all", label: "All" },
+                          { value: "Active", label: "Open" },
+                          { value: "Closed", label: "Closed" },
+                        ]}
+                        onChange={(value) => setCaseStatus(value as "all" | CaseStatus)}
+                      />
+                    </TableHead>
+                    {LITIGATION_EVENT_DEFINITIONS.map((event) => (
+                      <TableHead key={event.key} colSpan={2} className="min-w-[280px] border-l text-center">
+                        {event.label}
+                      </TableHead>
+                    ))}
+                    <TableHead className="w-12" />
+                  </TableRow>
+                  <TableRow>
+                    <TableHead className="sticky left-0 z-30 bg-slate-50" />
+                    <TableHead />
+                    {viewer.canViewAllCases ? <TableHead /> : null}
+                    <TableHead />
+                    {LITIGATION_EVENT_DEFINITIONS.map((event) => (
+                      <Fragment key={`${event.key}-subheads`}>
+                        <TableHead className="border-l text-xs text-muted-foreground">Date</TableHead>
+                        <TableHead className="min-w-[9rem] align-top">
+                          <HeaderFilter
+                            label="Status"
+                            value={eventStatusFilters[event.key]}
+                            options={EVENT_STATUS_FILTER_OPTIONS}
+                            onChange={(value) => setEventStatusFilter(event.key, value)}
+                            ariaLabel={`Filter ${event.label} by status`}
+                          />
+                        </TableHead>
+                      </Fragment>
+                    ))}
+                    <TableHead />
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredRecords.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={(viewer.canViewAllCases ? 5 : 4) + LITIGATION_EVENT_DEFINITIONS.length * 2}
+                        className="py-10 text-center text-muted-foreground"
+                      >
+                        No litigation-stage cases match your filters.
                       </TableCell>
                     </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
+                  ) : (
+                    filteredRecords.map((record) => {
+                      const caseId = record.shared.id;
+                      const saveStatus = rowSaveStatus[caseId];
+                      const saveError = rowSaveErrors[caseId];
+                      const pinned = isRowPinnedBySaveFeedback(caseId, rowSaveStatus);
+
+                      return (
+                        <TableRow key={caseId} className={cn(pinned && "bg-slate-50/80")}>
+                          <TableCell className="sticky left-0 z-10 bg-white">
+                            <div className="flex items-center gap-2">
+                              <CaseNumberLink caseNumber={record.shared.caseNumber} caseId={caseId} />
+                              {saveStatus === "saving" ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                              ) : null}
+                            </div>
+                          </TableCell>
+                          <TableCell className="font-medium text-navy-950">{record.shared.clientName}</TableCell>
+                          {viewer.canViewAllCases ? <TableCell>{record.attorney.name}</TableCell> : null}
+                          <TableCell>
+                            <Badge variant={record.shared.status === "Active" ? "success" : "outline"}>
+                              {record.shared.status === "Active" ? "Open" : "Closed"}
+                            </Badge>
+                          </TableCell>
+                          {LITIGATION_EVENT_DEFINITIONS.map((event) => {
+                            const current = record.tracker.litigationEvents[event.key];
+                            return (
+                              <Fragment key={`${caseId}-${event.key}`}>
+                                <TableCell className="border-l align-top">
+                                  <LitigationEventDateInput
+                                    value={current.date}
+                                    onChange={(date) => updateEventField(caseId, event.key, { date })}
+                                  />
+                                </TableCell>
+                                <TableCell className="align-top">
+                                  <LitigationEventStatusSelect
+                                    value={current.status}
+                                    onChange={(status) =>
+                                      updateEventField(caseId, event.key, {
+                                        status: status as LitigationEventStatus | null,
+                                      })
+                                    }
+                                  />
+                                </TableCell>
+                              </Fragment>
+                            );
+                          })}
+                          <TableCell className="align-top">
+                            <Button variant="ghost" size="sm" asChild>
+                              <Link href={`/cases/${caseId}`} aria-label={`Open case ${record.shared.caseNumber}`}>
+                                <Eye className="h-4 w-4" />
+                              </Link>
+                            </Button>
+                            {saveError ? <p className="mt-1 text-xs text-red-600">{saveError}</p> : null}
+                            {!saveError && saveStatus === "saved" ? (
+                              <p className="mt-1 text-xs text-emerald-600">Saved</p>
+                            ) : null}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
         </div>
 
         <p className="text-xs text-muted-foreground">
