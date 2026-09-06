@@ -6,6 +6,7 @@ import {
   BarChart3,
   BriefcaseBusiness,
   CircleDollarSign,
+  Download,
   Gavel,
   HelpCircle,
   LayoutDashboard,
@@ -19,7 +20,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { canViewOutputAndGoals } from "@/lib/auth/constants";
+import { canViewCaseCsvExport, canViewOutputAndGoals } from "@/lib/auth/constants";
 import { type SessionUser } from "@/lib/auth/types";
 import { cn } from "@/lib/utils";
 
@@ -32,6 +33,7 @@ const navItems = [
   { href: "/output", label: "Output", icon: BarChart3, attorneyGoalsOnly: true },
   { href: "/jumbotron", label: "Jumbotron", icon: Presentation, attorneyGoalsOnly: true },
   { href: "/goals", label: "Goals", icon: Target, attorneyGoalsOnly: true },
+  { href: "/export", label: "Export", icon: Download, caseExportOnly: true },
   { href: "/client-sms", label: "Client SMS", icon: MessageSquare, adminOnly: true },
   { href: "/settings", label: "Settings", icon: Settings, adminOnly: true },
   { href: "/faq", label: "FAQ", icon: HelpCircle, adminOnly: true },
@@ -40,9 +42,11 @@ const navItems = [
 function visibleNavForSession(sessionUser: SessionUser) {
   const isAdmin = sessionUser.role === "admin" || sessionUser.role === "super_admin";
   const showGoals = canViewOutputAndGoals(sessionUser.role);
+  const showCaseExport = canViewCaseCsvExport(sessionUser.email);
   return navItems.filter((item) => {
     if (item.adminOnly && !isAdmin) return false;
     if (item.attorneyGoalsOnly && !showGoals) return false;
+    if (item.caseExportOnly && !showCaseExport) return false;
     return true;
   });
 }

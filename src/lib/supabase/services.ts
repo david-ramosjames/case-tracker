@@ -2875,6 +2875,36 @@ export async function getCaseComments(caseId: string): Promise<TrackerComment[]>
   });
 }
 
+/** Bulk comments for CSV export, keyed by DocketFlow case id and tracker entry id. */
+export async function getCaseCommentsByCaseIds(caseIds: string[]): Promise<Map<string, TrackerComment[]>> {
+  const map = new Map<string, TrackerComment[]>();
+  const uniqueIds = [...new Set(caseIds.filter(Boolean))];
+  if (uniqueIds.length === 0) return map;
+
+  const client = await createTrackerClient();
+  const rows = await fetchAllSupabaseRows<UnknownRow>(client, "case_tracker_comments", "*", {
+    orderBy: "created_at",
+    ascending: false,
+  });
+
+  const idSet = new Set(uniqueIds);
+  for (const row of rows) {
+    const comment = commentRowToComment(row);
+    const caseId = toStringOrNull(row.case_id);
+    const trackerEntryId = toStringOrNull(row.tracker_entry_id);
+    const keys = [caseId, trackerEntryId].filter((id): id is string => Boolean(id) && idSet.has(id as string));
+    if (keys.length === 0) continue;
+
+    for (const key of keys) {
+      const existing = map.get(key);
+      if (existing) existing.push(comment);
+      else map.set(key, [comment]);
+    }
+  }
+
+  return map;
+}
+
 export async function getCaseActivity(caseId: string): Promise<ActivityLogEntry[]> {
   const client = await createTrackerClient();
 

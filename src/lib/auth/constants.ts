@@ -24,6 +24,12 @@ export function getAdminRoleForEmail(email: string): "admin" | null {
   return null;
 }
 
+/** Case CSV export page — limited to the three primary firm admins. */
+export function canViewCaseCsvExport(email: string | null | undefined) {
+  if (!email) return false;
+  return (ADMIN_EMAILS as readonly string[]).includes(normalizeEmail(email));
+}
+
 export function displayNameFromEmail(email: string, metadataName?: string | null) {
   if (metadataName?.trim()) return metadataName.trim();
   const localPart = normalizeEmail(email).split("@")[0] ?? "User";
