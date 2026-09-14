@@ -118,6 +118,13 @@ export function CaseDetailView({
   const [commentType, setCommentType] = useState<CommentType>("general_note");
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [isOverviewEditing, setIsOverviewEditing] = useState(false);
+  const [isHeaderEditing, setIsHeaderEditing] = useState(false);
+  const headerEditSnapshotRef = useRef<{
+    preferredLanguage: typeof shared.preferredLanguage;
+    secondaryLanguage: typeof shared.secondaryLanguage;
+    caseStage: TrackerEntry["caseStage"];
+    expectedLitigation: TrackerEntry["expectedLitigation"];
+  } | null>(null);
   const [isSourcesEditing, setIsSourcesEditing] = useState(false);
   const [isLitEventsEditing, setIsLitEventsEditing] = useState(false);
   const [isResultsEditing, setIsResultsEditing] = useState(false);
@@ -475,7 +482,11 @@ export function CaseDetailView({
     return { tracker: body.tracker, activity: body.activity };
   }
 
-  async function saveTracker(options?: { markReviewed?: boolean; exitOverviewEdit?: boolean }) {
+  async function saveTracker(options?: {
+    markReviewed?: boolean;
+    exitOverviewEdit?: boolean;
+    exitHeaderEdit?: boolean;
+  }) {
     const markReviewed = options?.markReviewed ?? true;
     const now = new Date().toISOString();
     const nextTracker = deriveTrackerSettlement({
@@ -505,6 +516,10 @@ export function CaseDetailView({
       setSavedAt(now);
       if (options?.exitOverviewEdit) {
         setIsOverviewEditing(false);
+      }
+      if (options?.exitHeaderEdit) {
+        headerEditSnapshotRef.current = null;
+        setIsHeaderEditing(false);
       }
       return true;
     } catch (error) {
@@ -777,19 +792,116 @@ export function CaseDetailView({
                   </div>
                 </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                {isOrphanTracker ? <Badge variant="warning">Orphaned tracker row</Badge> : null}
-                <StageBadge stage={tracker.caseStage} />
-                <Badge variant="outline">{record.shared.status}</Badge>
-                <ConfidenceBadge level={tracker.confidenceLevel} />
+              <div className="flex flex-col items-stretch gap-3 md:items-end">
+                <div className="flex flex-wrap gap-2 md:justify-end">
+                  {isOrphanTracker ? <Badge variant="warning">Orphaned tracker row</Badge> : null}
+                  <StageBadge stage={tracker.caseStage} />
+                  <Badge variant="outline">{record.shared.status}</Badge>
+                  <ConfidenceBadge level={tracker.confidenceLevel} />
+                </div>
+                {isHeaderEditing ? (
+                  <div className="flex flex-wrap gap-2 md:justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={isSaving}
+                      onClick={() => {
+                        const snapshot = headerEditSnapshotRef.current;
+                        if (snapshot) {
+                          setShared((current) => ({
+                            ...current,
+                            preferredLanguage: snapshot.preferredLanguage,
+                            secondaryLanguage: snapshot.secondaryLanguage,
+                          }));
+                          setTracker((current) => ({
+                            ...current,
+                            caseStage: snapshot.caseStage,
+                            expectedLitigation: snapshot.expectedLitigation,
+                          }));
+                        }
+                        headerEditSnapshotRef.current = null;
+                        setIsHeaderEditing(false);
+                      }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      variant="pink"
+                      size="sm"
+                      disabled={isSaving}
+                      onClick={() => saveTracker({ exitHeaderEdit: true })}
+                    >
+                      <Save className="h-4 w-4" />
+                      {isSaving ? "Saving..." : "Save"}
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="md:self-end"
+                    onClick={() => {
+                      headerEditSnapshotRef.current = {
+                        preferredLanguage: shared.preferredLanguage,
+                        secondaryLanguage: shared.secondaryLanguage,
+                        caseStage: tracker.caseStage,
+                        expectedLitigation: tracker.expectedLitigation,
+                      };
+                      setIsHeaderEditing(true);
+                    }}
+                  >
+                    <Pencil className="h-4 w-4" />
+                    Edit
+                  </Button>
+                )}
               </div>
             </div>
           </CardHeader>
-          <CardContent>
-            <div className="grid gap-4 md:grid-cols-4">
+          <CardContent className="space-y-4">
+            {isHeaderEditing ? (
+              <div className="grid gap-4 rounded-lg border border-pink-200 bg-pink-50/40 p-4 md:grid-cols-3">
+                <Field label="Primary language">
+                  <Select
+                    value={shared.preferredLanguage}
+                    onChange={(event) =>
+                      updateShared("preferredLanguage", event.target.value as typeof shared.preferredLanguage)
+                    }
+                  >
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                  </Select>
+                </Field>
+                <Field label="Secondary language">
+                  <Select
+                    value={shared.secondaryLanguage ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      updateShared("secondaryLanguage", value === "" ? null : (value as "en" | "es"));
+                    }}
+                  >
+                    <option value="">None</option>
+                    <option value="en">English</option>
+                    <option value="es">Spanish</option>
+                  </Select>
+                </Field>
+                <Field label="Stage">
+                  <Select
+                    value={tracker.caseStage}
+                    onChange={(event) => updateField("caseStage", event.target.value as TrackerEntry["caseStage"])}
+                  >
+                    {CASE_STAGE_OPTIONS.map((stage) => (
+                      <option key={stage} value={stage}>
+                        {stage}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+            ) : null}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
               <Info label="Attorney" value={record.attorney.name} />
               <Info label="Paralegal" value={record.paralegal.name} />
-              {record.legalAssistant ? <Info label="Legal assistant" value={record.legalAssistant.name} /> : null}
+              <Info label="Legal assistant" value={record.legalAssistant?.name ?? "Not set"} />
               <Info label="Date Signed" value={formatDate(record.shared.dateSigned)} />
               <Info label="Last reviewed" value={formatDate(tracker.lastReviewedAt)} />
             </div>
