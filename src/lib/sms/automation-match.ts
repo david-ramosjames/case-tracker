@@ -1,9 +1,15 @@
 import { type SmsAutomation } from "@/lib/supabase/sms-automations";
+import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import { type CaseRecord, type CaseStage } from "@/lib/types";
 import { daysSince, hoursSince } from "@/lib/utils";
 
 /** Closed pipeline stages commonly excluded from client SMS on transition. */
 export const SMS_DEFAULT_EXCLUDED_TO_STAGES: CaseStage[] = ["Disengaged", "Terminated", "Referred"];
+
+/** Same Active definition as the Cases table (stage + disbursement), not the legacy is_active flag. */
+export function isSmsActivePipelineCase(record: CaseRecord) {
+  return deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result) === "Active";
+}
 
 export function automationMatchesFromStage(automation: SmsAutomation, fromStage: CaseStage) {
   if (automation.fromStages.length > 0) {
@@ -69,7 +75,7 @@ export function automationMatchesStageChange(
 export function automationMatchesTimeInStage(automation: SmsAutomation, record: CaseRecord) {
   if (automation.triggerType !== "time_in_stage") return false;
   if (!automation.enabled) return false;
-  if (!record.tracker.isActive) return false;
+  if (!isSmsActivePipelineCase(record)) return false;
   if (automation.inStages.length === 0) return false;
   if (!automation.inStages.includes(record.tracker.caseStage)) return false;
   if (automation.caseTypes.length > 0 && !automation.caseTypes.includes(record.shared.caseType)) return false;
@@ -87,7 +93,7 @@ export function automationMatchesManualAttorney(
 ) {
   if (automation.triggerType !== "manual") return false;
   if (options?.requireEnabled !== false && !automation.enabled) return false;
-  if (!record.tracker.isActive) return false;
+  if (!isSmsActivePipelineCase(record)) return false;
   if (record.shared.attorneyId !== attorneyContactId) return false;
   if (automation.caseTypes.length > 0 && !automation.caseTypes.includes(record.shared.caseType)) return false;
   return true;
