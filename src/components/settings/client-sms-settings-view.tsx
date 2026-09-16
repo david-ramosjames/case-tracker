@@ -38,7 +38,9 @@ const EMPTY_FORM = {
 function formatAutomationTrigger(automation: SmsAutomation, attorneys: AppUser[]) {
   const parts: string[] = [];
 
-  if (automation.triggerType === "time_in_stage") {
+  if (automation.triggerType === "manual") {
+    parts.push("Manual — run on demand (e.g. attorney departure)");
+  } else if (automation.triggerType === "time_in_stage") {
     parts.push(`While in ${formatStageList(automation.inStages) || "—"}`);
     if (automation.delayHoursAfterSigning != null) {
       parts.push(`Signing + ${automation.delayHoursAfterSigning}h`);
@@ -71,7 +73,7 @@ function formatAutomationTrigger(automation: SmsAutomation, attorneys: AppUser[]
 
   parts.push(automation.caseTypes.length > 0 ? automation.caseTypes.join(", ") : "All case types");
 
-  if (automation.attorneyContactIds.length > 0) {
+  if (automation.triggerType !== "manual" && automation.attorneyContactIds.length > 0) {
     const names = automation.attorneyContactIds
       .map((id) => attorneys.find((user) => user.id === id)?.name ?? id)
       .join(", ");
@@ -79,6 +81,12 @@ function formatAutomationTrigger(automation: SmsAutomation, attorneys: AppUser[]
   }
 
   return parts.join(" · ");
+}
+
+function triggerBadgeLabel(triggerType: SmsAutomationTriggerType) {
+  if (triggerType === "manual") return "Manual";
+  if (triggerType === "time_in_stage") return "Time in stage";
+  return "Stage change";
 }
 
 function stageChipLabel(stage: CaseStage) {
@@ -96,6 +104,10 @@ type ClientSmsSettingsViewProps = {
 
 export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   const attorneys = useMemo(() => users.filter((user) => user.role === "attorney" && user.active), [users]);
+  const allAttorneys = useMemo(
+    () => users.filter((user) => user.role === "attorney").sort((a, b) => a.name.localeCompare(b.name)),
+    [users],
+  );
   const [automations, setAutomations] = useState<SmsAutomation[]>([]);
   const [form, setForm] = useState(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -103,6 +115,8 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [runningId, setRunningId] = useState<string | null>(null);
+  const [runAttorneyByAutomation, setRunAttorneyByAutomation] = useState<Record<string, string>>({});
   const [syncCaseNumbers, setSyncCaseNumbers] = useState("");
   const [renameCaseNumbers, setRenameCaseNumbers] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -222,12 +236,21 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
         fromStages: form.triggerType === "stage_change" ? form.fromStages : [],
         fromStage: form.fromStages.length > 0 ? form.fromStages[0] : "any",
         inStages: form.triggerType === "time_in_stage" ? form.inStages : [],
-        toStage: form.triggerType === "time_in_stage" ? (form.inStages[0] ?? "Onboarding") : form.toMode === "any" ? "any" : form.toStage,
+        toStage:
+          form.triggerType === "manual"
+            ? "Onboarding"
+            : form.triggerType === "time_in_stage"
+              ? (form.inStages[0] ?? "Onboarding")
+              : form.toMode === "any"
+                ? "any"
+                : form.toStage,
         excludedToStages: form.triggerType === "stage_change" && form.toMode === "any" ? form.excludedToStages : [],
         caseTypes: form.caseTypes,
-        delayDaysAfterSigning: delayDaysTrimmed === "" ? null : Number(delayDaysTrimmed),
-        delayHoursAfterSigning: delayHoursTrimmed === "" ? null : Number(delayHoursTrimmed),
-        attorneyContactIds: form.attorneyContactIds,
+        delayDaysAfterSigning:
+          form.triggerType === "manual" ? null : delayDaysTrimmed === "" ? null : Number(delayDaysTrimmed),
+        delayHoursAfterSigning:
+          form.triggerType === "manual" ? null : delayHoursTrimmed === "" ? null : Number(delayHoursTrimmed),
+        attorneyContactIds: form.triggerType === "manual" ? [] : form.attorneyContactIds,
         messageEn: form.messageEn,
         messageEs: form.messageEs,
         youtubeUrlEn: form.youtubeUrlEn.trim() || null,
@@ -373,6 +396,63 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     void renameQuoContacts(numbers);
   }
 
+  async function runManualAutomation(automationId: string, dryRun: boolean) {
+    const attorneyContactId = runAttorneyByAutomation[automationId]?.trim() ?? "";
+    if (!attorneyContactId) {
+      setError("Select the departing attorney before queuing SMS.");
+      return;
+    }
+
+    const attorneyName = allAttorneys.find((user) => user.id === attorneyContactId)?.name ?? "this attorney";
+    if (
+      !dryRun &&
+      !window.confirm(
+        `Queue Slack-approval SMS for all active clients assigned to ${attorneyName}? Messages use each client's primary language (EN/ES) and YouTube URL.`,
+      )
+    ) {
+      return;
+    }
+
+    setRunningId(automationId);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/admin/sms-automations/${automationId}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ attorneyContactId, dryRun }),
+      });
+      const body = (await response.json()) as {
+        error?: string;
+        queued?: number;
+        matched?: number;
+        skipped?: number;
+        cases?: number;
+        english?: number;
+        spanish?: number;
+        automationName?: string;
+        dryRun?: boolean;
+      };
+      if (!response.ok) throw new Error(body.error ?? "Unable to run manual SMS.");
+
+      const prefix = body.dryRun ? "Preview" : "Queued";
+      setMessage(
+        [
+          `${prefix}: ${body.automationName ?? "manual SMS"} for ${attorneyName}.`,
+          `${body.cases ?? 0} active case(s) matched (${body.english ?? 0} EN · ${body.spanish ?? 0} ES).`,
+          `${body.queued ?? 0} recipient approval(s) ${body.dryRun ? "would be posted" : "posted"} to Slack.`,
+          body.skipped ? `${body.skipped} skipped (already queued/sent, missing phone, or no Slack channel).` : null,
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to run manual SMS.");
+    } finally {
+      setRunningId(null);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card>
@@ -455,7 +535,8 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
           <CardTitle>{editingId ? "Edit automation" : "New SMS automation"}</CardTitle>
           <CardDescription>
             Stage-change automations fire when the tracker stage updates. Time-in-stage automations are checked daily
-            (morning cron) while the case stays in the selected stage after the signing delay. Each send is posted to
+            (morning cron) while the case stays in the selected stage after the signing delay. Manual automations
+            (e.g. attorney departure) are queued on demand for one attorney&apos;s active clients. Each send is posted to
             Slack for approval first.
           </CardDescription>
         </CardHeader>
@@ -480,11 +561,18 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
               >
                 <option value="stage_change">Stage change — fires when the case moves between stages (supports “any except” destination)</option>
                 <option value="time_in_stage">Time in stage — fires daily while in stage after signing delay (no stage change)</option>
+                <option value="manual">Manual — attorney departure (pick attorney and queue on demand)</option>
               </Select>
             </div>
           </div>
 
-          {form.triggerType === "time_in_stage" ? (
+          {form.triggerType === "manual" ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-950">
+              Save English and Spanish messages (and YouTube URLs). Then use <strong>Queue for Slack approval</strong> on
+              the automation card and choose the departing attorney. Each active client gets the message for their
+              primary language.
+            </div>
+          ) : form.triggerType === "time_in_stage" ? (
             <div className="space-y-2">
               <label className="text-sm font-medium text-navy-950">While in stage(s)</label>
               <p className="text-xs text-muted-foreground">
@@ -591,6 +679,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
             </>
           )}
 
+          {form.triggerType !== "manual" ? (
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <label className="text-sm font-medium text-navy-950">Delay after signing (hours)</label>
@@ -623,7 +712,9 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
               </p>
             </div>
           </div>
+          ) : null}
 
+          {form.triggerType !== "manual" ? (
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2 md:col-span-2">
               <label className="text-sm font-medium text-navy-950">Attorneys (leave empty for all)</label>
@@ -648,6 +739,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
               </div>
             </div>
           </div>
+          ) : null}
 
           <div className="space-y-2">
             <label className="text-sm font-medium text-navy-950">Case types (leave empty for all)</label>
@@ -721,7 +813,9 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
       <Card>
         <CardHeader>
           <CardTitle>Automations</CardTitle>
-          <CardDescription>Stage + filter triggers that queue Slack approval before sending SMS via Quo.</CardDescription>
+          <CardDescription>
+            Stage, time-in-stage, and manual triggers that queue Slack approval before sending SMS via Quo.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {loading ? <p className="text-sm text-muted-foreground">Loading…</p> : null}
@@ -735,9 +829,9 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-semibold text-navy-950">{automation.name}</p>
                     <Badge variant={automation.enabled ? "success" : "secondary"}>{automation.enabled ? "Enabled" : "Disabled"}</Badge>
-                    <Badge variant="outline">{automation.triggerType === "time_in_stage" ? "Time in stage" : "Stage change"}</Badge>
+                    <Badge variant="outline">{triggerBadgeLabel(automation.triggerType)}</Badge>
                   </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{formatAutomationTrigger(automation, attorneys)}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{formatAutomationTrigger(automation, allAttorneys)}</p>
                 </div>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => startEdit(automation)}>
@@ -748,6 +842,51 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                   </Button>
                 </div>
               </div>
+              {automation.triggerType === "manual" ? (
+                <div className="mt-4 flex flex-col gap-3 rounded-md border bg-slate-50 p-3 sm:flex-row sm:items-end">
+                  <label className="block min-w-0 flex-1">
+                    <span className="mb-1 block text-xs font-medium text-navy-950">Departing attorney</span>
+                    <Select
+                      value={runAttorneyByAutomation[automation.id] ?? ""}
+                      onChange={(event) =>
+                        setRunAttorneyByAutomation((current) => ({
+                          ...current,
+                          [automation.id]: event.target.value,
+                        }))
+                      }
+                    >
+                      <option value="">Select attorney…</option>
+                      {allAttorneys.map((attorney) => (
+                        <option key={attorney.id} value={attorney.id}>
+                          {attorney.name}
+                          {!attorney.active ? " (inactive)" : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={runningId === automation.id || !automation.enabled}
+                      onClick={() => void runManualAutomation(automation.id, true)}
+                    >
+                      {runningId === automation.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Preview
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={runningId === automation.id || !automation.enabled}
+                      onClick={() => void runManualAutomation(automation.id, false)}
+                    >
+                      {runningId === automation.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Queue for Slack approval
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           ))}
         </CardContent>

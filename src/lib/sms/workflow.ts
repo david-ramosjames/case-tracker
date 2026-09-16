@@ -12,10 +12,11 @@ import { rejectSmsPendingApproval } from "@/lib/sms/approval";
 import { getSmsRecipients } from "@/lib/sms/recipients";
 import { createSupabaseAdminClient, fetchAllSupabaseRows } from "@/lib/supabase/admin";
 import { syncTrackerQuoContacts } from "@/lib/supabase/quo-contacts";
-import { automationMatchesStageChange, automationMatchesTimeInStage } from "@/lib/sms/automation-match";
+import { automationMatchesStageChange, automationMatchesTimeInStage, automationMatchesManualAttorney } from "@/lib/sms/automation-match";
 import {
   claimSmsPendingApproval,
   createSmsPendingApproval,
+  getSmsAutomationById,
   hasSmsAutomationDeliveryForCase,
   listSmsAutomations,
   listStaleSmsPendingApprovals,
@@ -56,15 +57,19 @@ async function resolveApprovalChannelId(caseNumber: string) {
 export function buildSmsApprovalSlackMessage(input: {
   approval: SmsPendingApproval;
   appUrl: string;
+  triggerType?: SmsAutomation["triggerType"];
+  automationName?: string;
 }) {
   const languageLabel = input.approval.language === "es" ? "Spanish" : "English";
   const recipientLabel = input.approval.quoContactName
     ? `${input.approval.quoContactName} · \`${input.approval.phone}\``
     : `\`${input.approval.phone}\``;
   const stageLine =
-    input.approval.fromStage === input.approval.toStage
-      ? `While in *${input.approval.toStage}* (signing delay met)`
-      : `Stage: *${input.approval.fromStage}* → *${input.approval.toStage}*`;
+    input.triggerType === "manual"
+      ? `Manual send${input.automationName ? ` · *${input.automationName}*` : ""}`
+      : input.approval.fromStage === input.approval.toStage
+        ? `While in *${input.approval.toStage}* (signing delay met)`
+        : `Stage: *${input.approval.fromStage}* → *${input.approval.toStage}*`;
   return [
     "*Pending client SMS — not sent yet.*",
     `Case *#${input.approval.caseNumber}* · ${input.approval.clientName ?? "Client"}`,
@@ -122,7 +127,12 @@ async function queueSmsApprovalsForAutomation(
       toStage: stages.toStage,
     });
 
-    const slackText = buildSmsApprovalSlackMessage({ approval, appUrl });
+    const slackText = buildSmsApprovalSlackMessage({
+      approval,
+      appUrl,
+      triggerType: automation.triggerType,
+      automationName: automation.name,
+    });
     const posted = await postSlackMessage({ channel: channelId, text: slackText });
     if (!posted?.ts) continue;
 
@@ -209,6 +219,76 @@ export async function processSmsTimeInStageAutomations(options?: {
   }
 
   return { queued, matched, skipped, automations: automations.length, dryRun: Boolean(options?.dryRun) };
+}
+
+export async function processManualAttorneyDepartureSms(options: {
+  automationId: string;
+  attorneyContactId: string;
+  dryRun?: boolean;
+}) {
+  if (!isSlackEnabled()) {
+    return {
+      queued: 0,
+      matched: 0,
+      skipped: 0,
+      cases: 0,
+      reason: "slack_disabled" as const,
+    };
+  }
+
+  const automation = await getSmsAutomationById(options.automationId);
+  if (!automation) {
+    return { queued: 0, matched: 0, skipped: 0, cases: 0, reason: "automation_not_found" as const };
+  }
+  if (automation.triggerType !== "manual") {
+    return { queued: 0, matched: 0, skipped: 0, cases: 0, reason: "not_manual_automation" as const };
+  }
+  if (!automation.enabled) {
+    return { queued: 0, matched: 0, skipped: 0, cases: 0, reason: "automation_disabled" as const };
+  }
+  if (!options.attorneyContactId.trim()) {
+    return { queued: 0, matched: 0, skipped: 0, cases: 0, reason: "attorney_required" as const };
+  }
+
+  const records = await getCases();
+  let queued = 0;
+  let matched = 0;
+  let skipped = 0;
+  let cases = 0;
+  let english = 0;
+  let spanish = 0;
+
+  for (const record of records) {
+    if (!automationMatchesManualAttorney(automation, record, options.attorneyContactId)) continue;
+    matched += 1;
+    cases += 1;
+    if (resolveClientLanguage(record) === "es") spanish += 1;
+    else english += 1;
+
+    const result = await queueSmsApprovalsForAutomation(
+      record,
+      automation,
+      { fromStage: record.tracker.caseStage, toStage: record.tracker.caseStage },
+      { dryRun: options.dryRun },
+    );
+    if ("skipped" in result && result.skipped) {
+      skipped += 1;
+      continue;
+    }
+    if (result.queued === 0) skipped += 1;
+    queued += result.queued;
+  }
+
+  return {
+    queued,
+    matched,
+    skipped,
+    cases,
+    english,
+    spanish,
+    automationName: automation.name,
+    dryRun: Boolean(options.dryRun),
+  };
 }
 
 export const SMS_APPROVAL_AUTO_REJECT_DAYS = 7;

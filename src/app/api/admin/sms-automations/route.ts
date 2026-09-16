@@ -20,7 +20,12 @@ function parseAutomationBody(body: Record<string, unknown>): SmsAutomationInput 
   const name = typeof body.name === "string" ? body.name.trim() : "";
   const messageEn = typeof body.messageEn === "string" ? body.messageEn.trim() : "";
   const messageEs = typeof body.messageEs === "string" ? body.messageEs.trim() : "";
-  const triggerType: SmsAutomationTriggerType = body.triggerType === "time_in_stage" ? "time_in_stage" : "stage_change";
+  const triggerType: SmsAutomationTriggerType =
+    body.triggerType === "time_in_stage"
+      ? "time_in_stage"
+      : body.triggerType === "manual"
+        ? "manual"
+        : "stage_change";
 
   if (!name || !messageEn || !messageEs) {
     return { error: "Name and both messages are required." };
@@ -44,6 +49,27 @@ function parseAutomationBody(body: Record<string, unknown>): SmsAutomationInput 
   }
   if (delayHoursAfterSigning != null && (!Number.isFinite(delayHoursAfterSigning) || delayHoursAfterSigning < 0)) {
     return { error: "Delay after signing (hours) must be a non-negative number." };
+  }
+
+  if (triggerType === "manual") {
+    return {
+      name,
+      enabled: body.enabled !== false,
+      triggerType,
+      fromStage: "any",
+      fromStages: [],
+      toStage: "Onboarding",
+      excludedToStages: [],
+      inStages: [],
+      caseTypes: Array.isArray(body.caseTypes) ? (body.caseTypes as string[]) : [],
+      delayDaysAfterSigning: null,
+      delayHoursAfterSigning: null,
+      attorneyContactIds: [],
+      messageEn,
+      messageEs,
+      youtubeUrlEn: typeof body.youtubeUrlEn === "string" ? body.youtubeUrlEn.trim() || null : null,
+      youtubeUrlEs: typeof body.youtubeUrlEs === "string" ? body.youtubeUrlEs.trim() || null : null,
+    };
   }
 
   if (triggerType === "time_in_stage") {

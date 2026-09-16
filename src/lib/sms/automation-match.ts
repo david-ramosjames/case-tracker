@@ -77,3 +77,17 @@ export function automationMatchesTimeInStage(automation: SmsAutomation, record: 
   if (!automationMatchesTimeInStageDelay(automation, record)) return false;
   return true;
 }
+
+/** Manual attorney-departure (and similar) sends: active cases for a specific attorney. */
+export function automationMatchesManualAttorney(
+  automation: SmsAutomation,
+  record: CaseRecord,
+  attorneyContactId: string,
+) {
+  if (automation.triggerType !== "manual") return false;
+  if (!automation.enabled) return false;
+  if (!record.tracker.isActive) return false;
+  if (record.shared.attorneyId !== attorneyContactId) return false;
+  if (automation.caseTypes.length > 0 && !automation.caseTypes.includes(record.shared.caseType)) return false;
+  return true;
+}

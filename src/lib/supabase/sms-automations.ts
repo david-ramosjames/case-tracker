@@ -3,7 +3,7 @@ import { type CaseStage } from "@/lib/types";
 
 export type ClientPreferredLanguage = "en" | "es";
 
-export type SmsAutomationTriggerType = "stage_change" | "time_in_stage";
+export type SmsAutomationTriggerType = "stage_change" | "time_in_stage" | "manual";
 
 export type SmsAutomation = {
   id: string;
@@ -80,7 +80,12 @@ function parseStageList(values: string[] | null | undefined): CaseStage[] {
 function rowToAutomation(row: AutomationRow): SmsAutomation {
   const fromStages = parseStageList(row.from_stages);
   const inStages = parseStageList(row.in_stages);
-  const triggerType = row.trigger_type === "time_in_stage" ? "time_in_stage" : "stage_change";
+  const triggerType =
+    row.trigger_type === "time_in_stage"
+      ? "time_in_stage"
+      : row.trigger_type === "manual"
+        ? "manual"
+        : "stage_change";
   return {
     id: row.id,
     name: row.name,
@@ -165,6 +170,13 @@ export async function listSmsAutomations(): Promise<SmsAutomation[]> {
   const { data, error } = await admin.from("sms_automations").select("*").order("created_at", { ascending: false });
   if (error) throw new Error(error.message);
   return ((data ?? []) as AutomationRow[]).map(rowToAutomation);
+}
+
+export async function getSmsAutomationById(id: string): Promise<SmsAutomation | null> {
+  const admin = requireAdmin();
+  const { data, error } = await admin.from("sms_automations").select("*").eq("id", id).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? rowToAutomation(data as AutomationRow) : null;
 }
 
 export type SmsAutomationInput = {
