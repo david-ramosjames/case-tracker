@@ -180,6 +180,20 @@ export function mergeDailyCronRunToAllResult(run: DailyCronRunState | null) {
         skipped: 0,
         conversationLinks: 0,
       } as const),
+    quoLanguageTag:
+      (quoSync?.quoLanguageTag as Record<string, unknown>) ??
+      ({
+        configured: false,
+        totalContacts: 0,
+        matched: 0,
+        renamed: 0,
+        skipped: 0,
+        alreadyTagged: 0,
+        noLanguage: 0,
+        notFound: [],
+        errors: [],
+        details: [],
+      } as const),
     sheetSync: (slackChannels?.sheetSync as Record<string, unknown>) ?? { synced: 0, configured: false },
     settlementSync:
       (settlement?.settlementSync as Record<string, unknown>) ??

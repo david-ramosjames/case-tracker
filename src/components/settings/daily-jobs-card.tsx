@@ -27,6 +27,7 @@ type JobRow = {
 
 const FULL_JOB_STEPS: DailyJobStep[] = [
   "quoPhoneSync",
+  "quoLanguageTag",
   "sheetSync",
   "settlementSync",
   "treatmentPromotion",
@@ -41,6 +42,11 @@ const JOB_ROWS: JobRow[] = [
     step: "quoPhoneSync",
     title: "Quo phone sync",
     description: "Match Quo contacts to cases and sync client phone numbers.",
+  },
+  {
+    step: "quoLanguageTag",
+    title: "Quo language tags",
+    description: "Add or correct EN/ES on Quo contact names from each case’s primary language (updates when language changes).",
   },
   {
     step: "sheetSync",
@@ -92,6 +98,8 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
     const parts: string[] = [];
     const quoPhoneSync = body.quoPhoneSync as { updated?: number; configured?: boolean } | undefined;
     if (quoPhoneSync?.configured) parts.push(`${quoPhoneSync.updated ?? 0} Quo phone(s) updated`);
+    const quoLanguageTag = body.quoLanguageTag as { renamed?: number; configured?: boolean } | undefined;
+    if (quoLanguageTag?.configured) parts.push(`${quoLanguageTag.renamed ?? 0} Quo language tag(s) updated`);
     const sheetSync = body.sheetSync as { synced?: number; configured?: boolean } | undefined;
     if (sheetSync?.configured) parts.push(`${sheetSync.synced ?? 0} channel row(s) synced`);
     const settlementSync = body.settlementSync as { disbursementsSynced?: number; stagesAutoSettled?: number } | undefined;
@@ -154,6 +162,18 @@ function formatJobResult(step: DailyJobStep, body: Record<string, unknown>): str
         ? ` ${result.skippedUnchanged} unchanged case(s) skipped.`
         : "";
     return `Synced ${result.disbursementsSynced ?? 0} disbursement row(s) across ${result.casesProcessed ?? 0} case(s). Updated ${result.settlementsUpdated ?? 0} settlement field(s). Auto-settled ${result.stagesAutoSettled ?? 0} case(s).${skippedNote}${unchangedNote}`;
+  }
+
+  if (step === "quoPhoneSync" && result) {
+    if (!result.configured) return "Quo is not configured.";
+    return `Matched ${result.matched ?? 0} contact(s), updated ${result.updated ?? 0} phone(s) (${result.skipped ?? 0} skipped).`;
+  }
+
+  if (step === "quoLanguageTag" && result) {
+    if (!result.configured) return "Quo is not configured.";
+    const filter = body.filter as { caseNumber?: string } | null | undefined;
+    const scope = filter?.caseNumber ? ` for case ${filter.caseNumber}` : "";
+    return `Renamed ${result.renamed ?? 0} Quo contact(s)${scope} (${result.alreadyTagged ?? 0} already tagged, ${result.matched ?? 0} matched, ${result.skipped ?? 0} skipped).`;
   }
 
   if (step === "treatmentPromotion" && result) {
@@ -257,6 +277,13 @@ function formatJobPreviewSummary(step: DailyJobStep, body: Record<string, unknow
     const filter = body.filter as { caseNumber?: string } | null | undefined;
     const scope = filter?.caseNumber ? ` for case ${filter.caseNumber}` : "";
     return `Preview: would queue ${result.queued ?? 0} SMS approval(s)${scope} (${result.matched ?? 0} matched). Nothing posted.`;
+  }
+
+  if (step === "quoLanguageTag" && result) {
+    if (!result.configured) return "Preview: Quo is not configured.";
+    const filter = body.filter as { caseNumber?: string } | null | undefined;
+    const scope = filter?.caseNumber ? ` for case ${filter.caseNumber}` : "";
+    return `Preview: would rename ${result.renamed ?? 0} Quo contact(s)${scope} (${result.alreadyTagged ?? 0} already tagged). No changes saved.`;
   }
 
   return "Preview complete. No changes saved.";
@@ -363,6 +390,24 @@ function DailyJobPreviewPanel({
           `${item.currentStage} → ${item.newStage}`,
         ])}
       />
+    );
+  }
+
+  if (step === "quoLanguageTag") {
+    const details = (result.details as string[] | undefined) ?? [];
+    const wouldChange = details.filter(
+      (line) => line.includes("→") || line.includes("would restore"),
+    );
+    if (wouldChange.length === 0) {
+      return <p className="mt-2 text-sm text-muted-foreground">No Quo contacts need an EN/ES language tag.</p>;
+    }
+    return (
+      <ul className="mt-2 max-h-48 list-disc space-y-1 overflow-y-auto rounded-md border bg-slate-50 px-4 py-2 text-xs text-navy-950">
+        {wouldChange.slice(0, 40).map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+        {wouldChange.length > 40 ? <li>…and {wouldChange.length - 40} more</li> : null}
+      </ul>
     );
   }
 

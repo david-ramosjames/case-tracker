@@ -8,6 +8,7 @@ import {
   updateQuoContactName,
   type QuoContactRaw,
 } from "@/lib/quo/client";
+import { isQuoEnabled } from "@/lib/quo/config";
 import { parseCaseNumbersFromQuoContactName } from "@/lib/quo/contact-sync";
 
 const TRAILING_CASE_NUMBERS_RE = /(\d{3,6}(?:\s*&\s*\d{3,6})*)\s*$/;
@@ -43,8 +44,9 @@ async function buildCaseLanguageMap(): Promise<Map<string, string>> {
 }
 
 /**
- * Insert a language tag (EN/ES) before the trailing case number(s).
- * Returns null when the name already has the tag or has no trailing case number.
+ * Insert or replace a language tag (EN/ES) before the trailing case number(s).
+ * Returns null when the name already has the correct tag or has no trailing case number.
+ * Wrong tags (EN ↔ ES) are replaced to match the case preferred language.
  */
 function buildRenamedFields(
   contact: QuoContactRaw,
@@ -238,7 +240,11 @@ async function resolveContactsForRename(filterCaseNumbers?: string[]): Promise<{
  * Rename Quo contacts to include a language tag (EN/ES) before the case number.
  * When `filterCaseNumbers` is provided, only contacts matching those case numbers are updated.
  */
-export async function renameQuoContactsWithLanguage(filterCaseNumbers?: string[]): Promise<RenameResult> {
+export async function renameQuoContactsWithLanguage(
+  filterCaseNumbers?: string[],
+  options?: { dryRun?: boolean },
+): Promise<RenameResult> {
+  const dryRun = Boolean(options?.dryRun);
   const filterList = filterCaseNumbers?.length
     ? [...new Set(filterCaseNumbers.map((n) => cleanCaseNumber(n)).filter(Boolean))]
     : null;
@@ -314,9 +320,20 @@ export async function renameQuoContactsWithLanguage(filterCaseNumbers?: string[]
       continue;
     }
 
+    const nextFirst = renamed?.firstName ?? contact.firstName;
+    const nextLast = renamed?.lastName ?? contact.lastName;
+
+    if (dryRun) {
+      if (renamed) {
+        result.renamed += 1;
+        result.details.push(`${contact.displayName} → ${nextFirst} ${nextLast}`.trim());
+      } else {
+        result.details.push(`${contact.displayName}: would restore missing phone from case data`);
+      }
+      continue;
+    }
+
     try {
-      const nextFirst = renamed?.firstName ?? contact.firstName;
-      const nextLast = renamed?.lastName ?? contact.lastName;
       await updateQuoContactName(contact.id, nextFirst, nextLast, contact.defaultFields, {
         fallbackPhones: fallbackPhone ? [fallbackPhone] : [],
       });
@@ -340,4 +357,30 @@ export async function renameQuoContactsWithLanguage(filterCaseNumbers?: string[]
   }
 
   return result;
+}
+
+export async function renameQuoContactsWithLanguageIfConfigured(options?: {
+  caseNumber?: string;
+  dryRun?: boolean;
+}) {
+  if (!isQuoEnabled()) {
+    return {
+      configured: false as const,
+      totalContacts: 0,
+      matched: 0,
+      renamed: 0,
+      skipped: 0,
+      alreadyTagged: 0,
+      noLanguage: 0,
+      notFound: [] as string[],
+      errors: [] as string[],
+      details: [] as string[],
+      dryRun: Boolean(options?.dryRun),
+    };
+  }
+
+  const caseNumber = options?.caseNumber?.trim();
+  const filter = caseNumber ? [caseNumber] : undefined;
+  const result = await renameQuoContactsWithLanguage(filter, { dryRun: options?.dryRun });
+  return { configured: true as const, dryRun: Boolean(options?.dryRun), ...result };
 }

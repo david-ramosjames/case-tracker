@@ -2,6 +2,7 @@ import { cleanCaseNumber } from "@/lib/csv/parse";
 import { type DailyCronGroup } from "@/lib/cron/daily-cron-run";
 import { syncSettlementsFromGoogleSheetIfConfigured } from "@/lib/google/settlements-sync";
 import { syncSlackChannelsFromGoogleSheetIfConfigured } from "@/lib/google/sheets-sync";
+import { renameQuoContactsWithLanguageIfConfigured } from "@/lib/quo/rename-contacts";
 import { sendSlackFieldReminders } from "@/lib/slack/field-reminder-notify";
 import { sendSlackMissingFieldNotices } from "@/lib/slack/missing-field-notify";
 import { processDailyPulseRecap } from "@/lib/slack/stage-confirmation";
@@ -14,6 +15,7 @@ export type DailyJobStep =
   | "sheetSync"
   | "settlementSync"
   | "quoPhoneSync"
+  | "quoLanguageTag"
   | "treatmentPromotion"
   | "dailyPulse"
   | "missingFields"
@@ -139,6 +141,23 @@ function emptyQuoPhoneSyncResult(error?: string) {
   } as const;
 }
 
+function emptyQuoLanguageTagResult(error?: string) {
+  return {
+    configured: false,
+    totalContacts: 0,
+    matched: 0,
+    renamed: 0,
+    skipped: 0,
+    alreadyTagged: 0,
+    noLanguage: 0,
+    notFound: [] as string[],
+    errors: [] as string[],
+    details: [] as string[],
+    dryRun: false,
+    error,
+  } as const;
+}
+
 export async function runDailyCronGroup(group: DailyCronGroup, options: DailyJobOptions = {}) {
   const force = options.force ?? true;
   const dryRun = Boolean(options.dryRun);
@@ -148,11 +167,18 @@ export async function runDailyCronGroup(group: DailyCronGroup, options: DailyJob
     const quoPhoneSyncResult = await runDailyJobStep("quoPhoneSync", syncQuoPhonesToTrackerIfConfigured);
     if (quoPhoneSyncResult.error) errors.push(quoPhoneSyncResult.error);
 
+    const quoLanguageTagResult = await runDailyJobStep("quoLanguageTag", () =>
+      renameQuoContactsWithLanguageIfConfigured({ dryRun, caseNumber: options.caseNumber }),
+    );
+    if (quoLanguageTagResult.error) errors.push(quoLanguageTagResult.error);
+
     return {
       ok: errors.length === 0,
       group,
       quoPhoneSync:
         quoPhoneSyncResult.data ?? emptyQuoPhoneSyncResult(quoPhoneSyncResult.error?.error),
+      quoLanguageTag:
+        quoLanguageTagResult.data ?? emptyQuoLanguageTagResult(quoLanguageTagResult.error?.error),
       errors: errors.length > 0 ? errors : undefined,
     };
   }
@@ -270,6 +296,11 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
     const quoPhoneSyncResult = await runDailyJobStep("quoPhoneSync", syncQuoPhonesToTrackerIfConfigured);
     if (quoPhoneSyncResult.error) errors.push(quoPhoneSyncResult.error);
 
+    const quoLanguageTagResult = await runDailyJobStep("quoLanguageTag", () =>
+      renameQuoContactsWithLanguageIfConfigured({ dryRun, caseNumber: options.caseNumber }),
+    );
+    if (quoLanguageTagResult.error) errors.push(quoLanguageTagResult.error);
+
     const sheetSyncResult = await runSheetSyncStep(options);
     if (sheetSyncResult.error) errors.push(sheetSyncResult.error);
 
@@ -305,6 +336,8 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
       step,
       quoPhoneSync:
         quoPhoneSyncResult.data ?? emptyQuoPhoneSyncResult(quoPhoneSyncResult.error?.error),
+      quoLanguageTag:
+        quoLanguageTagResult.data ?? emptyQuoLanguageTagResult(quoLanguageTagResult.error?.error),
       sheetSync: sheetSyncResult.data ?? { synced: 0, configured: false, error: sheetSyncResult.error?.error },
       settlementSync:
         settlementSyncResult.data ??
@@ -355,6 +388,22 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
       return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
     }
     return { ok: true, step, dryRun, result: result.data };
+  }
+
+  if (step === "quoLanguageTag") {
+    const result = await runDailyJobStep("quoLanguageTag", () =>
+      renameQuoContactsWithLanguageIfConfigured({ dryRun, caseNumber: options.caseNumber }),
+    );
+    if (result.error) {
+      return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
+    }
+    return {
+      ok: true,
+      step,
+      dryRun,
+      result: result.data,
+      filter: options.caseNumber ? { caseNumber: options.caseNumber, force } : null,
+    };
   }
 
   if (step === "treatmentPromotion") {

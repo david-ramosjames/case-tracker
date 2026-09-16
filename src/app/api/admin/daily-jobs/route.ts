@@ -10,6 +10,7 @@ const VALID_STEPS: DailyJobStep[] = [
   "sheetSync",
   "settlementSync",
   "quoPhoneSync",
+  "quoLanguageTag",
   "treatmentPromotion",
   "dailyPulse",
   "missingFields",

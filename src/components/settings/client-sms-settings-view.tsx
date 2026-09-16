@@ -620,7 +620,9 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
           <CardDescription>
             Insert the client&apos;s preferred language (EN or ES) into each Quo contact name before the case number.
             For example, &quot;David Eagan 9999&quot; becomes &quot;David Eagan EN 9999&quot;.
-            Contacts that already have a language tag or no trailing case number are skipped.
+            Matching tags are left alone; a wrong tag (EN ↔ ES) is replaced. Contacts with no trailing case number are
+            skipped. Changing primary language on a case also updates Quo immediately, and the daily job catches anything
+            still missing or out of date.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

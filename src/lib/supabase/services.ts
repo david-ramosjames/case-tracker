@@ -1377,6 +1377,21 @@ export async function updateSharedCaseFields(
       console.error("Slack topic sync after shared field update failed", error);
     }
   }
+
+  if (input.preferredLanguage !== undefined) {
+    try {
+      const caseNumber =
+        record?.shared.caseNumber?.trim() ||
+        (await getCaseById(caseId))?.shared.caseNumber?.trim() ||
+        "";
+      if (caseNumber && (await import("@/lib/quo/config")).isQuoEnabled()) {
+        const { renameQuoContactsWithLanguage } = await import("@/lib/quo/rename-contacts");
+        await renameQuoContactsWithLanguage([caseNumber]);
+      }
+    } catch (error) {
+      console.error("Quo language tag rename after preferred language update failed", error);
+    }
+  }
 }
 
 /** Load tracker date-signed overrides for sheet sync comparisons. */
@@ -3204,13 +3219,16 @@ export async function updateSlackFieldAlertSettings(input: {
     disabled_attorney_ids: [...new Set(input.disabledAttorneyIds.filter(Boolean))],
   };
 
-  const { error } = await client.from("case_tracker_settings").upsert({
-    key: "slack_field_alerts",
-    value,
-    description: "Slack missing-field and field-reminder alert rules.",
-  });
+  const { error } = await client.from("case_tracker_settings").upsert(
+    {
+      key: "slack_field_alerts",
+      value,
+      description: "Slack missing-field and field-reminder alert rules.",
+    },
+    { onConflict: "key" },
+  );
 
-  if (error) throw error;
+  if (error) throw new Error(error.message);
 
   return {
     slackFieldAlertGraceDays: value.grace_days,

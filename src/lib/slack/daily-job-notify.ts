@@ -26,6 +26,19 @@ function formatAllJobLines(body: Record<string, unknown>): string[] {
     lines.push("Quo phone sync: not configured");
   }
 
+  const quoLanguageTag = body.quoLanguageTag as
+    | { configured?: boolean; renamed?: number; alreadyTagged?: number; matched?: number; error?: string }
+    | undefined;
+  if (quoLanguageTag?.error) {
+    lines.push(`Quo language tags failed: ${quoLanguageTag.error}`);
+  } else if (quoLanguageTag?.configured) {
+    lines.push(
+      `Quo language tags: ${quoLanguageTag.renamed ?? 0} renamed (${quoLanguageTag.alreadyTagged ?? 0} already tagged, ${quoLanguageTag.matched ?? 0} matched)`,
+    );
+  } else {
+    lines.push("Quo language tags: not configured");
+  }
+
   const sheetSync = body.sheetSync as
     | { synced?: number; configured?: boolean; dateSignedUpdated?: number; error?: string }
     | undefined;
@@ -160,6 +173,8 @@ function formatSingleStepLine(step: DailyJobStep, body: Record<string, unknown>)
       return `Settlement sync: ${result.disbursementsSynced ?? 0} disbursement row(s)`;
     case "quoPhoneSync":
       return `Quo phone sync: ${result.updated ?? 0} case(s) updated`;
+    case "quoLanguageTag":
+      return `Quo language tags: ${result.renamed ?? 0} renamed (${result.alreadyTagged ?? 0} already tagged)`;
     case "treatmentPromotion":
       return `Treatment promotion: ${result.promoted ?? 0} of ${result.eligible ?? 0} eligible`;
     case "dailyPulse":
