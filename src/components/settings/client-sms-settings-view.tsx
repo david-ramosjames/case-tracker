@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { CASE_STAGE_OPTIONS, CASE_TYPE_OPTIONS } from "@/lib/case-options";
 import { SMS_DEFAULT_EXCLUDED_TO_STAGES } from "@/lib/sms/automation-match";
+import { MANUAL_SMS_BATCH_SIZE } from "@/lib/sms/manual-send";
 import { type SmsAutomation, type SmsAutomationTriggerType } from "@/lib/supabase/sms-automations";
 import { STAGE_SLACK_LABELS } from "@/lib/slack/enum-replies";
 import { type AppUser, type CaseStage } from "@/lib/types";
@@ -13,6 +14,39 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+
+type ManualSmsProgressItem = {
+  caseId: string;
+  caseNumber: string;
+  clientName: string | null;
+  phone: string;
+  language: "en" | "es";
+  status?: string;
+  sentAt?: string | null;
+  errorMessage?: string | null;
+};
+
+type ManualSmsProgress = {
+  cases: number;
+  english: number;
+  spanish: number;
+  sentCount: number;
+  skippedCount: number;
+  failedCount: number;
+  remainingCount: number;
+  missingPhoneCount: number;
+  done: boolean;
+  sent: ManualSmsProgressItem[];
+  failed: ManualSmsProgressItem[];
+  remaining: ManualSmsProgressItem[];
+  missingPhone: ManualSmsProgressItem[];
+};
+
+function formatProgressRow(item: ManualSmsProgressItem) {
+  const name = item.clientName?.trim() || "—";
+  const phone = item.phone?.trim() || "no phone";
+  return `#${item.caseNumber} · ${name} · ${phone} · ${item.language.toUpperCase()}`;
+}
 
 type ToMode = "specific" | "any";
 
@@ -117,6 +151,8 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   const [renaming, setRenaming] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [runAttorneyByAutomation, setRunAttorneyByAutomation] = useState<Record<string, string>>({});
+  const [progressByAutomation, setProgressByAutomation] = useState<Record<string, ManualSmsProgress | null>>({});
+  const [progressLoadingId, setProgressLoadingId] = useState<string | null>(null);
   const [syncCaseNumbers, setSyncCaseNumbers] = useState("");
   const [renameCaseNumbers, setRenameCaseNumbers] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -138,9 +174,63 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     }
   }
 
+  async function loadManualProgress(automationId: string, attorneyContactId: string) {
+    if (!attorneyContactId.trim()) {
+      setProgressByAutomation((current) => ({ ...current, [automationId]: null }));
+      return;
+    }
+
+    setProgressLoadingId(automationId);
+    try {
+      const response = await fetch(
+        `/api/admin/sms-automations/${automationId}/run?attorneyContactId=${encodeURIComponent(attorneyContactId)}`,
+      );
+      const body = (await response.json()) as ManualSmsProgress & { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Unable to load send progress.");
+      setProgressByAutomation((current) => ({
+        ...current,
+        [automationId]: {
+          cases: body.cases,
+          english: body.english,
+          spanish: body.spanish,
+          sentCount: body.sentCount,
+          skippedCount: body.skippedCount,
+          failedCount: body.failedCount,
+          remainingCount: body.remainingCount,
+          missingPhoneCount: body.missingPhoneCount,
+          done: body.done,
+          sent: body.sent ?? [],
+          failed: body.failed ?? [],
+          remaining: body.remaining ?? [],
+          missingPhone: body.missingPhone ?? [],
+        },
+      }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load send progress.");
+      setProgressByAutomation((current) => ({ ...current, [automationId]: null }));
+    } finally {
+      setProgressLoadingId(null);
+    }
+  }
+
   useEffect(() => {
     void loadData();
   }, []);
+
+  useEffect(() => {
+    for (const automation of automations) {
+      if (automation.triggerType !== "manual") continue;
+      const attorneyContactId = runAttorneyByAutomation[automation.id]?.trim() ?? "";
+      if (!attorneyContactId) {
+        setProgressByAutomation((current) =>
+          current[automation.id] == null ? current : { ...current, [automation.id]: null },
+        );
+        continue;
+      }
+      void loadManualProgress(automation.id, attorneyContactId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when attorney selection changes
+  }, [automations, runAttorneyByAutomation]);
 
   function resetForm() {
     setForm(EMPTY_FORM);
@@ -399,7 +489,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   async function runManualAutomation(automationId: string, dryRun: boolean) {
     const attorneyContactId = runAttorneyByAutomation[automationId]?.trim() ?? "";
     if (!attorneyContactId) {
-      setError("Select the departing attorney before queuing SMS.");
+      setError("Select the departing attorney before sending SMS.");
       return;
     }
 
@@ -407,7 +497,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     if (
       !dryRun &&
       !window.confirm(
-        `Queue Slack-approval SMS for all active clients assigned to ${attorneyName}? Messages use each client's primary language (EN/ES) and YouTube URL.`,
+        `Send the next batch of up to ${MANUAL_SMS_BATCH_SIZE} SMS now (no Slack approval) to active clients assigned to ${attorneyName}?\n\nMessages use each client's primary language and YouTube URL. Click Send again for each following batch.`,
       )
     ) {
       return;
@@ -416,40 +506,72 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     setRunningId(automationId);
     setError(null);
     setMessage(null);
+
     try {
       const response = await fetch(`/api/admin/sms-automations/${automationId}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ attorneyContactId, dryRun }),
+        body: JSON.stringify({ attorneyContactId, dryRun, batchSize: MANUAL_SMS_BATCH_SIZE }),
       });
       const body = (await response.json()) as {
         error?: string;
-        queued?: number;
-        matched?: number;
-        skipped?: number;
+        sent?: number;
+        failed?: number;
+        remaining?: number;
+        done?: boolean;
         cases?: number;
         english?: number;
         spanish?: number;
+        totalPending?: number;
+        skipped?: number;
         automationName?: string;
+        failures?: string[];
         dryRun?: boolean;
       };
-      if (!response.ok) throw new Error(body.error ?? "Unable to run manual SMS.");
+      if (!response.ok) throw new Error(body.error ?? "Unable to send manual SMS.");
 
-      const prefix = body.dryRun ? "Preview" : "Queued";
+      if (dryRun || body.dryRun) {
+        setMessage(
+          [
+            `Preview: ${body.automationName ?? "manual SMS"} for ${attorneyName}.`,
+            `${body.cases ?? 0} active case(s) (${body.english ?? 0} EN · ${body.spanish ?? 0} ES).`,
+            `${body.totalPending ?? 0} recipient(s) ready — sends in batches of ${MANUAL_SMS_BATCH_SIZE} when you click Send SMS.`,
+            body.skipped ? `${body.skipped} skipped (already sent or missing phone).` : null,
+          ]
+            .filter(Boolean)
+            .join("\n"),
+        );
+        return;
+      }
+
+      if (body.done || (body.remaining ?? 0) === 0) {
+        setMessage(
+          [
+            `Finished ${body.automationName ?? "manual SMS"} for ${attorneyName}.`,
+            `${body.cases ?? 0} active case(s) matched (${body.english ?? 0} EN · ${body.spanish ?? 0} ES).`,
+            `This batch: ${body.sent ?? 0} sent${body.failed ? ` · ${body.failed} failed` : ""}. No recipients remaining.`,
+            ...(body.failures?.length ? [`Failures: ${body.failures.join(" · ")}`] : []),
+          ].join("\n"),
+        );
+        return;
+      }
+
       setMessage(
         [
-          `${prefix}: ${body.automationName ?? "manual SMS"} for ${attorneyName}.`,
-          `${body.cases ?? 0} active case(s) matched (${body.english ?? 0} EN · ${body.spanish ?? 0} ES).`,
-          `${body.queued ?? 0} recipient approval(s) ${body.dryRun ? "would be posted" : "posted"} to Slack.`,
-          body.skipped ? `${body.skipped} skipped (already queued/sent, missing phone, or no Slack channel).` : null,
-        ]
-          .filter(Boolean)
-          .join("\n"),
+          `Batch sent for ${attorneyName}: ${body.sent ?? 0} SMS via Quo${body.failed ? ` · ${body.failed} failed` : ""}.`,
+          `${body.remaining ?? 0} recipient(s) still waiting.`,
+          `Click Send SMS again when you are ready for the next batch of ${MANUAL_SMS_BATCH_SIZE}.`,
+          ...(body.failures?.length ? [`Failures: ${body.failures.join(" · ")}`] : []),
+        ].join("\n"),
       );
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unable to run manual SMS.");
+      setError(err instanceof Error ? err.message : "Unable to send manual SMS.");
     } finally {
       setRunningId(null);
+      const selectedAttorney = runAttorneyByAutomation[automationId]?.trim() ?? "";
+      if (selectedAttorney) {
+        void loadManualProgress(automationId, selectedAttorney);
+      }
     }
   }
 
@@ -568,9 +690,10 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
 
           {form.triggerType === "manual" ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-950">
-              Save English and Spanish messages (and YouTube URLs). Then use <strong>Queue for Slack approval</strong> on
-              the automation card and choose the departing attorney. Each active client gets the message for their
-              primary language.
+              Save English and Spanish messages (and YouTube URLs). Then use <strong>Send SMS</strong> on the automation
+              card and choose the departing attorney. Each click sends the next batch of {MANUAL_SMS_BATCH_SIZE}{" "}
+              messages directly via Quo (no Slack approval). Click again when you are ready for the next batch. Each
+              active client gets the message for their primary language.
             </div>
           ) : form.triggerType === "time_in_stage" ? (
             <div className="space-y-2">
@@ -814,7 +937,8 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
         <CardHeader>
           <CardTitle>Automations</CardTitle>
           <CardDescription>
-            Stage, time-in-stage, and manual triggers that queue Slack approval before sending SMS via Quo.
+            Stage and time-in-stage triggers queue Slack approval before Quo. Manual attorney-departure SMS send
+            directly in batches of {MANUAL_SMS_BATCH_SIZE} — click Send for each batch.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -843,48 +967,161 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                 </div>
               </div>
               {automation.triggerType === "manual" ? (
-                <div className="mt-4 flex flex-col gap-3 rounded-md border bg-slate-50 p-3 sm:flex-row sm:items-end">
-                  <label className="block min-w-0 flex-1">
-                    <span className="mb-1 block text-xs font-medium text-navy-950">Departing attorney</span>
-                    <Select
-                      value={runAttorneyByAutomation[automation.id] ?? ""}
-                      onChange={(event) =>
-                        setRunAttorneyByAutomation((current) => ({
-                          ...current,
-                          [automation.id]: event.target.value,
-                        }))
-                      }
-                    >
-                      <option value="">Select attorney…</option>
-                      {allAttorneys.map((attorney) => (
-                        <option key={attorney.id} value={attorney.id}>
-                          {attorney.name}
-                          {!attorney.active ? " (inactive)" : ""}
-                        </option>
-                      ))}
-                    </Select>
-                  </label>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={runningId === automation.id || !automation.enabled}
-                      onClick={() => void runManualAutomation(automation.id, true)}
-                    >
-                      {runningId === automation.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Preview
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={runningId === automation.id || !automation.enabled}
-                      onClick={() => void runManualAutomation(automation.id, false)}
-                    >
-                      {runningId === automation.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Queue for Slack approval
-                    </Button>
+                <div className="mt-4 space-y-3">
+                  <div className="flex flex-col gap-3 rounded-md border bg-slate-50 p-3 sm:flex-row sm:items-end">
+                    <label className="block min-w-0 flex-1">
+                      <span className="mb-1 block text-xs font-medium text-navy-950">Departing attorney</span>
+                      <Select
+                        value={runAttorneyByAutomation[automation.id] ?? ""}
+                        onChange={(event) => {
+                          const attorneyContactId = event.target.value;
+                          setRunAttorneyByAutomation((current) => ({
+                            ...current,
+                            [automation.id]: attorneyContactId,
+                          }));
+                        }}
+                      >
+                        <option value="">Select attorney…</option>
+                        {allAttorneys.map((attorney) => (
+                          <option key={attorney.id} value={attorney.id}>
+                            {attorney.name}
+                            {!attorney.active ? " (inactive)" : ""}
+                          </option>
+                        ))}
+                      </Select>
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={runningId === automation.id || !automation.enabled}
+                        onClick={() => void runManualAutomation(automation.id, true)}
+                      >
+                        {runningId === automation.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Preview
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={runningId === automation.id || !automation.enabled}
+                        onClick={() => void runManualAutomation(automation.id, false)}
+                      >
+                        {runningId === automation.id ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Send SMS
+                      </Button>
+                    </div>
                   </div>
+
+                  {(runAttorneyByAutomation[automation.id] ?? "").trim() ? (
+                    <div className="rounded-md border border-slate-200 bg-white p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-navy-950">
+                          Send progress (saved — safe after refresh)
+                        </p>
+                        {progressLoadingId === automation.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : null}
+                      </div>
+                      {progressByAutomation[automation.id] ? (
+                        <>
+                          <p className="mt-2 text-sm text-muted-foreground">
+                            {progressByAutomation[automation.id]!.cases} active case
+                            {progressByAutomation[automation.id]!.cases === 1 ? "" : "s"} (
+                            {progressByAutomation[automation.id]!.english} EN ·{" "}
+                            {progressByAutomation[automation.id]!.spanish} ES)
+                            {" · "}
+                            <span className="font-medium text-emerald-700">
+                              {progressByAutomation[automation.id]!.sentCount} sent
+                            </span>
+                            {" · "}
+                            <span className="font-medium text-amber-700">
+                              {progressByAutomation[automation.id]!.remainingCount} remaining
+                            </span>
+                            {progressByAutomation[automation.id]!.failedCount > 0 ? (
+                              <>
+                                {" · "}
+                                <span className="font-medium text-pink-600">
+                                  {progressByAutomation[automation.id]!.failedCount} failed (will retry)
+                                </span>
+                              </>
+                            ) : null}
+                            {progressByAutomation[automation.id]!.missingPhoneCount > 0 ? (
+                              <>
+                                {" · "}
+                                {progressByAutomation[automation.id]!.missingPhoneCount} missing phone
+                              </>
+                            ) : null}
+                            {progressByAutomation[automation.id]!.done ? (
+                              <span className="font-medium text-emerald-700"> · All recipients handled</span>
+                            ) : null}
+                          </p>
+
+                          <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                            <div>
+                              <p className="mb-1 text-xs font-medium text-navy-950">
+                                Remaining ({progressByAutomation[automation.id]!.remainingCount})
+                              </p>
+                              <ul className="max-h-40 overflow-y-auto rounded border bg-slate-50 p-2 text-xs text-navy-950">
+                                {progressByAutomation[automation.id]!.remaining.length === 0 ? (
+                                  <li className="text-muted-foreground">None — nothing left to send.</li>
+                                ) : (
+                                  progressByAutomation[automation.id]!.remaining.map((item) => (
+                                    <li key={`${item.caseId}-${item.phone}`} className="py-0.5">
+                                      {formatProgressRow(item)}
+                                      {item.status === "failed" && item.errorMessage
+                                        ? ` · failed: ${item.errorMessage}`
+                                        : ""}
+                                    </li>
+                                  ))
+                                )}
+                              </ul>
+                            </div>
+                            <div>
+                              <p className="mb-1 text-xs font-medium text-navy-950">
+                                Sent ({progressByAutomation[automation.id]!.sentCount})
+                              </p>
+                              <ul className="max-h-40 overflow-y-auto rounded border bg-slate-50 p-2 text-xs text-navy-950">
+                                {progressByAutomation[automation.id]!.sent.length === 0 ? (
+                                  <li className="text-muted-foreground">None sent yet for this attorney.</li>
+                                ) : (
+                                  progressByAutomation[automation.id]!.sent.map((item) => (
+                                    <li key={`${item.caseId}-${item.phone}`} className="py-0.5">
+                                      {formatProgressRow(item)}
+                                      {item.sentAt
+                                        ? ` · ${new Date(item.sentAt).toLocaleString()}`
+                                        : ""}
+                                    </li>
+                                  ))
+                                )}
+                              </ul>
+                            </div>
+                          </div>
+
+                          {progressByAutomation[automation.id]!.missingPhone.length > 0 ? (
+                            <div className="mt-3">
+                              <p className="mb-1 text-xs font-medium text-navy-950">
+                                Missing phone ({progressByAutomation[automation.id]!.missingPhoneCount})
+                              </p>
+                              <ul className="max-h-28 overflow-y-auto rounded border bg-slate-50 p-2 text-xs text-muted-foreground">
+                                {progressByAutomation[automation.id]!.missingPhone.map((item) => (
+                                  <li key={item.caseId} className="py-0.5">
+                                    {formatProgressRow(item)}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </>
+                      ) : progressLoadingId === automation.id ? (
+                        <p className="mt-2 text-sm text-muted-foreground">Loading progress…</p>
+                      ) : (
+                        <p className="mt-2 text-sm text-muted-foreground">
+                          Select an attorney to see who already received this text vs who is left.
+                        </p>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>

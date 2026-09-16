@@ -12,6 +12,7 @@ import { rejectSmsPendingApproval } from "@/lib/sms/approval";
 import { getSmsRecipients } from "@/lib/sms/recipients";
 import { createSupabaseAdminClient, fetchAllSupabaseRows } from "@/lib/supabase/admin";
 import { syncTrackerQuoContacts } from "@/lib/supabase/quo-contacts";
+import { MANUAL_SMS_BATCH_SIZE } from "@/lib/sms/manual-send";
 import { automationMatchesStageChange, automationMatchesTimeInStage, automationMatchesManualAttorney } from "@/lib/sms/automation-match";
 import {
   claimSmsPendingApproval,
@@ -19,6 +20,7 @@ import {
   getSmsAutomationById,
   hasSmsAutomationDeliveryForCase,
   listSmsAutomations,
+  listSmsPendingApprovalsForAutomation,
   listStaleSmsPendingApprovals,
   updateSmsPendingApproval,
   type SmsAutomation,
@@ -225,71 +227,344 @@ export async function processManualAttorneyDepartureSms(options: {
   automationId: string;
   attorneyContactId: string;
   dryRun?: boolean;
+  /** How many SMS to send in this call (default 5). */
+  batchSize?: number;
 }) {
-  if (!isSlackEnabled()) {
+  if (!isQuoEnabled() && !options.dryRun) {
     return {
-      queued: 0,
+      sent: 0,
+      failed: 0,
       matched: 0,
       skipped: 0,
       cases: 0,
-      reason: "slack_disabled" as const,
+      remaining: 0,
+      done: true,
+      reason: "quo_disabled" as const,
     };
   }
 
   const automation = await getSmsAutomationById(options.automationId);
   if (!automation) {
-    return { queued: 0, matched: 0, skipped: 0, cases: 0, reason: "automation_not_found" as const };
+    return {
+      sent: 0,
+      failed: 0,
+      matched: 0,
+      skipped: 0,
+      cases: 0,
+      remaining: 0,
+      done: true,
+      reason: "automation_not_found" as const,
+    };
   }
   if (automation.triggerType !== "manual") {
-    return { queued: 0, matched: 0, skipped: 0, cases: 0, reason: "not_manual_automation" as const };
+    return {
+      sent: 0,
+      failed: 0,
+      matched: 0,
+      skipped: 0,
+      cases: 0,
+      remaining: 0,
+      done: true,
+      reason: "not_manual_automation" as const,
+    };
   }
   if (!automation.enabled) {
-    return { queued: 0, matched: 0, skipped: 0, cases: 0, reason: "automation_disabled" as const };
+    return {
+      sent: 0,
+      failed: 0,
+      matched: 0,
+      skipped: 0,
+      cases: 0,
+      remaining: 0,
+      done: true,
+      reason: "automation_disabled" as const,
+    };
   }
   if (!options.attorneyContactId.trim()) {
-    return { queued: 0, matched: 0, skipped: 0, cases: 0, reason: "attorney_required" as const };
+    return {
+      sent: 0,
+      failed: 0,
+      matched: 0,
+      skipped: 0,
+      cases: 0,
+      remaining: 0,
+      done: true,
+      reason: "attorney_required" as const,
+    };
   }
 
+  const batchSize = Math.max(1, Math.min(options.batchSize ?? MANUAL_SMS_BATCH_SIZE, 20));
+
+  type WorkItem = {
+    record: CaseRecord;
+    recipient: ReturnType<typeof getSmsRecipients>[number];
+    language: "en" | "es";
+    messageBody: string;
+  };
+
   const records = await getCases();
-  let queued = 0;
-  let matched = 0;
-  let skipped = 0;
-  let cases = 0;
+  const workItems: WorkItem[] = [];
+  const matchedCaseIds = new Set<string>();
   let english = 0;
   let spanish = 0;
+  let alreadyHandled = 0;
+  let missingPhone = 0;
 
   for (const record of records) {
     if (!automationMatchesManualAttorney(automation, record, options.attorneyContactId)) continue;
-    matched += 1;
-    cases += 1;
-    if (resolveClientLanguage(record) === "es") spanish += 1;
+    matchedCaseIds.add(record.shared.id);
+    const language = resolveClientLanguage(record);
+    if (language === "es") spanish += 1;
     else english += 1;
 
-    const result = await queueSmsApprovalsForAutomation(
-      record,
-      automation,
-      { fromStage: record.tracker.caseStage, toStage: record.tracker.caseStage },
-      { dryRun: options.dryRun },
-    );
-    if ("skipped" in result && result.skipped) {
-      skipped += 1;
+    const recipients = getSmsRecipients(record);
+    if (recipients.length === 0) {
+      missingPhone += 1;
       continue;
     }
-    if (result.queued === 0) skipped += 1;
-    queued += result.queued;
+
+    for (const recipient of recipients) {
+      const handled = await hasSmsAutomationDeliveryForCase(record.shared.id, automation.id, recipient.phone);
+      if (handled) {
+        alreadyHandled += 1;
+        continue;
+      }
+      workItems.push({
+        record,
+        recipient,
+        language,
+        messageBody: buildAutomationMessage(
+          automation,
+          record,
+          record.tracker.caseStage,
+          record.tracker.caseStage,
+        ),
+      });
+    }
+  }
+
+  const batch = workItems.slice(0, batchSize);
+  const remainingAfter = Math.max(0, workItems.length - batch.length);
+
+  if (options.dryRun) {
+    return {
+      sent: batch.length,
+      failed: 0,
+      matched: matchedCaseIds.size,
+      skipped: alreadyHandled + missingPhone,
+      cases: matchedCaseIds.size,
+      english,
+      spanish,
+      alreadyHandled,
+      missingPhone,
+      remaining: remainingAfter,
+      done: remainingAfter === 0,
+      totalPending: workItems.length,
+      batchSize,
+      automationName: automation.name,
+      dryRun: true as const,
+    };
+  }
+
+  let sent = 0;
+  let failed = 0;
+  const failures: string[] = [];
+
+  for (const item of batch) {
+    const approval = await createSmsPendingApproval({
+      caseId: item.record.shared.id,
+      trackerEntryId: item.record.tracker.id,
+      automationId: automation.id,
+      caseNumber: item.record.shared.caseNumber,
+      clientName: item.record.shared.clientName,
+      phone: item.recipient.phone,
+      quoContactId: item.recipient.quoContactId,
+      quoContactName: item.recipient.displayName,
+      language: item.language,
+      messageBody: item.messageBody,
+      fromStage: item.record.tracker.caseStage,
+      toStage: item.record.tracker.caseStage,
+    });
+
+    try {
+      const quoMessageId = await sendQuoTextMessage({
+        to: item.recipient.phone,
+        content: item.messageBody,
+      });
+      await updateSmsPendingApproval(approval.id, {
+        status: "sent",
+        quoMessageId,
+        sentAt: new Date().toISOString(),
+        errorMessage: null,
+      });
+      sent += 1;
+    } catch (sendError) {
+      const message = sendError instanceof Error ? sendError.message : "SMS send failed.";
+      await updateSmsPendingApproval(approval.id, {
+        status: "failed",
+        errorMessage: message,
+      });
+      failed += 1;
+      failures.push(`#${item.record.shared.caseNumber} ${item.recipient.phone}: ${message}`);
+    }
   }
 
   return {
-    queued,
-    matched,
-    skipped,
-    cases,
+    sent,
+    failed,
+    matched: matchedCaseIds.size,
+    skipped: alreadyHandled + missingPhone,
+    cases: matchedCaseIds.size,
     english,
     spanish,
+    alreadyHandled,
+    missingPhone,
+    remaining: remainingAfter,
+    done: remainingAfter === 0,
+    totalPending: workItems.length,
+    batchSize,
     automationName: automation.name,
-    dryRun: Boolean(options.dryRun),
+    dryRun: false as const,
+    failures: failures.slice(0, 10),
   };
 }
+
+export type ManualSmsProgressItem = {
+  caseId: string;
+  caseNumber: string;
+  clientName: string | null;
+  phone: string;
+  language: "en" | "es";
+  status?: SmsPendingApproval["status"];
+  sentAt?: string | null;
+  errorMessage?: string | null;
+};
+
+const HANDLED_SMS_STATUSES = new Set<SmsPendingApproval["status"]>(["pending", "approved", "sent", "rejected"]);
+
+export async function getManualAttorneyDepartureSmsProgress(options: {
+  automationId: string;
+  attorneyContactId: string;
+}) {
+  const automation = await getSmsAutomationById(options.automationId);
+  if (!automation) {
+    return { reason: "automation_not_found" as const };
+  }
+  if (automation.triggerType !== "manual") {
+    return { reason: "not_manual_automation" as const };
+  }
+  if (!options.attorneyContactId.trim()) {
+    return { reason: "attorney_required" as const };
+  }
+
+  const records = await getCases();
+  const matched = records.filter((record) =>
+    automationMatchesManualAttorney(automation, record, options.attorneyContactId, { requireEnabled: false }),
+  );
+  const matchedCaseIds = new Set(matched.map((record) => record.shared.id));
+
+  const approvals = (await listSmsPendingApprovalsForAutomation(automation.id)).filter((row) =>
+    matchedCaseIds.has(row.caseId),
+  );
+
+  // Group all delivery rows per case+phone (query is newest-first).
+  const byKey = new Map<string, SmsPendingApproval[]>();
+  for (const approval of approvals) {
+    const key = `${approval.caseId}::${approval.phone}`;
+    const list = byKey.get(key) ?? [];
+    list.push(approval);
+    byKey.set(key, list);
+  }
+
+  const sent: ManualSmsProgressItem[] = [];
+  const skipped: ManualSmsProgressItem[] = [];
+  const failed: ManualSmsProgressItem[] = [];
+  const remaining: ManualSmsProgressItem[] = [];
+  const missingPhone: ManualSmsProgressItem[] = [];
+  let english = 0;
+  let spanish = 0;
+
+  for (const record of matched) {
+    const language = resolveClientLanguage(record);
+    if (language === "es") spanish += 1;
+    else english += 1;
+
+    const recipients = getSmsRecipients(record);
+    if (recipients.length === 0) {
+      missingPhone.push({
+        caseId: record.shared.id,
+        caseNumber: record.shared.caseNumber,
+        clientName: record.shared.clientName,
+        phone: "",
+        language,
+      });
+      continue;
+    }
+
+    for (const recipient of recipients) {
+      const key = `${record.shared.id}::${recipient.phone}`;
+      const rows = byKey.get(key) ?? [];
+      const sentRow = rows.find((row) => row.status === "sent");
+      const skippedRow = rows.find((row) => HANDLED_SMS_STATUSES.has(row.status) && row.status !== "sent");
+      const failedRow = rows.find((row) => row.status === "failed");
+      const latest = rows[0];
+
+      const item: ManualSmsProgressItem = {
+        caseId: record.shared.id,
+        caseNumber: record.shared.caseNumber,
+        clientName: record.shared.clientName ?? recipient.displayName,
+        phone: recipient.phone,
+        language,
+        status: sentRow?.status ?? skippedRow?.status ?? failedRow?.status ?? latest?.status,
+        sentAt: sentRow?.sentAt ?? null,
+        errorMessage: failedRow?.errorMessage ?? null,
+      };
+
+      if (sentRow) {
+        sent.push(item);
+      } else if (skippedRow) {
+        skipped.push(item);
+      } else if (failedRow) {
+        failed.push(item);
+        remaining.push(item);
+      } else {
+        remaining.push(item);
+      }
+    }
+  }
+
+  const sortByCase = (a: ManualSmsProgressItem, b: ManualSmsProgressItem) =>
+    a.caseNumber.localeCompare(b.caseNumber, undefined, { numeric: true });
+
+  sent.sort(sortByCase);
+  skipped.sort(sortByCase);
+  failed.sort(sortByCase);
+  remaining.sort(sortByCase);
+  missingPhone.sort(sortByCase);
+
+  return {
+    automationId: automation.id,
+    automationName: automation.name,
+    attorneyContactId: options.attorneyContactId,
+    cases: matched.length,
+    english,
+    spanish,
+    sentCount: sent.length,
+    skippedCount: skipped.length,
+    failedCount: failed.length,
+    remainingCount: remaining.length,
+    missingPhoneCount: missingPhone.length,
+    done: remaining.length === 0,
+    sent,
+    skipped,
+    failed,
+    remaining,
+    missingPhone,
+  };
+}
+
+/** Default batch size for manual attorney-departure SMS (spread callbacks). */
+export { MANUAL_SMS_BATCH_SIZE } from "@/lib/sms/manual-send";
 
 export const SMS_APPROVAL_AUTO_REJECT_DAYS = 7;
 

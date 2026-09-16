@@ -396,6 +396,18 @@ export async function hasSmsAutomationDeliveryForCase(caseId: string, automation
   return Boolean(data);
 }
 
+export async function listSmsPendingApprovalsForAutomation(automationId: string) {
+  const admin = requireAdmin();
+  const { data, error } = await admin
+    .from("sms_pending_approvals")
+    .select("*")
+    .eq("automation_id", automationId)
+    .order("created_at", { ascending: false });
+
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as ApprovalRow[]).map(rowToApproval);
+}
+
 export async function listStaleSmsPendingApprovals(maxAgeDays: number) {
   const admin = requireAdmin();
   const cutoff = new Date();

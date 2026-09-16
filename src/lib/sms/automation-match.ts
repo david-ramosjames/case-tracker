@@ -83,9 +83,10 @@ export function automationMatchesManualAttorney(
   automation: SmsAutomation,
   record: CaseRecord,
   attorneyContactId: string,
+  options?: { requireEnabled?: boolean },
 ) {
   if (automation.triggerType !== "manual") return false;
-  if (!automation.enabled) return false;
+  if (options?.requireEnabled !== false && !automation.enabled) return false;
   if (!record.tracker.isActive) return false;
   if (record.shared.attorneyId !== attorneyContactId) return false;
   if (automation.caseTypes.length > 0 && !automation.caseTypes.includes(record.shared.caseType)) return false;
