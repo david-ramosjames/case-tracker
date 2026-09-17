@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { requireSessionUser } from "@/lib/auth/session";
+import { ensureProvisionedSessionUser } from "@/lib/auth/session";
 
 export async function requireApiSession() {
   try {
-    return await requireSessionUser();
+    const sessionUser = await ensureProvisionedSessionUser();
+    if (!sessionUser) return null;
+    return sessionUser;
   } catch {
     return null;
   }

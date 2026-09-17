@@ -3,6 +3,7 @@ import { GlobalCaseSearch } from "@/components/layout/global-case-search";
 import { AppMobileNav, AppTopNav } from "@/components/layout/app-top-nav";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { isAdminRole } from "@/lib/auth/access";
 import { type SessionUser } from "@/lib/auth/types";
 
 export function AppShell({ children, sessionUser }: { children: React.ReactNode; sessionUser: SessionUser }) {
@@ -26,7 +27,7 @@ export function AppShell({ children, sessionUser }: { children: React.ReactNode;
                 <p className="truncate text-sm font-semibold text-navy-950">{sessionUser.name}</p>
                 <p className="truncate text-xs text-muted-foreground">{sessionUser.email}</p>
               </div>
-              {sessionUser.role === "admin" ? <Badge variant="pink">Admin</Badge> : null}
+              {isAdminRole(sessionUser.role) ? <Badge variant="pink">Admin</Badge> : null}
               {!sessionUser.role ? <Badge variant="warning">Role pending</Badge> : null}
               <form action="/auth/signout" method="post">
                 <Button variant="ghost" size="icon" aria-label="Sign out" type="submit">

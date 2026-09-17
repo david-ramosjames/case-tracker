@@ -17,7 +17,7 @@ export function isAllowedEmail(email: string | null | undefined) {
   return normalizeEmail(email).endsWith(`@${ALLOWED_EMAIL_DOMAIN}`);
 }
 
-/** Firm emails that always receive admin on sign-in. */
+/** Firm emails that always receive admin on sign-in (and every session resolve). */
 export function getAdminRoleForEmail(email: string): "admin" | null {
   const normalized = normalizeEmail(email);
   if ((ADMIN_EMAILS as readonly string[]).includes(normalized)) return "admin";

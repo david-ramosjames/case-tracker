@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { isAdminRole } from "@/lib/auth/access";
 import { canViewCaseCsvExport, canViewOutputAndGoals } from "@/lib/auth/constants";
 import { type SessionUser } from "@/lib/auth/types";
 import { cn } from "@/lib/utils";
@@ -40,7 +41,7 @@ const navItems = [
 ];
 
 function visibleNavForSession(sessionUser: SessionUser) {
-  const isAdmin = sessionUser.role === "admin" || sessionUser.role === "super_admin";
+  const isAdmin = isAdminRole(sessionUser.role);
   const showGoals = canViewOutputAndGoals(sessionUser.role);
   const showCaseExport = canViewCaseCsvExport(sessionUser.email);
   return navItems.filter((item) => {
@@ -122,7 +123,7 @@ export function AppMobileNav({ sessionUser }: { sessionUser: SessionUser }) {
           <p className="truncate text-sm font-semibold text-navy-950">{sessionUser.name}</p>
           <p className="truncate text-xs text-muted-foreground">{sessionUser.email}</p>
         </div>
-        {sessionUser.role === "admin" ? <Badge variant="pink">Admin</Badge> : null}
+        {isAdminRole(sessionUser.role) ? <Badge variant="pink">Admin</Badge> : null}
         {!sessionUser.role ? <Badge variant="warning">Role pending</Badge> : null}
         <form action="/auth/signout" method="post">
           <Button variant="outline" size="sm" type="submit">
