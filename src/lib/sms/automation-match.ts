@@ -1,4 +1,5 @@
 import { type SmsAutomation } from "@/lib/supabase/sms-automations";
+import { cleanCaseNumber } from "@/lib/csv/parse";
 import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import { type CaseRecord, type CaseStage } from "@/lib/types";
 import { daysSince, hoursSince } from "@/lib/utils";
@@ -9,6 +10,11 @@ export const SMS_DEFAULT_EXCLUDED_TO_STAGES: CaseStage[] = ["Disengaged", "Termi
 /** Same Active definition as the Cases table (stage + disbursement), not the legacy is_active flag. */
 export function isSmsActivePipelineCase(record: CaseRecord) {
   return deriveCaseStatusFromTracker(record.tracker.caseStage, record.tracker.result) === "Active";
+}
+
+export function normalizeSmsExcludeCaseNumbers(caseNumbers?: string[] | null) {
+  if (!caseNumbers?.length) return new Set<string>();
+  return new Set(caseNumbers.map((value) => cleanCaseNumber(value)).filter(Boolean));
 }
 
 export function automationMatchesFromStage(automation: SmsAutomation, fromStage: CaseStage) {
@@ -89,12 +95,18 @@ export function automationMatchesManualAttorney(
   automation: SmsAutomation,
   record: CaseRecord,
   attorneyContactId: string,
-  options?: { requireEnabled?: boolean },
+  options?: { requireEnabled?: boolean; excludeCaseNumbers?: Iterable<string> | null },
 ) {
   if (automation.triggerType !== "manual") return false;
   if (options?.requireEnabled !== false && !automation.enabled) return false;
   if (!isSmsActivePipelineCase(record)) return false;
   if (record.shared.attorneyId !== attorneyContactId) return false;
   if (automation.caseTypes.length > 0 && !automation.caseTypes.includes(record.shared.caseType)) return false;
+  if (options?.excludeCaseNumbers) {
+    const excluded = options.excludeCaseNumbers instanceof Set
+      ? options.excludeCaseNumbers
+      : normalizeSmsExcludeCaseNumbers([...options.excludeCaseNumbers]);
+    if (excluded.has(cleanCaseNumber(record.shared.caseNumber))) return false;
+  }
   return true;
 }

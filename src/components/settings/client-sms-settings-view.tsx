@@ -35,12 +35,20 @@ type ManualSmsProgress = {
   failedCount: number;
   remainingCount: number;
   missingPhoneCount: number;
+  excludedCount?: number;
   done: boolean;
   sent: ManualSmsProgressItem[];
   failed: ManualSmsProgressItem[];
   remaining: ManualSmsProgressItem[];
   missingPhone: ManualSmsProgressItem[];
 };
+
+function parseExcludeCaseNumbersInput(value: string) {
+  return value
+    .split(/[\s,]+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
 
 function formatProgressRow(item: ManualSmsProgressItem) {
   const name = item.clientName?.trim() || "—";
@@ -151,6 +159,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   const [renaming, setRenaming] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
   const [runAttorneyByAutomation, setRunAttorneyByAutomation] = useState<Record<string, string>>({});
+  const [excludeCasesByAutomation, setExcludeCasesByAutomation] = useState<Record<string, string>>({});
   const [progressByAutomation, setProgressByAutomation] = useState<Record<string, ManualSmsProgress | null>>({});
   const [progressLoadingId, setProgressLoadingId] = useState<string | null>(null);
   const [syncCaseNumbers, setSyncCaseNumbers] = useState("");
@@ -182,9 +191,12 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
 
     setProgressLoadingId(automationId);
     try {
-      const response = await fetch(
-        `/api/admin/sms-automations/${automationId}/run?attorneyContactId=${encodeURIComponent(attorneyContactId)}`,
-      );
+      const excludeCaseNumbers = parseExcludeCaseNumbersInput(excludeCasesByAutomation[automationId] ?? "");
+      const params = new URLSearchParams({ attorneyContactId });
+      if (excludeCaseNumbers.length) {
+        params.set("excludeCaseNumbers", excludeCaseNumbers.join(","));
+      }
+      const response = await fetch(`/api/admin/sms-automations/${automationId}/run?${params.toString()}`);
       const body = (await response.json()) as ManualSmsProgress & { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Unable to load send progress.");
       setProgressByAutomation((current) => ({
@@ -198,6 +210,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
           failedCount: body.failedCount,
           remainingCount: body.remainingCount,
           missingPhoneCount: body.missingPhoneCount,
+          excludedCount: body.excludedCount ?? 0,
           done: body.done,
           sent: body.sent ?? [],
           failed: body.failed ?? [],
@@ -229,8 +242,8 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
       }
       void loadManualProgress(automation.id, attorneyContactId);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when attorney selection changes
-  }, [automations, runAttorneyByAutomation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when attorney or exclude list changes
+  }, [automations, runAttorneyByAutomation, excludeCasesByAutomation]);
 
   function resetForm() {
     setForm(EMPTY_FORM);
@@ -494,10 +507,15 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     }
 
     const attorneyName = allAttorneys.find((user) => user.id === attorneyContactId)?.name ?? "this attorney";
+    const excludeCaseNumbers = parseExcludeCaseNumbersInput(excludeCasesByAutomation[automationId] ?? "");
     if (
       !dryRun &&
       !window.confirm(
-        `Send the next batch of up to ${MANUAL_SMS_BATCH_SIZE} SMS now (no Slack approval) to active clients assigned to ${attorneyName}?\n\nMessages use each client's primary language and YouTube URL. Click Send again for each following batch.`,
+        `Send the next batch of up to ${MANUAL_SMS_BATCH_SIZE} SMS now (no Slack approval) to active clients assigned to ${attorneyName}?\n\nMessages use each client's primary language and YouTube URL. Click Send again for each following batch.${
+          excludeCaseNumbers.length
+            ? `\n\nExcluded case(s): ${excludeCaseNumbers.join(", ")}`
+            : ""
+        }`,
       )
     ) {
       return;
@@ -511,7 +529,12 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
       const response = await fetch(`/api/admin/sms-automations/${automationId}/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ attorneyContactId, dryRun, batchSize: MANUAL_SMS_BATCH_SIZE }),
+        body: JSON.stringify({
+          attorneyContactId,
+          dryRun,
+          batchSize: MANUAL_SMS_BATCH_SIZE,
+          excludeCaseNumbers,
+        }),
       });
       const body = (await response.json()) as {
         error?: string;
@@ -524,6 +547,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
         spanish?: number;
         totalPending?: number;
         skipped?: number;
+        excluded?: number;
         automationName?: string;
         failures?: string[];
         dryRun?: boolean;
@@ -536,6 +560,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
             `Preview: ${body.automationName ?? "manual SMS"} for ${attorneyName}.`,
             `${body.cases ?? 0} active case(s) (${body.english ?? 0} EN · ${body.spanish ?? 0} ES).`,
             `${body.totalPending ?? 0} recipient(s) ready — sends in batches of ${MANUAL_SMS_BATCH_SIZE} when you click Send SMS.`,
+            body.excluded ? `${body.excluded} case(s) excluded from this run.` : null,
             body.skipped ? `${body.skipped} skipped (already sent or missing phone).` : null,
           ]
             .filter(Boolean)
@@ -1015,6 +1040,25 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                     </div>
                   </div>
 
+                  <label className="block rounded-md border bg-slate-50 p-3">
+                    <span className="mb-1 block text-xs font-medium text-navy-950">
+                      Exclude case numbers (optional)
+                    </span>
+                    <Input
+                      value={excludeCasesByAutomation[automation.id] ?? ""}
+                      onChange={(event) =>
+                        setExcludeCasesByAutomation((current) => ({
+                          ...current,
+                          [automation.id]: event.target.value,
+                        }))
+                      }
+                      placeholder="e.g. 1693, 1701, 1720"
+                    />
+                    <span className="mt-1 block text-xs text-muted-foreground">
+                      Comma or space separated. Excluded cases are left out of Preview, Send, and the progress lists.
+                    </span>
+                  </label>
+
                   {(runAttorneyByAutomation[automation.id] ?? "").trim() ? (
                     <div className="rounded-md border border-slate-200 bg-white p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1052,6 +1096,12 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                               <>
                                 {" · "}
                                 {progressByAutomation[automation.id]!.missingPhoneCount} missing phone
+                              </>
+                            ) : null}
+                            {(progressByAutomation[automation.id]!.excludedCount ?? 0) > 0 ? (
+                              <>
+                                {" · "}
+                                {progressByAutomation[automation.id]!.excludedCount} excluded
                               </>
                             ) : null}
                             {progressByAutomation[automation.id]!.done ? (

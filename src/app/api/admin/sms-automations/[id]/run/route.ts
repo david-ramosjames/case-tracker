@@ -15,21 +15,37 @@ function requireAdmin(sessionUser: Awaited<ReturnType<typeof requireApiSession>>
   return null;
 }
 
+function parseExcludeCaseNumbers(raw: unknown): string[] {
+  if (typeof raw === "string") {
+    return raw
+      .split(/[\s,]+/)
+      .map((value) => value.trim())
+      .filter(Boolean);
+  }
+  if (Array.isArray(raw)) {
+    return raw.filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  }
+  return [];
+}
+
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const sessionUser = await requireApiSession();
   const denied = requireAdmin(sessionUser);
   if (denied) return denied;
 
   const { id } = await params;
-  const attorneyContactId = new URL(request.url).searchParams.get("attorneyContactId")?.trim() ?? "";
+  const url = new URL(request.url);
+  const attorneyContactId = url.searchParams.get("attorneyContactId")?.trim() ?? "";
   if (!attorneyContactId) {
     return NextResponse.json({ error: "Select the departing attorney." }, { status: 400 });
   }
+  const excludeCaseNumbers = parseExcludeCaseNumbers(url.searchParams.get("excludeCaseNumbers"));
 
   try {
     const result = await getManualAttorneyDepartureSmsProgress({
       automationId: id,
       attorneyContactId,
+      excludeCaseNumbers,
     });
 
     if ("reason" in result && result.reason) {
@@ -63,6 +79,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       attorneyContactId?: string;
       dryRun?: boolean;
       batchSize?: number;
+      excludeCaseNumbers?: string[] | string;
     };
     const attorneyContactId = typeof body.attorneyContactId === "string" ? body.attorneyContactId.trim() : "";
     if (!attorneyContactId) {
@@ -74,6 +91,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       attorneyContactId,
       dryRun: Boolean(body.dryRun),
       batchSize: typeof body.batchSize === "number" ? body.batchSize : undefined,
+      excludeCaseNumbers: parseExcludeCaseNumbers(body.excludeCaseNumbers),
     });
 
     if ("reason" in result && result.reason) {

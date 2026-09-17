@@ -13,7 +13,7 @@ import { getSmsRecipients } from "@/lib/sms/recipients";
 import { createSupabaseAdminClient, fetchAllSupabaseRows } from "@/lib/supabase/admin";
 import { syncTrackerQuoContacts } from "@/lib/supabase/quo-contacts";
 import { MANUAL_SMS_BATCH_SIZE } from "@/lib/sms/manual-send";
-import { automationMatchesStageChange, automationMatchesTimeInStage, automationMatchesManualAttorney } from "@/lib/sms/automation-match";
+import { automationMatchesStageChange, automationMatchesTimeInStage, automationMatchesManualAttorney, normalizeSmsExcludeCaseNumbers } from "@/lib/sms/automation-match";
 import {
   claimSmsPendingApproval,
   createSmsPendingApproval,
@@ -229,6 +229,8 @@ export async function processManualAttorneyDepartureSms(options: {
   dryRun?: boolean;
   /** How many SMS to send in this call (default 5). */
   batchSize?: number;
+  /** Case numbers to skip for this campaign (e.g. no client contact yet). */
+  excludeCaseNumbers?: string[];
 }) {
   if (!isQuoEnabled() && !options.dryRun) {
     return {
@@ -294,6 +296,7 @@ export async function processManualAttorneyDepartureSms(options: {
   }
 
   const batchSize = Math.max(1, Math.min(options.batchSize ?? MANUAL_SMS_BATCH_SIZE, 20));
+  const excludeCaseNumbers = normalizeSmsExcludeCaseNumbers(options.excludeCaseNumbers);
 
   type WorkItem = {
     record: CaseRecord;
@@ -309,9 +312,15 @@ export async function processManualAttorneyDepartureSms(options: {
   let spanish = 0;
   let alreadyHandled = 0;
   let missingPhone = 0;
+  let excluded = 0;
 
   for (const record of records) {
-    if (!automationMatchesManualAttorney(automation, record, options.attorneyContactId)) continue;
+    const matchesAttorney = automationMatchesManualAttorney(automation, record, options.attorneyContactId);
+    if (!matchesAttorney) continue;
+    if (excludeCaseNumbers.has(cleanCaseNumber(record.shared.caseNumber))) {
+      excluded += 1;
+      continue;
+    }
     matchedCaseIds.add(record.shared.id);
     const language = resolveClientLanguage(record);
     if (language === "es") spanish += 1;
@@ -357,6 +366,7 @@ export async function processManualAttorneyDepartureSms(options: {
       spanish,
       alreadyHandled,
       missingPhone,
+      excluded,
       remaining: remainingAfter,
       done: remainingAfter === 0,
       totalPending: workItems.length,
@@ -419,6 +429,7 @@ export async function processManualAttorneyDepartureSms(options: {
     spanish,
     alreadyHandled,
     missingPhone,
+    excluded,
     remaining: remainingAfter,
     done: remainingAfter === 0,
     totalPending: workItems.length,
@@ -445,6 +456,7 @@ const HANDLED_SMS_STATUSES = new Set<SmsPendingApproval["status"]>(["pending", "
 export async function getManualAttorneyDepartureSmsProgress(options: {
   automationId: string;
   attorneyContactId: string;
+  excludeCaseNumbers?: string[];
 }) {
   const automation = await getSmsAutomationById(options.automationId);
   if (!automation) {
@@ -457,10 +469,19 @@ export async function getManualAttorneyDepartureSmsProgress(options: {
     return { reason: "attorney_required" as const };
   }
 
+  const excludeCaseNumbers = normalizeSmsExcludeCaseNumbers(options.excludeCaseNumbers);
   const records = await getCases();
-  const matched = records.filter((record) =>
-    automationMatchesManualAttorney(automation, record, options.attorneyContactId, { requireEnabled: false }),
-  );
+  let excludedCount = 0;
+  const matched = records.filter((record) => {
+    if (!automationMatchesManualAttorney(automation, record, options.attorneyContactId, { requireEnabled: false })) {
+      return false;
+    }
+    if (excludeCaseNumbers.has(cleanCaseNumber(record.shared.caseNumber))) {
+      excludedCount += 1;
+      return false;
+    }
+    return true;
+  });
   const matchedCaseIds = new Set(matched.map((record) => record.shared.id));
 
   const approvals = (await listSmsPendingApprovalsForAutomation(automation.id)).filter((row) =>
@@ -554,6 +575,8 @@ export async function getManualAttorneyDepartureSmsProgress(options: {
     failedCount: failed.length,
     remainingCount: remaining.length,
     missingPhoneCount: missingPhone.length,
+    excludedCount,
+    excludedCaseNumbers: [...excludeCaseNumbers],
     done: remaining.length === 0,
     sent,
     skipped,
