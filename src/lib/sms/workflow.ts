@@ -17,6 +17,7 @@ import { automationMatchesStageChange, automationMatchesTimeInStage, automationM
 import {
   claimSmsPendingApproval,
   createSmsPendingApproval,
+  failInterruptedManualSmsApprovals,
   getSmsAutomationById,
   hasSmsAutomationDeliveryForCase,
   listSmsAutomations,
@@ -298,6 +299,10 @@ export async function processManualAttorneyDepartureSms(options: {
   const batchSize = Math.max(1, Math.min(options.batchSize ?? MANUAL_SMS_BATCH_SIZE, 20));
   const excludeCaseNumbers = normalizeSmsExcludeCaseNumbers(options.excludeCaseNumbers);
 
+  // Manual flow does not use Slack approval. Stranded "pending" rows from a hung Quo call
+  // would otherwise block retries forever.
+  const clearedPending = await failInterruptedManualSmsApprovals(automation.id);
+
   type WorkItem = {
     record: CaseRecord;
     recipient: ReturnType<typeof getSmsRecipients>[number];
@@ -306,6 +311,13 @@ export async function processManualAttorneyDepartureSms(options: {
   };
 
   const records = await getCases();
+  const existingApprovals = await listSmsPendingApprovalsForAutomation(automation.id);
+  const handledKeys = new Set(
+    existingApprovals
+      .filter((row) => row.status === "sent" || row.status === "approved" || row.status === "rejected")
+      .map((row) => `${row.caseId}::${row.phone}`),
+  );
+
   const workItems: WorkItem[] = [];
   const matchedCaseIds = new Set<string>();
   let english = 0;
@@ -333,8 +345,7 @@ export async function processManualAttorneyDepartureSms(options: {
     }
 
     for (const recipient of recipients) {
-      const handled = await hasSmsAutomationDeliveryForCase(record.shared.id, automation.id, recipient.phone);
-      if (handled) {
+      if (handledKeys.has(`${record.shared.id}::${recipient.phone}`)) {
         alreadyHandled += 1;
         continue;
       }
@@ -367,6 +378,7 @@ export async function processManualAttorneyDepartureSms(options: {
       alreadyHandled,
       missingPhone,
       excluded,
+      clearedPending,
       remaining: remainingAfter,
       done: remainingAfter === 0,
       totalPending: workItems.length,
@@ -378,9 +390,14 @@ export async function processManualAttorneyDepartureSms(options: {
 
   let sent = 0;
   let failed = 0;
+  let processed = 0;
   const failures: string[] = [];
+  // Leave headroom under Vercel maxDuration (300s) so the response can return.
+  const deadlineMs = Date.now() + 240_000;
 
   for (const item of batch) {
+    if (Date.now() >= deadlineMs) break;
+
     const approval = await createSmsPendingApproval({
       caseId: item.record.shared.id,
       trackerEntryId: item.record.tracker.id,
@@ -417,7 +434,10 @@ export async function processManualAttorneyDepartureSms(options: {
       failed += 1;
       failures.push(`#${item.record.shared.caseNumber} ${item.recipient.phone}: ${message}`);
     }
+    processed += 1;
   }
+
+  const remaining = Math.max(0, workItems.length - processed);
 
   return {
     sent,
@@ -430,8 +450,9 @@ export async function processManualAttorneyDepartureSms(options: {
     alreadyHandled,
     missingPhone,
     excluded,
-    remaining: remainingAfter,
-    done: remainingAfter === 0,
+    clearedPending,
+    remaining,
+    done: remaining === 0,
     totalPending: workItems.length,
     batchSize,
     automationName: automation.name,
@@ -470,6 +491,9 @@ export async function getManualAttorneyDepartureSmsProgress(options: {
   }
 
   const excludeCaseNumbers = normalizeSmsExcludeCaseNumbers(options.excludeCaseNumbers);
+  // Only clear stranded rows — not an in-flight send from a concurrent POST.
+  await failInterruptedManualSmsApprovals(automation.id, { olderThanSeconds: 60 });
+
   const records = await getCases();
   let excludedCount = 0;
   const matched = records.filter((record) => {

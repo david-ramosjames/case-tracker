@@ -160,6 +160,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   const [runningId, setRunningId] = useState<string | null>(null);
   const [runAttorneyByAutomation, setRunAttorneyByAutomation] = useState<Record<string, string>>({});
   const [excludeCasesByAutomation, setExcludeCasesByAutomation] = useState<Record<string, string>>({});
+  const [debouncedExcludeByAutomation, setDebouncedExcludeByAutomation] = useState<Record<string, string>>({});
   const [progressByAutomation, setProgressByAutomation] = useState<Record<string, ManualSmsProgress | null>>({});
   const [progressLoadingId, setProgressLoadingId] = useState<string | null>(null);
   const [syncCaseNumbers, setSyncCaseNumbers] = useState("");
@@ -183,7 +184,11 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     }
   }
 
-  async function loadManualProgress(automationId: string, attorneyContactId: string) {
+  async function loadManualProgress(
+    automationId: string,
+    attorneyContactId: string,
+    excludeInput?: string,
+  ) {
     if (!attorneyContactId.trim()) {
       setProgressByAutomation((current) => ({ ...current, [automationId]: null }));
       return;
@@ -191,7 +196,9 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
 
     setProgressLoadingId(automationId);
     try {
-      const excludeCaseNumbers = parseExcludeCaseNumbersInput(excludeCasesByAutomation[automationId] ?? "");
+      const excludeCaseNumbers = parseExcludeCaseNumbersInput(
+        excludeInput ?? debouncedExcludeByAutomation[automationId] ?? excludeCasesByAutomation[automationId] ?? "",
+      );
       const params = new URLSearchParams({ attorneyContactId });
       if (excludeCaseNumbers.length) {
         params.set("excludeCaseNumbers", excludeCaseNumbers.join(","));
@@ -231,6 +238,13 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   }, []);
 
   useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedExcludeByAutomation(excludeCasesByAutomation);
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [excludeCasesByAutomation]);
+
+  useEffect(() => {
     for (const automation of automations) {
       if (automation.triggerType !== "manual") continue;
       const attorneyContactId = runAttorneyByAutomation[automation.id]?.trim() ?? "";
@@ -240,10 +254,10 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
         );
         continue;
       }
-      void loadManualProgress(automation.id, attorneyContactId);
+      void loadManualProgress(automation.id, attorneyContactId, debouncedExcludeByAutomation[automation.id] ?? "");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when attorney or exclude list changes
-  }, [automations, runAttorneyByAutomation, excludeCasesByAutomation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when attorney or debounced exclude list changes
+  }, [automations, runAttorneyByAutomation, debouncedExcludeByAutomation]);
 
   function resetForm() {
     setForm(EMPTY_FORM);

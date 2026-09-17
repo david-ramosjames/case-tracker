@@ -408,6 +408,36 @@ export async function listSmsPendingApprovalsForAutomation(automationId: string)
   return ((data ?? []) as ApprovalRow[]).map(rowToApproval);
 }
 
+/**
+ * Manual sends don't use Slack approval — stranded pending rows block retries.
+ * Pass olderThanSeconds so progress polling does not fail an in-flight send.
+ */
+export async function failInterruptedManualSmsApprovals(
+  automationId: string,
+  options?: { olderThanSeconds?: number },
+) {
+  const admin = requireAdmin();
+  let query = admin
+    .from("sms_pending_approvals")
+    .update({
+      status: "failed",
+      error_message: "Send interrupted before Quo confirmed delivery. Safe to retry.",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("automation_id", automationId)
+    .eq("status", "pending");
+
+  if (options?.olderThanSeconds != null && options.olderThanSeconds > 0) {
+    const cutoff = new Date(Date.now() - options.olderThanSeconds * 1000).toISOString();
+    query = query.lt("created_at", cutoff);
+  }
+
+  const { data, error } = await query.select("id");
+
+  if (error) throw new Error(error.message);
+  return (data ?? []).length;
+}
+
 export async function listStaleSmsPendingApprovals(maxAgeDays: number) {
   const admin = requireAdmin();
   const cutoff = new Date();
