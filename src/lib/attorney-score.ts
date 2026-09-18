@@ -240,3 +240,35 @@ export function buildFieldValidationRowPatch(
 
   return patch;
 }
+
+/**
+ * Re-include filled 90-day validation fields so an explicit Save confirms them
+ * even when the values did not change (product copy: "even when nothing changed").
+ */
+export function appendPresentValidationFields<T extends Record<string, unknown>>(
+  changeInput: T,
+  tracker: Pick<
+    CaseRecord["tracker"],
+    "liability" | "targetResolutionQuarter" | "minimumValue" | "policyLimits"
+  >,
+): T {
+  const next: Record<string, unknown> = { ...changeInput };
+  if (tracker.liability?.trim()) next.liability = tracker.liability;
+  if (tracker.targetResolutionQuarter?.trim()) next.targetResolutionQuarter = tracker.targetResolutionQuarter;
+  if (tracker.minimumValue != null) next.minimumValue = tracker.minimumValue;
+  if (tracker.policyLimits != null) next.policyLimits = tracker.policyLimits;
+  return next as T;
+}
+
+export const INLINE_VALIDATION_CONFIRM_FIELDS = [
+  "liability",
+  "targetResolutionQuarter",
+  "minimumValue",
+  "policyLimits",
+] as const;
+
+export type InlineValidationConfirmField = (typeof INLINE_VALIDATION_CONFIRM_FIELDS)[number];
+
+export function isInlineValidationConfirmField(key: string): key is InlineValidationConfirmField {
+  return (INLINE_VALIDATION_CONFIRM_FIELDS as readonly string[]).includes(key);
+}

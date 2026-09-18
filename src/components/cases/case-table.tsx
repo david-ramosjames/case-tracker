@@ -28,7 +28,7 @@ import {
   toStandardTargetPeriodLabel,
 } from "@/lib/case-options";
 import { CaseAttorneyScoreCell } from "@/components/attorney-score/attorney-score";
-import { getCaseAttorneyScore } from "@/lib/attorney-score";
+import { getCaseAttorneyScore, isInlineValidationConfirmField } from "@/lib/attorney-score";
 import { deriveResultFeePercent, getCaseCompletionScore } from "@/lib/calculations";
 import { getCasePipelineFilter, isActivePipelineCase, type CasePipelineFilter, type ViewerContext } from "@/lib/auth/access";
 import {
@@ -591,12 +591,16 @@ export function CaseTable({
 
     const normalizedValue = normalizeTrackerFieldValue(key, value);
     const currentValue = record.tracker[key];
-    if (key === "liability" || key === "targetResolutionQuarter") {
-      if ((currentValue ?? null) === (normalizedValue ?? null)) return;
-    } else if (currentValue === normalizedValue) {
+    const unchanged =
+      key === "liability" || key === "targetResolutionQuarter"
+        ? (currentValue ?? null) === (normalizedValue ?? null)
+        : currentValue === normalizedValue;
+    // Same-value edits on 90-day fields still need to persist so validated_at stamps.
+    if (unchanged && !isInlineValidationConfirmField(key)) {
       return;
     }
 
+    const now = new Date().toISOString();
     const nextStage = key === "caseStage" ? (normalizedValue as CaseStage) : record.tracker.caseStage;
     const tracker: TrackerEntry = {
       ...record.tracker,
@@ -607,6 +611,10 @@ export function CaseTable({
       ...(key === "minimumValue"
         ? { caseSize: deriveCaseSizeFromMinimumValue(normalizedValue as number | null) }
         : {}),
+      ...(key === "liability" ? { liabilityValidatedAt: now } : {}),
+      ...(key === "targetResolutionQuarter" ? { targetResolutionQuarterValidatedAt: now } : {}),
+      ...(key === "minimumValue" ? { minimumValueValidatedAt: now } : {}),
+      ...(key === "policyLimits" ? { policyLimitsValidatedAt: now } : {}),
     };
 
     if (key === "caseStage" || key === "referralFee" || key === "minimumValue") {

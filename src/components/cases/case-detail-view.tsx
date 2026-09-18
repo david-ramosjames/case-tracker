@@ -32,7 +32,7 @@ import {
   toStandardTargetPeriodLabel,
 } from "@/lib/case-options";
 import { AttorneyScoreBreakdown } from "@/components/attorney-score/attorney-score";
-import { getCaseAttorneyScore, getValidationFieldLabel } from "@/lib/attorney-score";
+import { getCaseAttorneyScore, getValidationFieldLabel, appendPresentValidationFields } from "@/lib/attorney-score";
 import {
   deriveResultFeePercent,
   getDataQualityFlags,
@@ -447,10 +447,13 @@ export function CaseDetailView({
   }
 
   async function persistTracker(nextTracker: TrackerEntry, options?: { markReviewed?: boolean }) {
-    const changeInput = buildTrackerChangeInput(nextTracker, serverTrackerRef.current, {
-      manualDisbursements: manualDisbursementsForSave(nextTracker.disbursements),
-      disbursementOverrides: disbursementOverridesForSave(nextTracker.disbursements),
-    });
+    const changeInput = appendPresentValidationFields(
+      buildTrackerChangeInput(nextTracker, serverTrackerRef.current, {
+        manualDisbursements: manualDisbursementsForSave(nextTracker.disbursements),
+        disbursementOverrides: disbursementOverridesForSave(nextTracker.disbursements),
+      }) as Record<string, unknown>,
+      nextTracker,
+    );
     const quoContactPreferences = buildQuoContactPreferences(nextTracker);
     const payload = {
       shared: {
