@@ -15,7 +15,7 @@ function requireAdmin(sessionUser: Awaited<ReturnType<typeof requireApiSession>>
   return null;
 }
 
-function parseExcludeCaseNumbers(raw: unknown): string[] {
+function parseCaseNumbers(raw: unknown): string[] {
   if (typeof raw === "string") {
     return raw
       .split(/[\s,]+/)
@@ -39,13 +39,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (!attorneyContactId) {
     return NextResponse.json({ error: "Select the departing attorney." }, { status: 400 });
   }
-  const excludeCaseNumbers = parseExcludeCaseNumbers(url.searchParams.get("excludeCaseNumbers"));
+  const excludeCaseNumbers = parseCaseNumbers(url.searchParams.get("excludeCaseNumbers"));
+  const onlyCaseNumbers = parseCaseNumbers(url.searchParams.get("onlyCaseNumbers"));
 
   try {
     const result = await getManualAttorneyDepartureSmsProgress({
       automationId: id,
       attorneyContactId,
       excludeCaseNumbers,
+      onlyCaseNumbers,
     });
 
     if ("reason" in result && result.reason) {
@@ -80,18 +82,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       dryRun?: boolean;
       batchSize?: number;
       excludeCaseNumbers?: string[] | string;
+      onlyCaseNumbers?: string[] | string;
     };
     const attorneyContactId = typeof body.attorneyContactId === "string" ? body.attorneyContactId.trim() : "";
     if (!attorneyContactId) {
       return NextResponse.json({ error: "Select the departing attorney." }, { status: 400 });
     }
 
+    const onlyCaseNumbers = parseCaseNumbers(body.onlyCaseNumbers);
     const result = await processManualAttorneyDepartureSms({
       automationId: id,
       attorneyContactId,
       dryRun: Boolean(body.dryRun),
-      batchSize: typeof body.batchSize === "number" ? body.batchSize : undefined,
-      excludeCaseNumbers: parseExcludeCaseNumbers(body.excludeCaseNumbers),
+      batchSize: typeof body.batchSize === "number" ? body.batchSize : onlyCaseNumbers.length > 0 ? 1 : undefined,
+      excludeCaseNumbers: parseCaseNumbers(body.excludeCaseNumbers),
+      onlyCaseNumbers,
     });
 
     if ("reason" in result && result.reason) {

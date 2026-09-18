@@ -232,6 +232,8 @@ export async function processManualAttorneyDepartureSms(options: {
   batchSize?: number;
   /** Case numbers to skip for this campaign (e.g. no client contact yet). */
   excludeCaseNumbers?: string[];
+  /** When set, only these case numbers are included (for single-case tests). */
+  onlyCaseNumbers?: string[];
 }) {
   if (!isQuoEnabled() && !options.dryRun) {
     return {
@@ -296,7 +298,11 @@ export async function processManualAttorneyDepartureSms(options: {
     };
   }
 
-  const batchSize = Math.max(1, Math.min(options.batchSize ?? MANUAL_SMS_BATCH_SIZE, 20));
+  const onlyCaseNumbers = normalizeSmsExcludeCaseNumbers(options.onlyCaseNumbers);
+  // Single-case tests should never fan out into a large batch.
+  const batchSize = onlyCaseNumbers.size > 0
+    ? Math.max(1, Math.min(options.batchSize ?? 1, 5))
+    : Math.max(1, Math.min(options.batchSize ?? MANUAL_SMS_BATCH_SIZE, 20));
   const excludeCaseNumbers = normalizeSmsExcludeCaseNumbers(options.excludeCaseNumbers);
 
   // Manual flow does not use Slack approval. Stranded "pending" rows from a hung Quo call
@@ -325,11 +331,17 @@ export async function processManualAttorneyDepartureSms(options: {
   let alreadyHandled = 0;
   let missingPhone = 0;
   let excluded = 0;
+  let outsideOnlyFilter = 0;
 
   for (const record of records) {
     const matchesAttorney = automationMatchesManualAttorney(automation, record, options.attorneyContactId);
     if (!matchesAttorney) continue;
-    if (excludeCaseNumbers.has(cleanCaseNumber(record.shared.caseNumber))) {
+    const caseNumber = cleanCaseNumber(record.shared.caseNumber);
+    if (onlyCaseNumbers.size > 0 && !onlyCaseNumbers.has(caseNumber)) {
+      outsideOnlyFilter += 1;
+      continue;
+    }
+    if (excludeCaseNumbers.has(caseNumber)) {
       excluded += 1;
       continue;
     }
@@ -378,6 +390,8 @@ export async function processManualAttorneyDepartureSms(options: {
       alreadyHandled,
       missingPhone,
       excluded,
+      onlyCaseNumbers: [...onlyCaseNumbers],
+      outsideOnlyFilter,
       clearedPending,
       remaining: remainingAfter,
       done: remainingAfter === 0,
@@ -450,6 +464,7 @@ export async function processManualAttorneyDepartureSms(options: {
     alreadyHandled,
     missingPhone,
     excluded,
+    onlyCaseNumbers: [...onlyCaseNumbers],
     clearedPending,
     remaining,
     done: remaining === 0,
@@ -478,6 +493,7 @@ export async function getManualAttorneyDepartureSmsProgress(options: {
   automationId: string;
   attorneyContactId: string;
   excludeCaseNumbers?: string[];
+  onlyCaseNumbers?: string[];
 }) {
   const automation = await getSmsAutomationById(options.automationId);
   if (!automation) {
@@ -491,6 +507,7 @@ export async function getManualAttorneyDepartureSmsProgress(options: {
   }
 
   const excludeCaseNumbers = normalizeSmsExcludeCaseNumbers(options.excludeCaseNumbers);
+  const onlyCaseNumbers = normalizeSmsExcludeCaseNumbers(options.onlyCaseNumbers);
   // Only clear stranded rows — not an in-flight send from a concurrent POST.
   await failInterruptedManualSmsApprovals(automation.id, { olderThanSeconds: 60 });
 
@@ -500,7 +517,11 @@ export async function getManualAttorneyDepartureSmsProgress(options: {
     if (!automationMatchesManualAttorney(automation, record, options.attorneyContactId, { requireEnabled: false })) {
       return false;
     }
-    if (excludeCaseNumbers.has(cleanCaseNumber(record.shared.caseNumber))) {
+    const caseNumber = cleanCaseNumber(record.shared.caseNumber);
+    if (onlyCaseNumbers.size > 0 && !onlyCaseNumbers.has(caseNumber)) {
+      return false;
+    }
+    if (excludeCaseNumbers.has(caseNumber)) {
       excludedCount += 1;
       return false;
     }
@@ -601,6 +622,7 @@ export async function getManualAttorneyDepartureSmsProgress(options: {
     missingPhoneCount: missingPhone.length,
     excludedCount,
     excludedCaseNumbers: [...excludeCaseNumbers],
+    onlyCaseNumbers: [...onlyCaseNumbers],
     done: remaining.length === 0,
     sent,
     skipped,

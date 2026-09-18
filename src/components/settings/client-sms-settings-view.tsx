@@ -36,6 +36,7 @@ type ManualSmsProgress = {
   remainingCount: number;
   missingPhoneCount: number;
   excludedCount?: number;
+  onlyCaseNumbers?: string[];
   done: boolean;
   sent: ManualSmsProgressItem[];
   failed: ManualSmsProgressItem[];
@@ -43,7 +44,7 @@ type ManualSmsProgress = {
   missingPhone: ManualSmsProgressItem[];
 };
 
-function parseExcludeCaseNumbersInput(value: string) {
+function parseCaseNumbersInput(value: string) {
   return value
     .split(/[\s,]+/)
     .map((part) => part.trim())
@@ -160,7 +161,9 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   const [runningId, setRunningId] = useState<string | null>(null);
   const [runAttorneyByAutomation, setRunAttorneyByAutomation] = useState<Record<string, string>>({});
   const [excludeCasesByAutomation, setExcludeCasesByAutomation] = useState<Record<string, string>>({});
+  const [onlyCasesByAutomation, setOnlyCasesByAutomation] = useState<Record<string, string>>({});
   const [debouncedExcludeByAutomation, setDebouncedExcludeByAutomation] = useState<Record<string, string>>({});
+  const [debouncedOnlyByAutomation, setDebouncedOnlyByAutomation] = useState<Record<string, string>>({});
   const [progressByAutomation, setProgressByAutomation] = useState<Record<string, ManualSmsProgress | null>>({});
   const [progressLoadingId, setProgressLoadingId] = useState<string | null>(null);
   const [syncCaseNumbers, setSyncCaseNumbers] = useState("");
@@ -187,7 +190,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   async function loadManualProgress(
     automationId: string,
     attorneyContactId: string,
-    excludeInput?: string,
+    filters?: { excludeInput?: string; onlyInput?: string },
   ) {
     if (!attorneyContactId.trim()) {
       setProgressByAutomation((current) => ({ ...current, [automationId]: null }));
@@ -196,12 +199,21 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
 
     setProgressLoadingId(automationId);
     try {
-      const excludeCaseNumbers = parseExcludeCaseNumbersInput(
-        excludeInput ?? debouncedExcludeByAutomation[automationId] ?? excludeCasesByAutomation[automationId] ?? "",
+      const excludeCaseNumbers = parseCaseNumbersInput(
+        filters?.excludeInput ??
+          debouncedExcludeByAutomation[automationId] ??
+          excludeCasesByAutomation[automationId] ??
+          "",
+      );
+      const onlyCaseNumbers = parseCaseNumbersInput(
+        filters?.onlyInput ?? debouncedOnlyByAutomation[automationId] ?? onlyCasesByAutomation[automationId] ?? "",
       );
       const params = new URLSearchParams({ attorneyContactId });
       if (excludeCaseNumbers.length) {
         params.set("excludeCaseNumbers", excludeCaseNumbers.join(","));
+      }
+      if (onlyCaseNumbers.length) {
+        params.set("onlyCaseNumbers", onlyCaseNumbers.join(","));
       }
       const response = await fetch(`/api/admin/sms-automations/${automationId}/run?${params.toString()}`);
       const body = (await response.json()) as ManualSmsProgress & { error?: string };
@@ -218,6 +230,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
           remainingCount: body.remainingCount,
           missingPhoneCount: body.missingPhoneCount,
           excludedCount: body.excludedCount ?? 0,
+          onlyCaseNumbers: body.onlyCaseNumbers ?? [],
           done: body.done,
           sent: body.sent ?? [],
           failed: body.failed ?? [],
@@ -240,9 +253,10 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setDebouncedExcludeByAutomation(excludeCasesByAutomation);
+      setDebouncedOnlyByAutomation(onlyCasesByAutomation);
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [excludeCasesByAutomation]);
+  }, [excludeCasesByAutomation, onlyCasesByAutomation]);
 
   useEffect(() => {
     for (const automation of automations) {
@@ -254,10 +268,13 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
         );
         continue;
       }
-      void loadManualProgress(automation.id, attorneyContactId, debouncedExcludeByAutomation[automation.id] ?? "");
+      void loadManualProgress(automation.id, attorneyContactId, {
+        excludeInput: debouncedExcludeByAutomation[automation.id] ?? "",
+        onlyInput: debouncedOnlyByAutomation[automation.id] ?? "",
+      });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when attorney or debounced exclude list changes
-  }, [automations, runAttorneyByAutomation, debouncedExcludeByAutomation]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when attorney or debounced filters change
+  }, [automations, runAttorneyByAutomation, debouncedExcludeByAutomation, debouncedOnlyByAutomation]);
 
   function resetForm() {
     setForm(EMPTY_FORM);
@@ -521,11 +538,16 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     }
 
     const attorneyName = allAttorneys.find((user) => user.id === attorneyContactId)?.name ?? "this attorney";
-    const excludeCaseNumbers = parseExcludeCaseNumbersInput(excludeCasesByAutomation[automationId] ?? "");
+    const excludeCaseNumbers = parseCaseNumbersInput(excludeCasesByAutomation[automationId] ?? "");
+    const onlyCaseNumbers = parseCaseNumbersInput(onlyCasesByAutomation[automationId] ?? "");
     if (
       !dryRun &&
       !window.confirm(
-        `Send the next batch of up to ${MANUAL_SMS_BATCH_SIZE} SMS now (no Slack approval) to active clients assigned to ${attorneyName}?\n\nMessages use each client's primary language and YouTube URL. Click Send again for each following batch.${
+        `Send the next batch of up to ${onlyCaseNumbers.length > 0 ? 1 : MANUAL_SMS_BATCH_SIZE} SMS now (no Slack approval) to active clients assigned to ${attorneyName}?\n\nMessages use each client's primary language and YouTube URL. Click Send again for each following batch.${
+          onlyCaseNumbers.length
+            ? `\n\nONLY sending to case(s): ${onlyCaseNumbers.join(", ")} — real SMS will go out.`
+            : ""
+        }${
           excludeCaseNumbers.length
             ? `\n\nExcluded case(s): ${excludeCaseNumbers.join(", ")}`
             : ""
@@ -546,8 +568,9 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
         body: JSON.stringify({
           attorneyContactId,
           dryRun,
-          batchSize: MANUAL_SMS_BATCH_SIZE,
+          batchSize: onlyCaseNumbers.length > 0 ? 1 : MANUAL_SMS_BATCH_SIZE,
           excludeCaseNumbers,
+          onlyCaseNumbers,
         }),
       });
       const body = (await response.json()) as {
@@ -562,6 +585,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
         totalPending?: number;
         skipped?: number;
         excluded?: number;
+        onlyCaseNumbers?: string[];
         automationName?: string;
         failures?: string[];
         dryRun?: boolean;
@@ -573,7 +597,10 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
           [
             `Preview: ${body.automationName ?? "manual SMS"} for ${attorneyName}.`,
             `${body.cases ?? 0} active case(s) (${body.english ?? 0} EN · ${body.spanish ?? 0} ES).`,
-            `${body.totalPending ?? 0} recipient(s) ready — sends in batches of ${MANUAL_SMS_BATCH_SIZE} when you click Send SMS.`,
+            `${body.totalPending ?? 0} recipient(s) ready — sends in batches of ${onlyCaseNumbers.length > 0 ? 1 : MANUAL_SMS_BATCH_SIZE} when you click Send SMS.`,
+            body.onlyCaseNumbers?.length
+              ? `Only including case(s): ${body.onlyCaseNumbers.join(", ")}.`
+              : null,
             body.excluded ? `${body.excluded} case(s) excluded from this run.` : null,
             body.skipped ? `${body.skipped} skipped (already sent or missing phone).` : null,
           ]
@@ -1054,24 +1081,45 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                     </div>
                   </div>
 
-                  <label className="block rounded-md border bg-slate-50 p-3">
-                    <span className="mb-1 block text-xs font-medium text-navy-950">
-                      Exclude case numbers (optional)
-                    </span>
-                    <Input
-                      value={excludeCasesByAutomation[automation.id] ?? ""}
-                      onChange={(event) =>
-                        setExcludeCasesByAutomation((current) => ({
-                          ...current,
-                          [automation.id]: event.target.value,
-                        }))
-                      }
-                      placeholder="e.g. 1693, 1701, 1720"
-                    />
-                    <span className="mt-1 block text-xs text-muted-foreground">
-                      Comma or space separated. Excluded cases are left out of Preview, Send, and the progress lists.
-                    </span>
-                  </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block rounded-md border bg-slate-50 p-3">
+                      <span className="mb-1 block text-xs font-medium text-navy-950">
+                        Only these case numbers (test)
+                      </span>
+                      <Input
+                        value={onlyCasesByAutomation[automation.id] ?? ""}
+                        onChange={(event) =>
+                          setOnlyCasesByAutomation((current) => ({
+                            ...current,
+                            [automation.id]: event.target.value,
+                          }))
+                        }
+                        placeholder="e.g. 1693"
+                      />
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        Leave blank for the full attorney list. When set, Preview/Send/progress only include these
+                        cases (real SMS if you click Send).
+                      </span>
+                    </label>
+                    <label className="block rounded-md border bg-slate-50 p-3">
+                      <span className="mb-1 block text-xs font-medium text-navy-950">
+                        Exclude case numbers (optional)
+                      </span>
+                      <Input
+                        value={excludeCasesByAutomation[automation.id] ?? ""}
+                        onChange={(event) =>
+                          setExcludeCasesByAutomation((current) => ({
+                            ...current,
+                            [automation.id]: event.target.value,
+                          }))
+                        }
+                        placeholder="e.g. 1693, 1701, 1720"
+                      />
+                      <span className="mt-1 block text-xs text-muted-foreground">
+                        Comma or space separated. Excluded cases are left out of Preview, Send, and the progress lists.
+                      </span>
+                    </label>
+                  </div>
 
                   {(runAttorneyByAutomation[automation.id] ?? "").trim() ? (
                     <div className="rounded-md border border-slate-200 bg-white p-3">
@@ -1116,6 +1164,14 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                               <>
                                 {" · "}
                                 {progressByAutomation[automation.id]!.excludedCount} excluded
+                              </>
+                            ) : null}
+                            {(progressByAutomation[automation.id]!.onlyCaseNumbers?.length ?? 0) > 0 ? (
+                              <>
+                                {" · "}
+                                <span className="font-medium text-sky-700">
+                                  only {progressByAutomation[automation.id]!.onlyCaseNumbers!.join(", ")}
+                                </span>
                               </>
                             ) : null}
                             {progressByAutomation[automation.id]!.done ? (

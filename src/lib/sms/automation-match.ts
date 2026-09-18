@@ -17,6 +17,9 @@ export function normalizeSmsExcludeCaseNumbers(caseNumbers?: string[] | null) {
   return new Set(caseNumbers.map((value) => cleanCaseNumber(value)).filter(Boolean));
 }
 
+/** Alias — same normalization for include-only / test case lists. */
+export const normalizeSmsCaseNumbers = normalizeSmsExcludeCaseNumbers;
+
 export function automationMatchesFromStage(automation: SmsAutomation, fromStage: CaseStage) {
   if (automation.fromStages.length > 0) {
     return automation.fromStages.includes(fromStage);
