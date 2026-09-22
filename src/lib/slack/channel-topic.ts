@@ -1,4 +1,5 @@
 import { fetchChannelTopic, fetchChannelTopicResult, listSlackWorkspaceUsers, lookupSlackUserIdByEmail, setChannelTopic } from "@/lib/slack/client";
+import { inviteCaseAttorneyToSlackChannel } from "@/lib/slack/channel-members";
 import { getStageTopicLabel } from "@/lib/slack/enum-replies";
 import {
   updateChannelTopicStage,
@@ -199,7 +200,7 @@ function topicsEquivalent(current: string | null | undefined, expected: string) 
 
 export async function syncSlackChannelTopicSummary(
   record: CaseRecord,
-  options: { skipRead?: boolean } = {},
+  options: { skipRead?: boolean; skipAttorneyInvite?: boolean } = {},
 ) {
   const mappingRaw = await getSlackChannelForCaseNumber(record.shared.caseNumber);
   if (!mappingRaw) {
@@ -220,6 +221,20 @@ export async function syncSlackChannelTopicSummary(
     return { updated: false as const, reason: "invalid_channel" as const };
   }
 
+  // When the topic shows the responsible attorney, make sure they can see the channel.
+  let attorneyInvite: Awaited<ReturnType<typeof inviteCaseAttorneyToSlackChannel>> | null = null;
+  if (!options.skipAttorneyInvite) {
+    try {
+      attorneyInvite = await inviteCaseAttorneyToSlackChannel(record, channelId);
+    } catch (error) {
+      console.warn("Slack attorney invite during topic sync failed", {
+        caseNumber: record.shared.caseNumber,
+        channelId,
+        error: error instanceof Error ? error.message : error,
+      });
+    }
+  }
+
   const stageLabel = stageLabelFromCaseStage(record.tracker.caseStage);
   const nextTopic = buildExpectedCaseTopic(record);
 
@@ -233,6 +248,7 @@ export async function syncSlackChannelTopicSummary(
       previousTopic: mapping.topicLastWritten,
       stageLabel,
       channelId,
+      attorneyInvite,
     };
   }
 
@@ -248,6 +264,7 @@ export async function syncSlackChannelTopicSummary(
         previousTopic: currentTopic,
         stageLabel,
         channelId,
+        attorneyInvite,
       };
     }
   }
@@ -261,6 +278,7 @@ export async function syncSlackChannelTopicSummary(
       previousTopic: currentTopic,
       stageLabel,
       channelId,
+      attorneyInvite,
     };
   }
 
@@ -272,6 +290,7 @@ export async function syncSlackChannelTopicSummary(
     previousTopic: currentTopic,
     stageLabel,
     channelId,
+    attorneyInvite,
   };
 }
 
