@@ -11,7 +11,16 @@ export type ParsedPulseItem = {
   confidence: ConfidenceLevel;
   reason: string;
   excerpt: string;
+  /** Slack permalink to the message Pulse based this suggestion on. */
+  sourceUrl: string | null;
 };
+
+const SLACK_PERMALINK = /https?:\/\/[\w-]+\.slack\.com\/archives\/[^\s|>)]+/i;
+
+export function extractSlackPermalink(text: string) {
+  const match = text.match(SLACK_PERMALINK);
+  return match ? match[0].replace(/&amp;/g, "&") : null;
+}
 
 /** Pulse app title line — allow en/em dash and optional date suffix. */
 const PULSE_HEADER = /pulse\s*[\u2013\u2014–—\-]\s*potential\s+case\s+status\s+changes/i;
@@ -179,6 +188,14 @@ function extractPulseItemsFromLines(lines: string[]) {
 
     if (!excerpt && reason) excerpt = reason;
 
+    let sourceUrl: string | null = null;
+    const linkLine = lines[index + lineOffset + 1] ?? "";
+    if (!PULSE_ARROW.test(linkLine)) {
+      sourceUrl = extractSlackPermalink(linkLine);
+      if (sourceUrl) lineOffset += 1;
+    }
+    if (!sourceUrl && parsedExcerpt) sourceUrl = extractSlackPermalink(excerptLine);
+
     items.push({
       channelRef,
       pulseLabel,
@@ -187,6 +204,7 @@ function extractPulseItemsFromLines(lines: string[]) {
       confidence,
       reason,
       excerpt,
+      sourceUrl,
     });
     index += lineOffset + 1;
   }

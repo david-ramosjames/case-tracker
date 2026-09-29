@@ -3836,6 +3836,7 @@ function suggestionRowToSuggestion(row: SuggestionRow): StageSuggestion {
     slackChannelId: toStringOrNull(row.slack_channel_id),
     slackConfirmationThreadTs: toStringOrNull(row.slack_confirmation_thread_ts),
     confirmationPostedAt: toStringOrNull(row.confirmation_posted_at),
+    sourceUrl: toStringOrNull(asObject(row.metadata).source_url),
   };
 }
 

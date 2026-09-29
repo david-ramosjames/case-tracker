@@ -55,6 +55,8 @@ export type StageSuggestion = {
   slackChannelId: string | null;
   slackConfirmationThreadTs: string | null;
   confirmationPostedAt: string | null;
+  /** Slack message the suggestion was derived from (pulse permalink). */
+  sourceUrl: string | null;
   metadata?: Record<string, unknown>;
 };
 

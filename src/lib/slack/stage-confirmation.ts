@@ -33,6 +33,7 @@ import {
 import {
   applyConfirmedStage,
   createStageSuggestion,
+  setStageSuggestionSourceUrl,
   dismissStageSuggestionById,
   findPulseLineSuggestion,
   findStageSuggestionByConfirmationThread,
@@ -306,6 +307,10 @@ async function fanOutPulseItem(
   if (skipReason === "already_applied") return "skipped_already_applied";
 
   const existingLine = await findPulseLineSuggestion(match.caseId, pulseMessageTs, item.channelRef);
+  if (existingLine && item.sourceUrl && !existingLine.sourceUrl && !options?.dryRun) {
+    await setStageSuggestionSourceUrl(existingLine, item.sourceUrl);
+    existingLine.sourceUrl = item.sourceUrl;
+  }
   if (existingLine?.confirmationPostedAt) return "skipped_already_posted";
   if (await wasPulseItemHandled(match.caseId, pulseMessageTs, item.suggestedStage)) return "skipped_handled";
 
@@ -330,10 +335,15 @@ async function fanOutPulseItem(
         channel_ref: normalizePulseChannelRef(item.channelRef),
         reason: item.reason,
         pulse_label: item.pulseLabel,
+        ...(item.sourceUrl ? { source_url: item.sourceUrl } : {}),
         ...(item.pulseSignal === "disbursed" ? { mark_disbursed: true } : {}),
       },
       slackChannelId: match.slackChannelId,
     }));
+
+  if (existing && item.sourceUrl && !existing.sourceUrl) {
+    await setStageSuggestionSourceUrl(existing, item.sourceUrl);
+  }
 
   // Post Slack confirmation only — tracker updates happen in applyConfirmedStage after ✅ / confirmed.
   const postResult = await postStageConfirmationForSuggestion(

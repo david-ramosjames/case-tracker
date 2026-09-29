@@ -179,8 +179,23 @@ export function StageSuggestionsPanel({
                           </span>
                         ) : null}
                       </p>
-                      {signal.excerpt ? (
-                        <p className="text-sm leading-6 text-muted-foreground">{signal.excerpt}</p>
+                      {signal.excerpt || signal.sourceUrl ? (
+                        <p className="text-sm leading-6 text-muted-foreground">
+                          {signal.excerpt}
+                          {signal.sourceUrl ? (
+                            <>
+                              {signal.excerpt ? " " : null}
+                              <a
+                                href={signal.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="whitespace-nowrap font-medium text-pink-600 hover:underline"
+                              >
+                                Slack post ↗
+                              </a>
+                            </>
+                          ) : null}
+                        </p>
                       ) : null}
                     </div>
                     <div className="flex shrink-0 flex-wrap gap-2">

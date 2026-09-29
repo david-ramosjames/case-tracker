@@ -24,6 +24,7 @@ import {
 type SuggestionRow = Record<string, unknown>;
 
 function rowToSuggestion(row: SuggestionRow): StageSuggestion {
+  const metadata = (row.metadata as Record<string, unknown> | null) ?? undefined;
   return {
     id: String(row.id ?? "stage-suggestion"),
     source: (row.source as StageSuggestion["source"]) ?? "manual",
@@ -37,8 +38,19 @@ function rowToSuggestion(row: SuggestionRow): StageSuggestion {
     slackChannelId: (row.slack_channel_id as string | null) ?? null,
     slackConfirmationThreadTs: (row.slack_confirmation_thread_ts as string | null) ?? null,
     confirmationPostedAt: (row.confirmation_posted_at as string | null) ?? null,
-    metadata: (row.metadata as Record<string, unknown> | null) ?? undefined,
+    sourceUrl: typeof metadata?.source_url === "string" ? metadata.source_url : null,
+    metadata,
   };
+}
+
+export async function setStageSuggestionSourceUrl(suggestion: StageSuggestion, sourceUrl: string) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return;
+
+  await admin
+    .from("case_tracker_stage_suggestions")
+    .update({ metadata: { ...(suggestion.metadata ?? {}), source_url: sourceUrl } })
+    .eq("id", suggestion.id);
 }
 
 export async function createStageSuggestion(input: {
