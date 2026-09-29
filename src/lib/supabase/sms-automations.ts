@@ -390,6 +390,7 @@ export async function hasSmsAutomationDeliveryForCase(caseId: string, automation
     .eq("automation_id", automationId)
     .eq("phone", phone)
     .in("status", ["pending", "approved", "sent", "rejected"])
+    .limit(1)
     .maybeSingle();
 
   if (error) throw new Error(error.message);
@@ -462,6 +463,7 @@ export async function hasPendingSmsApprovalForCase(caseId: string, automationId:
     .eq("automation_id", automationId)
     .eq("phone", phone)
     .eq("status", "pending")
+    .limit(1)
     .maybeSingle();
 
   if (error) throw new Error(error.message);
