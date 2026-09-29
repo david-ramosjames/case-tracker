@@ -46,17 +46,3 @@ export async function inviteCaseRecordTeamToSlackChannel(record: CaseRecord, cha
     legalAssistant: record.legalAssistant,
   });
 }
-
-/** Invite only the responsible attorney (no-op if already in the channel). */
-export async function inviteCaseAttorneyToSlackChannel(record: CaseRecord, channelId: string) {
-  if (!isSlackEnabled()) {
-    return { invited: [] as string[], skipped: true as const, reason: "slack_disabled" as const };
-  }
-
-  const userId = await slackUserIdForPerson(record.attorney);
-  if (!userId) {
-    return { invited: [] as string[], skipped: true as const, reason: "no_slack_user_id" as const };
-  }
-
-  return inviteSlackUsersToChannel(channelId, [userId]);
-}

@@ -81,7 +81,7 @@ export async function POST(request: Request) {
       });
     }
 
-    const result = await syncSlackChannelTopicSummary(record);
+    const result = await syncSlackChannelTopicSummary(record, { skipTeamInvite: Boolean(channelInvite) });
     if (result.reason === "no_channel" || result.reason === "missing_channel_id" || result.reason === "invalid_channel") {
       return NextResponse.json(
         {

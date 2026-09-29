@@ -175,7 +175,7 @@ export async function reassignCaseTeam(caseId: string, input: CaseAssignmentInpu
   let topicResult: Awaited<ReturnType<typeof syncSlackChannelTopicSummary>> | null = null;
   const { isSlackTopicAutoSyncEnabled } = await import("@/lib/slack/config");
   if (isSlackTopicAutoSyncEnabled()) {
-    topicResult = await syncSlackChannelTopicSummary(refreshed);
+    topicResult = await syncSlackChannelTopicSummary(refreshed, { skipTeamInvite: Boolean(channelInvite) });
     if (topicResult.updated && topicResult.stageLabel) {
       await updateChannelTopicStage(refreshed.shared.caseNumber, topicResult.stageLabel);
     }
