@@ -1,8 +1,8 @@
-import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { findCaseForSlackThread } from "@/lib/slack/channels";
 import { postSlackMessage } from "@/lib/slack/client";
-import { getSlackSigningSecret, isSlackEnabled } from "@/lib/slack/config";
+import { isSlackEnabled } from "@/lib/slack/config";
+import { verifySlackSignature } from "@/lib/slack/signature";
 import {
   formatFieldReminderAppliedMessage,
   handleFieldReminderReaction,
@@ -52,22 +52,6 @@ const IGNORED_MESSAGE_SUBTYPES = new Set([
   "group_join",
   "group_leave",
 ]);
-
-function verifySlackSignature(rawBody: string, timestamp: string | null, signature: string | null) {
-  const secret = getSlackSigningSecret();
-  if (!secret || !timestamp || !signature) return false;
-
-  const age = Math.abs(Date.now() / 1000 - Number(timestamp));
-  if (!Number.isFinite(age) || age > 60 * 5) return false;
-
-  const base = `v0:${timestamp}:${rawBody}`;
-  const digest = `v0=${crypto.createHmac("sha256", secret).update(base).digest("hex")}`;
-  try {
-    return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(signature));
-  } catch {
-    return false;
-  }
-}
 
 type SlackThreadReplyEvent = NonNullable<SlackEventPayload["event"]> & {
   thread_ts: string;

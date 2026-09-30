@@ -153,6 +153,21 @@ export async function lookupSlackUserIdByEmail(email: string) {
   }
 }
 
+/** Workspace email for a Slack user (requires users:read.email). */
+export async function lookupSlackUserEmail(userId: string) {
+  if (!isSlackEnabled()) return null;
+
+  try {
+    const payload = await slackApi<{ ok: boolean; user?: { profile?: { email?: string } } }>("users.info", {
+      user: userId.trim(),
+    });
+    return payload.user?.profile?.email?.trim() || null;
+  } catch (error) {
+    console.warn("Slack users.info failed", { userId, error: errorMessage(error) });
+    return null;
+  }
+}
+
 export async function listSlackWorkspaceUsers() {
   if (!isSlackEnabled()) return [];
 

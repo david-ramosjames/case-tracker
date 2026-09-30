@@ -243,6 +243,40 @@ curl "https://YOUR_DOMAIN/api/cron/slack-reminders?force=true&syncSheet=false" \
   -H "Authorization: Bearer YOUR_CRON_SECRET"
 ```
 
+## 7. Slackbot MCP (ask about and update cases from Slackbot)
+
+`POST /api/mcp` is an MCP server for Slack's Slackbot. People can ask Slackbot things like "what's the status of 1720?" or "which of my cases have stale fields?" and make attorney updates ("set 1404 minimum value to 45k", "confirm policy limits on 1233 are still right").
+
+Each call is verified with `SLACK_SIGNING_SECRET` and runs as the Slack user asking: their Slack account is matched to a `@ramosjames.com` email (Slack profile, else `contacts.slack_user_id`), then they get the same role and case visibility as on the website. Edits go through the normal tracker save, so the activity log shows e.g. "Kody Garza (via Slackbot)" and the usual Slack side effects fire.
+
+| Tool | Access |
+|------|--------|
+| `whoami`, `find_cases`, `get_case`, `cases_needing_updates` | Read |
+| `update_case_fields` (liability, expected disbursement quarter, minimum value, policy limits, policy source, referral fee, injuries, description, status notes, expected lit) | Write |
+| `confirm_fields_current` (clears the 90-day stale alert without changing values) | Write |
+| `set_case_stage`, `resolve_stage_suggestion`, `add_case_comment` | Write |
+
+There are no delete or reassignment tools.
+
+**Enable it on the Case Tracker Slack app** (App settings → Agents & AI / MCP, or edit the manifest), then reinstall. On Enterprise Grid install at the **org** level:
+
+```json
+{
+  "oauth_config": {
+    "scopes": { "bot": ["…existing scopes…", "mcp:connect", "users:read", "users:read.email"] }
+  },
+  "settings": { "org_deploy_enabled": true },
+  "mcp_servers": {
+    "case_tracker": {
+      "url": "https://rjl-case-tracker.vercel.app/api/mcp",
+      "auth_type": "slack_identity_auth"
+    }
+  }
+}
+```
+
+`users:read.email` is required so Slack users without a stored `contacts.slack_user_id` (e.g. admins who aren't DocketFlow contacts) can be matched by email. Org admins can then limit who can use the server and turn individual write tools on or off in the Slack admin dashboard.
+
 ## What triggers Slack
 
 | Trigger | Channel message |

@@ -71,13 +71,13 @@ export async function provisionUserRole(userId: string, email: string): Promise<
   return contactRole;
 }
 
-export async function getUserRole(userId: string, email: string): Promise<UserRole | null> {
+export async function getUserRole(userId: string | null, email: string): Promise<UserRole | null> {
   // Hard-coded firm admins always win — never allow a stale/demoted stored role to stick.
   const adminRole = getAdminRoleForEmail(email);
   if (adminRole) return adminRole;
 
   const adminClient = createSupabaseAdminClient();
-  if (adminClient) {
+  if (adminClient && userId) {
     const { data } = await adminClient.from("case_tracker_user_roles").select("role").eq("user_id", userId).maybeSingle();
     const storedRole = normalizeRole(data?.role as string | null | undefined);
     if (storedRole) return storedRole;

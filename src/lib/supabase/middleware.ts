@@ -8,8 +8,12 @@ const PUBLIC_PATHS = ["/login", "/auth/callback", "/auth/signout"];
 /** Webhooks and cron must bypass session auth (Slack, schedulers, DocketFlow). */
 const PUBLIC_API_PREFIXES = ["/api/slack/", "/api/cron/", "/api/internal/"];
 
+/** Slackbot MCP endpoint — authenticated by Slack request signature inside the route. */
+const PUBLIC_API_PATHS = ["/api/mcp"];
+
 function isPublicPath(pathname: string) {
   if (PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`))) return true;
+  if (PUBLIC_API_PATHS.includes(pathname)) return true;
   if (PUBLIC_API_PREFIXES.some((prefix) => pathname.startsWith(prefix))) return true;
   return false;
 }
