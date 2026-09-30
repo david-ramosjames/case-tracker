@@ -17,21 +17,33 @@ import {
 import { matchesCaseSearch, sortCaseSearchResults } from "@/lib/case-search";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
+import { getDocketFlowCaseUrl } from "@/lib/docketflow/links";
 import { type McpCaller } from "@/lib/mcp/identity";
+import { getCaseIntakeSummary } from "@/lib/mcp/intake";
+import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
 import { confirmStageSuggestionById, dismissStageSuggestionById } from "@/lib/supabase/stage-suggestions";
 import {
   createTrackerComment,
   getAttorneyGoals,
+  getCaseActivity,
   getCaseById,
+  getCaseComments,
   getCases,
+  getNextScheduledDocketFlowEvents,
   getUsers,
+  isOrphanTrackerRecord,
   updateTrackerEntry,
 } from "@/lib/supabase/services";
 import {
+  type ActivityLogEntry,
   type CaseRecord,
+  type CaseSlackChannel,
   type CaseStage,
   type CommentType,
+  type DocketFlowScheduledEvent,
   type ExpectedLitigationStatus,
+  type LitigationEventKey,
+  type TrackerComment,
   type TrackerUpdateInput,
 } from "@/lib/types";
 
@@ -141,26 +153,97 @@ function caseRow(record: CaseRecord) {
   };
 }
 
-function caseDetail(record: CaseRecord, activePipeline: boolean) {
+const LITIGATION_EVENT_LABELS: Record<LitigationEventKey, string> = {
+  plaintiffDeposition: "Plaintiff deposition",
+  defendantDeposition: "Defendant deposition",
+  mediation: "Mediation",
+  trial: "Trial",
+};
+
+type CaseDetailExtras = {
+  comments: TrackerComment[];
+  activity: ActivityLogEntry[];
+  upcomingEvents: DocketFlowScheduledEvent[];
+  slackChannel: CaseSlackChannel | null;
+  intake: Record<string, unknown> | null;
+};
+
+async function loadCaseDetailExtras(record: CaseRecord): Promise<CaseDetailExtras> {
+  const linked = !isOrphanTrackerRecord(record);
+  const [comments, activity, upcomingEvents, slackChannel, intake] = await Promise.all([
+    getCaseComments(record.shared.id),
+    getCaseActivity(record.shared.id),
+    linked ? getNextScheduledDocketFlowEvents(record.shared.id, 5) : Promise.resolve([]),
+    getSlackChannelForCaseNumber(record.shared.caseNumber),
+    linked ? getCaseIntakeSummary(record.shared.id) : Promise.resolve(null),
+  ]);
+  return { comments, activity, upcomingEvents, slackChannel, intake };
+}
+
+function caseDetail(record: CaseRecord, activePipeline: boolean, extras: CaseDetailExtras) {
   const { shared, tracker } = record;
   const result = tracker.result;
+  const slackWorkspace = process.env.NEXT_PUBLIC_SLACK_WORKSPACE_URL?.trim().replace(/\/$/, "");
   return {
     caseNumber: shared.caseNumber,
     client: shared.clientName,
     url: caseUrl(record),
+    docketFlowUrl: isOrphanTrackerRecord(record) ? null : getDocketFlowCaseUrl(shared.id),
+    slackChannel: extras.slackChannel
+      ? {
+          name: extras.slackChannel.slackChannelName,
+          url:
+            slackWorkspace && extras.slackChannel.slackChannelId
+              ? `${slackWorkspace}/archives/${extras.slackChannel.slackChannelId}`
+              : null,
+        }
+      : null,
     stage: STAGE_LABELS[tracker.caseStage],
     expectedLitigation: formatExpectedLitigationLabel(tracker.expectedLitigation),
     activePipeline,
     caseType: shared.caseType || null,
     dateSigned: shared.dateSigned || null,
     dateOfIncident: shared.dateOfIncident,
+    languages: { primary: shared.preferredLanguage, secondary: shared.secondaryLanguage },
     team: {
       attorney: record.attorney.name,
       paralegal: record.paralegal.name,
       legalAssistant: record.legalAssistant?.name ?? null,
     },
+    clientContacts:
+      tracker.quoContacts.length > 0
+        ? tracker.quoContacts.map((contact) => ({
+            name: contact.displayName,
+            phone: contact.phone,
+            smsEnabled: contact.smsEnabled,
+          }))
+        : tracker.clientPhone
+          ? [{ name: shared.clientName, phone: tracker.clientPhone, smsEnabled: true }]
+          : [],
     attorneyFields: attorneyFieldSummary(record),
+    forecast: {
+      caseSize: tracker.caseSize,
+      estimatedSettlementValue: tracker.estimatedSettlementValue,
+      estimatedFeeValue: tracker.estimatedFeeValue,
+      confidence: tracker.confidenceLevel,
+      sourceOfEstimate: tracker.sourceOfEstimate,
+      referralFeeArrangement: tracker.referralFeeArrangement,
+      balanceCtaInfo: tracker.balanceCtaInfo,
+      forecastNotes: tracker.forecastNotes || null,
+    },
     statusNotes: tracker.statusNotes || null,
+    sources: tracker.sources || null,
+    litigationEvents: (Object.keys(LITIGATION_EVENT_LABELS) as LitigationEventKey[])
+      .map((key) => ({ event: LITIGATION_EVENT_LABELS[key], ...tracker.litigationEvents[key] }))
+      .filter((event) => event.date || event.status),
+    upcomingDocketFlowEvents: extras.upcomingEvents.map((event) => ({
+      title: event.title,
+      date: event.startDateTime ?? event.date,
+      endDate: event.endDateTime ?? event.deadlineEndDate,
+      kind: event.scheduleKind,
+      category: event.category,
+    })),
+    intake: extras.intake,
     openStageSuggestions: getOpenStageSuggestions(record).map((signal) => ({
       id: signal.id,
       suggestedStage: STAGE_LABELS[signal.suggestedStage],
@@ -183,6 +266,29 @@ function caseDetail(record: CaseRecord, activePipeline: boolean) {
             disburseDate: result.disburseDate,
           }
         : null,
+    disbursementParties:
+      tracker.disbursements.length > 1
+        ? tracker.disbursements.map((party) => ({
+            party: party.partyLabel,
+            settlementAmount: party.settlementAmount,
+            attorneyFees: party.attorneyFees,
+            settlementDate: party.settlementDate,
+            disburseDate: party.disburseDate,
+            pending: party.pendingRemaining,
+          }))
+        : undefined,
+    recentComments: extras.comments.slice(0, 10).map((comment) => ({
+      author: comment.authorName,
+      type: comment.type,
+      body: comment.body,
+      createdAt: comment.createdAt,
+    })),
+    recentActivity: extras.activity.slice(0, 10).map((entry) => ({
+      action: entry.action,
+      description: entry.description,
+      by: entry.userName,
+      at: entry.createdAt,
+    })),
     lastUpdatedAt: tracker.updatedAt,
   };
 }
@@ -345,7 +451,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     name: "get_case",
     title: "Get case status",
     description:
-      "Full current status of one case: stage, team, attorney fields with missing/stale status, status notes, open stage suggestions, and settlement/disbursement progress.",
+      "Everything on the case page for one case: stage, team, client contacts, attorney fields (liability, policy limits, policy source incl. claim numbers/adjuster notes, injuries, description) with missing/stale status, forecast, notes, sources, litigation events, upcoming DocketFlow events, settlement/disbursement progress, recent comments and activity, plus the DocketFlow intake (accident narrative, police report, vehicle, client and third-party insurance with policy/claim numbers, treatment, employment).",
     inputSchema: {
       type: "object",
       properties: { case_number: caseNumberProperty },
@@ -355,8 +461,8 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     annotations: { readOnlyHint: true },
     handler: async (args, caller) => {
       const record = await requireVisibleCase(caller, args.case_number);
-      const goals = await getAttorneyGoals();
-      return caseDetail(record, isActivePipelineCase(record, goals));
+      const [goals, extras] = await Promise.all([getAttorneyGoals(), loadCaseDetailExtras(record)]);
+      return caseDetail(record, isActivePipelineCase(record, goals), extras);
     },
   },
   {

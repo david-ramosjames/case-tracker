@@ -251,7 +251,7 @@ Each call is verified with `SLACK_SIGNING_SECRET` and runs as the Slack user ask
 
 | Tool | Access |
 |------|--------|
-| `whoami`, `find_cases`, `get_case`, `cases_needing_updates` | Read |
+| `whoami`, `find_cases`, `get_case`, `cases_needing_updates` | Read — `get_case` returns everything on the case page plus the DocketFlow intake (accident narrative, police report, vehicle, insurers with policy/claim numbers, treatment, employment; no DOB, license numbers, or call transcript) |
 | `update_case_fields` (liability, expected disbursement quarter, minimum value, policy limits, policy source, referral fee, injuries, description, status notes, expected lit) | Write |
 | `confirm_fields_current` (clears the 90-day stale alert without changing values) | Write |
 | `set_case_stage`, `resolve_stage_suggestion`, `add_case_comment` | Write |
