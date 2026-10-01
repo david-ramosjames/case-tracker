@@ -41,6 +41,7 @@ import {
   getProjectedFeeValue,
   needsQuarterlyCheckIn,
 } from "@/lib/calculations";
+import { CasePhotosCard } from "@/components/cases/case-photos-card";
 import { CaseQuoContactsList } from "@/components/cases/case-quo-contacts";
 import { CommentMentionInput } from "@/components/cases/comment-mention-input";
 import { DisbursementPartiesCard } from "@/components/cases/disbursement-parties-card";
@@ -1286,6 +1287,8 @@ export function CaseDetailView({
             )}
           </CardContent>
         </Card>
+
+        <CasePhotosCard caseId={initialRecord.shared.id} />
 
         <Card className="border-amber-200/80">
           <CardHeader>

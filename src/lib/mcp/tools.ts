@@ -19,6 +19,8 @@ import { matchesCaseSearch, sortCaseSearchResults } from "@/lib/case-search";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { getDocketFlowCaseUrl } from "@/lib/docketflow/links";
+import { listEvidencePhotosForCase } from "@/lib/evidence-photos/repository";
+import { countEvidencePhotos, type EvidencePhoto } from "@/lib/evidence-photos/types";
 import { type McpCaller } from "@/lib/mcp/identity";
 import { getCaseIntakeSummary } from "@/lib/mcp/intake";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
@@ -189,18 +191,45 @@ type CaseDetailExtras = {
   upcomingEvents: DocketFlowScheduledEvent[];
   slackChannel: CaseSlackChannel | null;
   intake: Record<string, unknown> | null;
+  photos: EvidencePhoto[];
 };
 
 async function loadCaseDetailExtras(record: CaseRecord): Promise<CaseDetailExtras> {
   const linked = !isOrphanTrackerRecord(record);
-  const [comments, activity, upcomingEvents, slackChannel, intake] = await Promise.all([
+  const [comments, activity, upcomingEvents, slackChannel, intake, photos] = await Promise.all([
     getCaseComments(record.shared.id),
     getCaseActivity(record.shared.id),
     linked ? getNextScheduledDocketFlowEvents(record.shared.id, 5) : Promise.resolve([]),
     getSlackChannelForCaseNumber(record.shared.caseNumber),
     linked ? getCaseIntakeSummary(record.shared.id) : Promise.resolve(null),
+    listEvidencePhotosForCase(record.shared.caseNumber).catch((error) => {
+      console.warn("MCP case photos load failed", { caseNumber: record.shared.caseNumber, error });
+      return [] as EvidencePhoto[];
+    }),
   ]);
-  return { comments, activity, upcomingEvents, slackChannel, intake };
+  return { comments, activity, upcomingEvents, slackChannel, intake, photos };
+}
+
+/** Stored descriptions only; photos are never re-analyzed for Slackbot. */
+function casePhotosSummary(photos: EvidencePhoto[]) {
+  if (photos.length === 0) return null;
+  const counts = countEvidencePhotos(photos);
+  return {
+    note:
+      "AI-generated descriptions of visual evidence (staff-edited where verifiedByStaff is true). They describe only what is visible, not fault, injury severity, or causation. Phrase findings as 'Case photos show…'.",
+    total: counts.total,
+    described: counts.ready,
+    stillAnalyzing: counts.analyzing,
+    photos: photos
+      .filter((photo) => photo.status === "complete" && (photo.title || photo.description))
+      .map((photo) => ({
+        title: photo.title,
+        category: photo.category,
+        description: photo.description,
+        filename: photo.originalFilename,
+        verifiedByStaff: photo.humanEdited,
+      })),
+  };
 }
 
 function caseDetail(record: CaseRecord, activePipeline: boolean, extras: CaseDetailExtras) {
@@ -267,6 +296,7 @@ function caseDetail(record: CaseRecord, activePipeline: boolean, extras: CaseDet
       category: event.category,
     })),
     intake: extras.intake,
+    casePhotos: casePhotosSummary(extras.photos),
     openStageSuggestions: getOpenStageSuggestions(record).map((signal) => ({
       id: signal.id,
       suggestedStage: STAGE_LABELS[signal.suggestedStage],
@@ -477,7 +507,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     name: "get_case",
     title: "Get case status",
     description:
-      "Everything on the case page for one case: stage, team, client contacts, attorney fields (liability, policy limits, policy source incl. claim numbers/adjuster notes, injuries, description) with missing/stale status, forecast, notes, sources, litigation events, upcoming DocketFlow events, settlement/disbursement progress, recent comments and activity, plus the DocketFlow intake (accident narrative, police report, vehicle, client and third-party insurance with policy/claim numbers, treatment, employment).",
+      "Everything on the case page for one case: stage, team, client contacts, attorney fields (liability, policy limits, policy source incl. claim numbers/adjuster notes, injuries, description) with missing/stale status, forecast, notes, sources, litigation events, upcoming DocketFlow events, settlement/disbursement progress, recent comments and activity, plus the DocketFlow intake (accident narrative, police report, vehicle, client and third-party insurance with policy/claim numbers, treatment, employment), plus casePhotos: AI descriptions of the case's Dropbox photos. Present photo findings as 'Case photos show…' and never infer fault, liability, causation, injury severity, or diagnosis from them.",
     inputSchema: {
       type: "object",
       properties: { case_number: caseNumberProperty },

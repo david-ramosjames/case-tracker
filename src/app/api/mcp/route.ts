@@ -15,7 +15,7 @@ export const maxDuration = 60;
 const SUPPORTED_PROTOCOL_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 const SERVER_INFO = { name: "case-tracker", title: "Ramos James Case Tracker", version: "1.0.0" };
 const SERVER_INSTRUCTIONS =
-  "Case Tracker for Ramos James Law: live case status from DocketFlow and the case tracker. Users only see and edit cases they have access to on the website. Before any write tool, restate the exact change and get the user's confirmation.";
+  "Case Tracker for Ramos James Law: live case status from DocketFlow and the case tracker. Users only see and edit cases they have access to on the website. Before any write tool, restate the exact change and get the user's confirmation. Case photo descriptions are AI-generated descriptions of visual evidence: say 'Case photos show…' and never draw fault, liability, causation, severity, or medical conclusions from them.";
 
 type JsonRpcId = string | number | null;
 type JsonRpcRequest = {
