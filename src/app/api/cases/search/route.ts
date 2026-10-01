@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
-import { filterRecordsForViewer } from "@/lib/auth/access";
+import { filterRecordsReadableByViewer } from "@/lib/auth/access";
+import { getEventAttorneyCaseIds } from "@/lib/auth/event-attorney";
 import { matchesCaseSearch, sortCaseSearchResults } from "@/lib/case-search";
 import { getAttorneyGoals, getCases, getUsers } from "@/lib/supabase/services";
 
@@ -17,7 +18,8 @@ export async function GET(request: Request) {
   }
 
   const [records, users, goals] = await Promise.all([getCases(), getUsers(), getAttorneyGoals()]);
-  const visible = filterRecordsForViewer(records, sessionUser, users, goals);
+  const eventCaseIds = await getEventAttorneyCaseIds(sessionUser, users);
+  const visible = filterRecordsReadableByViewer(records, sessionUser, users, goals, eventCaseIds);
   const matches = sortCaseSearchResults(visible.filter((record) => matchesCaseSearch(record, query)), query);
   const results = matches.slice(0, limit).map((record) => ({
     caseId: record.shared.id,

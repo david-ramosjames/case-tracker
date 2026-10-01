@@ -1,4 +1,5 @@
-import { filterRecordsForViewer, isActivePipelineCase } from "@/lib/auth/access";
+import { filterRecordsForViewer, filterRecordsReadableByViewer, isActivePipelineCase } from "@/lib/auth/access";
+import { getEventAttorneyCaseIds } from "@/lib/auth/event-attorney";
 import {
   ATTORNEY_SOURCED_FIELDS,
   getAttorneyFieldLastReviewedLabel,
@@ -98,19 +99,41 @@ function requireString(args: Record<string, unknown>, key: string) {
   return value.trim();
 }
 
+/**
+ * `records` = cases the caller is assigned to (website visibility); `readable` adds cases where they are
+ * an event attorney on a DocketFlow event. Lists and edits use `records`; looking up a case uses `readable`.
+ */
 async function loadVisibleCases(caller: McpCaller) {
-  const [records, users, goals] = await Promise.all([getCases(), getUsers(), getAttorneyGoals()]);
-  return { records: filterRecordsForViewer(records, caller.session, users, goals), users, goals };
+  const [allRecords, users, goals] = await Promise.all([getCases(), getUsers(), getAttorneyGoals()]);
+  const eventCaseIds = await getEventAttorneyCaseIds(caller.session, users);
+  return {
+    records: filterRecordsForViewer(allRecords, caller.session, users, goals),
+    readable: filterRecordsReadableByViewer(allRecords, caller.session, users, goals, eventCaseIds),
+    eventCaseIds,
+    users,
+    goals,
+  };
 }
 
-async function requireVisibleCase(caller: McpCaller, rawCaseNumber: unknown) {
+type CaseAccessMode = "read" | "comment" | "edit";
+
+async function requireVisibleCase(caller: McpCaller, rawCaseNumber: unknown, mode: CaseAccessMode = "edit") {
   const caseNumber = cleanCaseNumber(typeof rawCaseNumber === "string" ? rawCaseNumber : String(rawCaseNumber ?? ""));
   if (!caseNumber) throw new McpToolError('"case_number" is required.');
 
-  const { records } = await loadVisibleCases(caller);
-  const record = records.find((item) => cleanCaseNumber(item.shared.caseNumber) === caseNumber);
-  if (!record) throw new McpToolError(`Case ${caseNumber} was not found, or you don't have access to it.`);
-  return record;
+  const { records, readable } = await loadVisibleCases(caller);
+  const matches = (item: CaseRecord) => cleanCaseNumber(item.shared.caseNumber) === caseNumber;
+  const assigned = records.find(matches);
+  if (assigned) return { record: assigned, access: "assigned" as const };
+
+  const eventOnly = readable.find(matches);
+  if (!eventOnly) throw new McpToolError(`Case ${caseNumber} was not found, or you don't have access to it.`);
+  if (mode === "edit") {
+    throw new McpToolError(
+      `You can view case ${caseNumber} because you're an event attorney on it, but only the assigned case team can change it. You can still add a comment.`,
+    );
+  }
+  return { record: eventOnly, access: "event_attorney" as const };
 }
 
 function attorneyFieldSummary(record: CaseRecord) {
@@ -385,12 +408,13 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true },
     handler: async (_args, caller) => {
-      const { records } = await loadVisibleCases(caller);
+      const { records, readable } = await loadVisibleCases(caller);
       return {
         name: caller.session.name,
         email: caller.session.email,
         role: caller.session.role ?? "pending (no access)",
-        visibleCases: records.length,
+        assignedCases: records.length,
+        eventAttorneyCases: readable.length - records.length,
       };
     },
   },
@@ -398,7 +422,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     name: "find_cases",
     title: "Find cases",
     description:
-      "Search and list cases the user can see in Case Tracker (DocketFlow cases plus tracker status). Filter by client name or case number text, attorney, stage, or pipeline. Returns a compact list; use get_case for full detail.",
+      "Search and list cases the user can see in Case Tracker (DocketFlow cases plus tracker status): their assigned cases plus cases where they are an event attorney on a DocketFlow event (marked access: event_attorney). Filter by client name or case number text, attorney, stage, or pipeline. Returns a compact list; use get_case for full detail.",
     inputSchema: {
       type: "object",
       properties: {
@@ -420,7 +444,8 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     },
     annotations: { readOnlyHint: true },
     handler: async (args, caller) => {
-      const { records, goals } = await loadVisibleCases(caller);
+      const { readable: records, records: assigned, goals } = await loadVisibleCases(caller);
+      const assignedIds = new Set(assigned.map((record) => record.shared.id));
       const query = typeof args.query === "string" ? args.query.trim() : "";
       const attorney = typeof args.attorney === "string" ? args.attorney.trim().toLowerCase() : "";
       const stage = args.stage ? parseStageInput(args.stage) : null;
@@ -442,6 +467,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         showing: Math.min(limit, matches.length),
         cases: matches.slice(0, limit).map((record) => ({
           ...caseRow(record),
+          ...(assignedIds.has(record.shared.id) ? {} : { access: "event_attorney" }),
           ...(args.needs_update === true ? { needsUpdate: fieldsNeedingUpdate(record) } : {}),
         })),
       };
@@ -460,9 +486,14 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     },
     annotations: { readOnlyHint: true },
     handler: async (args, caller) => {
-      const record = await requireVisibleCase(caller, args.case_number);
+      const { record, access } = await requireVisibleCase(caller, args.case_number, "read");
       const [goals, extras] = await Promise.all([getAttorneyGoals(), loadCaseDetailExtras(record)]);
-      return caseDetail(record, isActivePipelineCase(record, goals), extras);
+      return {
+        ...(access === "event_attorney"
+          ? { access: "event_attorney (view and comment only; the assigned team makes edits)" }
+          : {}),
+        ...caseDetail(record, isActivePipelineCase(record, goals), extras),
+      };
     },
   },
   {
@@ -529,7 +560,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     handler: async (args, caller) => {
-      const record = await requireVisibleCase(caller, args.case_number);
+      const { record } = await requireVisibleCase(caller, args.case_number);
       const patch = buildFieldPatch(args);
       if (Object.keys(patch).length === 0) throw new McpToolError("No fields to update were provided.");
 
@@ -576,7 +607,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     handler: async (args, caller) => {
-      const record = await requireVisibleCase(caller, args.case_number);
+      const { record } = await requireVisibleCase(caller, args.case_number);
       const fields = Array.isArray(args.fields) ? args.fields.map(String) : [];
       const { tracker } = record;
       const patch: TrackerUpdateInput = {};
@@ -631,7 +662,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     handler: async (args, caller) => {
-      const record = await requireVisibleCase(caller, args.case_number);
+      const { record } = await requireVisibleCase(caller, args.case_number);
       const stage = parseStageInput(args.stage);
       const previousStage = record.tracker.caseStage;
       if (previousStage === stage) {
@@ -669,7 +700,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false },
     handler: async (args, caller) => {
-      const record = await requireVisibleCase(caller, args.case_number);
+      const { record } = await requireVisibleCase(caller, args.case_number);
       const open = getOpenStageSuggestions(record);
       if (open.length === 0) throw new McpToolError(`Case ${record.shared.caseNumber} has no open stage suggestions.`);
 
@@ -715,7 +746,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     },
     annotations: { readOnlyHint: false, destructiveHint: false },
     handler: async (args, caller) => {
-      const record = await requireVisibleCase(caller, args.case_number);
+      const { record } = await requireVisibleCase(caller, args.case_number, "comment");
       const body = requireString(args, "body");
       const type = (["attorney_update", "general_note", "risk_flag"].includes(String(args.type))
         ? args.type

@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { CaseDetailView } from "@/components/cases/case-detail-view";
 import { PageHeader } from "@/components/layout/page-header";
 import { canViewerAccessCase } from "@/lib/auth/access";
+import { getEventAttorneyCaseIds } from "@/lib/auth/event-attorney";
 import { dataRepository } from "@/lib/data/repository";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 import { getDocketFlowCaseUrl } from "@/lib/docketflow/links";
@@ -26,7 +27,11 @@ export default async function CaseDetailPage({ params }: { params: Promise<{ cas
       : [];
   const docketFlowCaseUrl = record && !isOrphanTrackerRecord(record) ? getDocketFlowCaseUrl(record.shared.id) : null;
 
-  if (!record || !sessionUser || !canViewerAccessCase(record, sessionUser, users, goals)) {
+  if (!record || !sessionUser) notFound();
+  if (
+    !canViewerAccessCase(record, sessionUser, users, goals) &&
+    !(await getEventAttorneyCaseIds(sessionUser, users)).has(record.shared.id)
+  ) {
     notFound();
   }
 

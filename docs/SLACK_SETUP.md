@@ -258,6 +258,8 @@ Each call is verified with `SLACK_SIGNING_SECRET` and runs as the Slack user ask
 
 There are no delete or reassignment tools.
 
+**Event attorneys:** an attorney listed as an internal attendee on any DocketFlow case event (`case_events.extra_internal_contact_ids`, e.g. covering a deposition) can look up and comment on that case — in Slackbot and on the website case page/search — but edits stay with the assigned team. Event-attorney cases never appear in their Cases pipeline, Output, Goals, or Results.
+
 **Enable it on the Case Tracker Slack app** (App settings → Agents & AI / MCP, or edit the manifest), then reinstall. On Enterprise Grid install at the **org** level:
 
 ```json

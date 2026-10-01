@@ -115,6 +115,31 @@ export function filterRecordsForViewer(
   return [];
 }
 
+/**
+ * Read-only access to individual cases: the viewer's own cases plus cases where they are an event attorney.
+ * Use for opening/searching a case — never for pipelines, output, or goals (those stay assignment-based).
+ */
+export function canViewerReadCase(
+  record: CaseRecord,
+  session: SessionUser,
+  users: AppUser[],
+  goals: AttorneyGoal[],
+  eventAttorneyCaseIds: Set<string>,
+) {
+  return canViewerAccessCase(record, session, users, goals) || eventAttorneyCaseIds.has(record.shared.id);
+}
+
+export function filterRecordsReadableByViewer(
+  records: CaseRecord[],
+  session: SessionUser,
+  users: AppUser[],
+  goals: AttorneyGoal[],
+  eventAttorneyCaseIds: Set<string>,
+) {
+  const assigned = new Set(filterRecordsForViewer(records, session, users, goals).map((record) => record.shared.id));
+  return records.filter((record) => assigned.has(record.shared.id) || eventAttorneyCaseIds.has(record.shared.id));
+}
+
 export function canViewerAccessCase(
   record: CaseRecord,
   session: SessionUser,

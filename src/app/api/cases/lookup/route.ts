@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
-import { filterRecordsForViewer } from "@/lib/auth/access";
+import { filterRecordsReadableByViewer } from "@/lib/auth/access";
+import { getEventAttorneyCaseIds } from "@/lib/auth/event-attorney";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { getAttorneyGoals, getCases, getUsers } from "@/lib/supabase/services";
 
@@ -14,7 +15,8 @@ export async function GET(request: Request) {
   }
 
   const [records, users, goals] = await Promise.all([getCases(), getUsers(), getAttorneyGoals()]);
-  const visible = filterRecordsForViewer(records, sessionUser, users, goals);
+  const eventCaseIds = await getEventAttorneyCaseIds(sessionUser, users);
+  const visible = filterRecordsReadableByViewer(records, sessionUser, users, goals, eventCaseIds);
   const match = visible.find((record) => cleanCaseNumber(record.shared.caseNumber) === caseNumber);
 
   if (!match) {
