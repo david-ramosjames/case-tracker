@@ -20,7 +20,7 @@ export async function POST(
   }
 
   const found = await getEvidencePhotoById(photoId);
-  if (!found || found.photo.caseNumber !== access.caseNumber) {
+  if (!found || found.caseNumber !== access.caseNumber) {
     return NextResponse.json({ error: "Not found." }, { status: 404 });
   }
 

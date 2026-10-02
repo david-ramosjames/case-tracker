@@ -16,6 +16,7 @@ export type EvidencePhoto = {
   id: string;
   caseNumber: string;
   dropboxPath: string;
+  dropboxPermalink: string | null;
   originalFilename: string;
   title: string | null;
   description: string | null;
@@ -49,14 +50,14 @@ export function countEvidencePhotos(photos: EvidencePhoto[]): EvidencePhotoCount
   };
 }
 
-/** Dropbox web preview of the original file (works for any team member with folder access). */
-export function getDropboxPreviewUrl(dropboxPath: string) {
-  const slash = dropboxPath.lastIndexOf("/");
-  const folder = slash > 0 ? dropboxPath.slice(0, slash) : "";
-  const filename = dropboxPath.slice(slash + 1);
-  const encodedFolder = folder
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `https://www.dropbox.com/home${encodedFolder}?preview=${encodeURIComponent(filename)}`;
+const DEFAULT_FILE_SORTER_URL = "https://email-attachment-sorter-production.up.railway.app";
+
+/** Thumbnail served by the file-sorter (streams from Dropbox; authenticated with the viewer's Supabase token). */
+export function getEvidencePhotoThumbnailUrl(
+  photoId: string,
+  size: "w256h256" | "w480h320" | "w640h480" | "w1024h768",
+  accessToken: string,
+) {
+  const base = (process.env.NEXT_PUBLIC_FILE_SORTER_URL?.trim() || DEFAULT_FILE_SORTER_URL).replace(/\/$/, "");
+  return `${base}/evidence-photos/${photoId}/thumbnail?size=${size}&access_token=${encodeURIComponent(accessToken)}`;
 }

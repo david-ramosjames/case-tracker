@@ -21,7 +21,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   EVIDENCE_PHOTO_CATEGORIES,
   countEvidencePhotos,
-  getDropboxPreviewUrl,
+  getEvidencePhotoThumbnailUrl,
   type EvidencePhoto,
   type EvidencePhotoCounts,
 } from "@/lib/evidence-photos/types";
@@ -31,8 +31,32 @@ type PhotosResponse = {
   photos: EvidencePhoto[];
   counts: EvidencePhotoCounts;
   canEdit: boolean;
-  thumbnailsEnabled: boolean;
 };
+
+/** The file-sorter authenticates thumbnails with the viewer's Supabase access token (kept current on refresh). */
+function useSupabaseAccessToken(enabled: boolean) {
+  const [token, setToken] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    let active = true;
+    let unsubscribe: (() => void) | null = null;
+    void import("@/lib/supabase/browser").then(async ({ createSupabaseBrowserClient }) => {
+      if (!active) return;
+      const supabase = createSupabaseBrowserClient();
+      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        setToken(session?.access_token ?? null);
+      });
+      unsubscribe = () => data.subscription.unsubscribe();
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (active) setToken(sessionData.session?.access_token ?? null);
+    });
+    return () => {
+      active = false;
+      unsubscribe?.();
+    };
+  }, [enabled]);
+  return token;
+}
 
 const POLL_INTERVAL_MS = 20_000;
 
@@ -54,6 +78,7 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const accessToken = useSupabaseAccessToken(isExpanded);
 
   const load = useCallback(async () => {
     try {
@@ -133,7 +158,7 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
             </p>
           ) : null}
           {photos.length > 0 ? (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
               {photos.map((photo, index) => (
                 <button
                   key={photo.id}
@@ -142,11 +167,10 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
                   className="group flex min-w-0 flex-col overflow-hidden rounded-md border bg-white text-left transition hover:border-pink-400 hover:shadow-sm"
                 >
                   <PhotoImage
-                    caseId={caseId}
                     photo={photo}
-                    size="w256h256"
-                    enabled={data?.thumbnailsEnabled ?? false}
-                    className="aspect-square w-full object-cover"
+                    size="w480h320"
+                    accessToken={accessToken}
+                    className="aspect-[3/2] w-full object-cover"
                   />
                   <div className="min-w-0 space-y-0.5 p-2">
                     <p className="line-clamp-2 text-sm font-medium leading-snug">{photoTitle(photo)}</p>
@@ -167,7 +191,7 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
           caseId={caseId}
           photo={viewerPhoto}
           canEdit={data.canEdit}
-          thumbnailsEnabled={data.thumbnailsEnabled}
+          accessToken={accessToken}
           position={`${(viewerIndex ?? 0) + 1} / ${photos.length}`}
           onClose={() => setViewerIndex(null)}
           onPrevious={
@@ -193,20 +217,18 @@ function PhotoStatusBadge({ photo }: { photo: EvidencePhoto }) {
 }
 
 function PhotoImage({
-  caseId,
   photo,
   size,
-  enabled,
+  accessToken,
   className,
 }: {
-  caseId: string;
   photo: EvidencePhoto;
-  size: "w256h256" | "w2048h1536";
-  enabled: boolean;
+  size: "w480h320" | "w1024h768";
+  accessToken: string | null;
   className?: string;
 }) {
-  const [failed, setFailed] = useState(false);
-  if (!enabled || failed) {
+  const [failedToken, setFailedToken] = useState<string | null>(null);
+  if (!accessToken || failedToken === accessToken) {
     return (
       <div className={`flex items-center justify-center bg-muted text-muted-foreground ${className ?? ""}`}>
         <ImageIcon className="h-8 w-8" />
@@ -214,13 +236,13 @@ function PhotoImage({
     );
   }
   return (
-    // eslint-disable-next-line @next/next/no-img-element -- authenticated proxy; next/image would cache copies
+    // eslint-disable-next-line @next/next/no-img-element -- file-sorter streams from Dropbox; next/image would cache copies
     <img
-      src={`/api/cases/${caseId}/photos/${photo.id}/thumbnail?size=${size}`}
+      src={getEvidencePhotoThumbnailUrl(photo.id, size, accessToken)}
       alt={photo.title ?? photo.originalFilename}
       loading="lazy"
       className={className}
-      onError={() => setFailed(true)}
+      onError={() => setFailedToken(accessToken)}
     />
   );
 }
@@ -229,7 +251,7 @@ function PhotoViewer({
   caseId,
   photo,
   canEdit,
-  thumbnailsEnabled,
+  accessToken,
   position,
   onClose,
   onPrevious,
@@ -239,7 +261,7 @@ function PhotoViewer({
   caseId: string;
   photo: EvidencePhoto;
   canEdit: boolean;
-  thumbnailsEnabled: boolean;
+  accessToken: string | null;
   position: string;
   onClose: () => void;
   onPrevious?: () => void;
@@ -320,14 +342,31 @@ function PhotoViewer({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="relative flex min-h-[240px] flex-1 items-center justify-center bg-neutral-900">
-          <PhotoImage
-            key={photo.id}
-            caseId={caseId}
-            photo={photo}
-            size="w2048h1536"
-            enabled={thumbnailsEnabled}
-            className="max-h-[60vh] w-full object-contain lg:max-h-[92vh]"
-          />
+          {photo.dropboxPermalink ? (
+            <a
+              href={photo.dropboxPermalink}
+              target="_blank"
+              rel="noreferrer"
+              className="flex w-full items-center justify-center"
+              title="Open original in Dropbox"
+            >
+              <PhotoImage
+                key={photo.id}
+                photo={photo}
+                size="w1024h768"
+                accessToken={accessToken}
+                className="max-h-[60vh] w-full object-contain lg:max-h-[92vh]"
+              />
+            </a>
+          ) : (
+            <PhotoImage
+              key={photo.id}
+              photo={photo}
+              size="w1024h768"
+              accessToken={accessToken}
+              className="max-h-[60vh] w-full object-contain lg:max-h-[92vh]"
+            />
+          )}
           {onPrevious ? (
             <button
               type="button"
@@ -415,12 +454,14 @@ function PhotoViewer({
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
           <div className="mt-auto flex flex-wrap gap-2">
-            <Button asChild variant="outline" size="sm">
-              <a href={getDropboxPreviewUrl(photo.dropboxPath)} target="_blank" rel="noreferrer">
-                <ExternalLink className="h-4 w-4" />
-                Open in Dropbox
-              </a>
-            </Button>
+            {photo.dropboxPermalink ? (
+              <Button asChild variant="outline" size="sm">
+                <a href={photo.dropboxPermalink} target="_blank" rel="noreferrer">
+                  <ExternalLink className="h-4 w-4" />
+                  Open in Dropbox
+                </a>
+              </Button>
+            ) : null}
             {canEdit && photo.status === "failed" ? (
               <Button variant="outline" size="sm" onClick={retry} disabled={isBusy}>
                 <RefreshCw className={`h-4 w-4 ${isBusy ? "animate-spin" : ""}`} />

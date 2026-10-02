@@ -10,7 +10,7 @@ const PHOTO_COLUMNS = [
   "id",
   "case_number",
   "dropbox_path",
-  "dropbox_file_id",
+  "dropbox_permalink",
   "original_filename",
   "ai_title",
   "ai_description",
@@ -28,7 +28,7 @@ type EvidencePhotoRow = {
   id: string;
   case_number: string;
   dropbox_path: string;
-  dropbox_file_id: string;
+  dropbox_permalink: string | null;
   original_filename: string;
   ai_title: string | null;
   ai_description: string | null;
@@ -47,6 +47,7 @@ function rowToPhoto(row: EvidencePhotoRow): EvidencePhoto {
     id: row.id,
     caseNumber: row.case_number,
     dropboxPath: row.dropbox_path,
+    dropboxPermalink: row.dropbox_permalink,
     originalFilename: row.original_filename,
     title: row.ai_title,
     description: row.ai_description,
@@ -79,8 +80,7 @@ export async function listEvidencePhotosForCase(caseNumber: string): Promise<Evi
   return ((data ?? []) as unknown as EvidencePhotoRow[]).map(rowToPhoto);
 }
 
-/** Internal lookup that also returns the Dropbox file id (never sent to the browser). */
-export async function getEvidencePhotoById(id: string) {
+export async function getEvidencePhotoById(id: string): Promise<EvidencePhoto | null> {
   const { data, error } = await requireAdmin()
     .from("evidence_photos")
     .select(PHOTO_COLUMNS)
@@ -88,9 +88,7 @@ export async function getEvidencePhotoById(id: string) {
     .is("deleted_at", null)
     .maybeSingle();
   if (error) throw new Error(error.message);
-  if (!data) return null;
-  const row = data as unknown as EvidencePhotoRow;
-  return { photo: rowToPhoto(row), dropboxFileId: row.dropbox_file_id };
+  return data ? rowToPhoto(data as unknown as EvidencePhotoRow) : null;
 }
 
 export async function updateEvidencePhotoDetails(

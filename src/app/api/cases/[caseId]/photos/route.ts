@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
-import { isDropboxConfigured } from "@/lib/dropbox/client";
 import { getCasePhotoAccess } from "@/lib/evidence-photos/access";
 import { listEvidencePhotosForCase } from "@/lib/evidence-photos/repository";
 import { countEvidencePhotos } from "@/lib/evidence-photos/types";
@@ -21,7 +20,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ cas
       photos,
       counts: countEvidencePhotos(photos),
       canEdit: access.canEdit,
-      thumbnailsEnabled: isDropboxConfigured(),
     });
   } catch (error) {
     console.error("Case photos load failed", { caseId, error });

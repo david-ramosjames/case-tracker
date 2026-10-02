@@ -227,6 +227,7 @@ function casePhotosSummary(photos: EvidencePhoto[]) {
         category: photo.category,
         description: photo.description,
         filename: photo.originalFilename,
+        dropboxLink: photo.dropboxPermalink,
         verifiedByStaff: photo.humanEdited,
       })),
   };
