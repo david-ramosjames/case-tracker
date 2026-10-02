@@ -20,7 +20,12 @@ import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { getDocketFlowCaseUrl } from "@/lib/docketflow/links";
 import { listEvidencePhotosForCase } from "@/lib/evidence-photos/repository";
-import { countEvidencePhotos, type EvidencePhoto } from "@/lib/evidence-photos/types";
+import {
+  EVIDENCE_PHOTO_CATEGORIES,
+  countEvidencePhotos,
+  isEvidencePhotoCategory,
+  type EvidencePhoto,
+} from "@/lib/evidence-photos/types";
 import { type McpCaller } from "@/lib/mcp/identity";
 import { getCaseIntakeSummary } from "@/lib/mcp/intake";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
@@ -210,26 +215,69 @@ async function loadCaseDetailExtras(record: CaseRecord): Promise<CaseDetailExtra
   return { comments, activity, upcomingEvents, slackChannel, intake, photos };
 }
 
-/** Stored descriptions only; photos are never re-analyzed for Slackbot. */
+const PHOTO_GUARDRAIL_NOTE =
+  "AI-generated descriptions of visual evidence (staff-edited where verifiedByStaff is true). They describe only what is visible, not fault, liability, causation, injury severity, or diagnosis. Phrase findings as 'Case photos show…'.";
+const GET_CASE_PHOTO_PREVIEW = 15;
+
+function describedPhotos(photos: EvidencePhoto[]) {
+  return photos.filter((photo) => photo.status === "complete" && (photo.title || photo.description));
+}
+
+function photoRow(photo: EvidencePhoto) {
+  return {
+    title: photo.title,
+    category: photo.category,
+    description: photo.description,
+    filename: photo.originalFilename,
+    dropboxLink: photo.dropboxPermalink,
+    verifiedByStaff: photo.humanEdited,
+  };
+}
+
+const PHOTO_PREVIEW_CATEGORY_ORDER = [
+  "Vehicle Damage",
+  "Injury",
+  "Accident Scene",
+  "Property Damage",
+  "Medical",
+  "Other",
+  "Document",
+];
+
+function photoPreviewRank(photo: EvidencePhoto) {
+  const index = photo.category ? PHOTO_PREVIEW_CATEGORY_ORDER.indexOf(photo.category) : -1;
+  return index === -1 ? PHOTO_PREVIEW_CATEGORY_ORDER.length : index;
+}
+
+function photoCategoryCounts(photos: EvidencePhoto[]) {
+  const counts: Record<string, number> = {};
+  for (const photo of photos) {
+    const key = photo.category ?? "Uncategorized";
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
+}
+
+/** Stored descriptions only; photos are never re-analyzed for Slackbot. Large cases are previewed — see get_case_photos. */
 function casePhotosSummary(photos: EvidencePhoto[]) {
   if (photos.length === 0) return null;
   const counts = countEvidencePhotos(photos);
+  const described = describedPhotos(photos);
   return {
-    note:
-      "AI-generated descriptions of visual evidence (staff-edited where verifiedByStaff is true). They describe only what is visible, not fault, injury severity, or causation. Phrase findings as 'Case photos show…'.",
+    note: PHOTO_GUARDRAIL_NOTE,
     total: counts.total,
     described: counts.ready,
     stillAnalyzing: counts.analyzing,
-    photos: photos
-      .filter((photo) => photo.status === "complete" && (photo.title || photo.description))
-      .map((photo) => ({
-        title: photo.title,
-        category: photo.category,
-        description: photo.description,
-        filename: photo.originalFilename,
-        dropboxLink: photo.dropboxPermalink,
-        verifiedByStaff: photo.humanEdited,
-      })),
+    byCategory: photoCategoryCounts(described),
+    photos: [...described]
+      .sort((a, b) => photoPreviewRank(a) - photoPreviewRank(b))
+      .slice(0, GET_CASE_PHOTO_PREVIEW)
+      .map(photoRow),
+    ...(described.length > GET_CASE_PHOTO_PREVIEW
+      ? {
+          morePhotos: `Showing ${GET_CASE_PHOTO_PREVIEW} of ${described.length}. Call get_case_photos (filter by category or text) for the rest.`,
+        }
+      : {}),
   };
 }
 
@@ -508,7 +556,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
     name: "get_case",
     title: "Get case status",
     description:
-      "Everything on the case page for one case: stage, team, client contacts, attorney fields (liability, policy limits, policy source incl. claim numbers/adjuster notes, injuries, description) with missing/stale status, forecast, notes, sources, litigation events, upcoming DocketFlow events, settlement/disbursement progress, recent comments and activity, plus the DocketFlow intake (accident narrative, police report, vehicle, client and third-party insurance with policy/claim numbers, treatment, employment), plus casePhotos: AI descriptions of the case's Dropbox photos. Present photo findings as 'Case photos show…' and never infer fault, liability, causation, injury severity, or diagnosis from them.",
+      "Everything on the case page for one case: stage, team, client contacts, attorney fields (liability, policy limits, policy source incl. claim numbers/adjuster notes, injuries, description) with missing/stale status, forecast, notes, sources, litigation events, upcoming DocketFlow events, settlement/disbursement progress, recent comments and activity, plus the DocketFlow intake (accident narrative, police report, vehicle, client and third-party insurance with policy/claim numbers, treatment, employment), plus casePhotos: photo counts by category and a preview of AI descriptions of the case's Dropbox photos (use get_case_photos for all of them). Present photo findings as 'Case photos show…' and never infer fault, liability, causation, injury severity, or diagnosis from them.",
     inputSchema: {
       type: "object",
       properties: { case_number: caseNumberProperty },
@@ -524,6 +572,64 @@ export const MCP_TOOLS: McpToolDefinition[] = [
           ? { access: "event_attorney (view and comment only; the assigned team makes edits)" }
           : {}),
         ...caseDetail(record, isActivePipelineCase(record, goals), extras),
+      };
+    },
+  },
+  {
+    name: "get_case_photos",
+    title: "Get case photo descriptions",
+    description:
+      "AI-generated descriptions of a case's photos from Dropbox (vehicle damage, injuries, accident scene, property damage, medical, documents), with title, category, original filename, and Dropbox link. Filter by category and/or text in the title, description, or filename; page with offset. Descriptions cover only what is visible: present them as 'Case photos show…' and never infer fault, liability, causation, injury severity, or diagnosis.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        case_number: caseNumberProperty,
+        category: { type: "string", enum: [...EVIDENCE_PHOTO_CATEGORIES] },
+        contains: {
+          type: "string",
+          description: "Only photos whose title, description, or filename contains this text (case-insensitive).",
+        },
+        limit: { type: "number", minimum: 1, maximum: 100, description: "Photos per page (default 50)." },
+        offset: { type: "number", minimum: 0, description: "Photos to skip for paging (default 0)." },
+      },
+      required: ["case_number"],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+    handler: async (args, caller) => {
+      const { record } = await requireVisibleCase(caller, args.case_number, "read");
+      const category = args.category;
+      if (category != null && !isEvidencePhotoCategory(category)) {
+        throw new McpToolError(`Unknown category. Use one of: ${EVIDENCE_PHOTO_CATEGORIES.join(", ")}.`);
+      }
+      const contains = typeof args.contains === "string" ? args.contains.trim().toLowerCase() : "";
+      const limit = Math.min(Math.max(Math.floor(Number(args.limit ?? 50)) || 50, 1), 100);
+      const offset = Math.max(Math.floor(Number(args.offset ?? 0)) || 0, 0);
+
+      const photos = await listEvidencePhotosForCase(record.shared.caseNumber);
+      const counts = countEvidencePhotos(photos);
+      const matching = describedPhotos(photos).filter(
+        (photo) =>
+          (!category || photo.category === category) &&
+          (!contains ||
+            [photo.title, photo.description, photo.originalFilename].some((value) =>
+              value?.toLowerCase().includes(contains),
+            )),
+      );
+      const page = matching.slice(offset, offset + limit);
+      return {
+        caseNumber: record.shared.caseNumber,
+        client: record.shared.clientName,
+        note: PHOTO_GUARDRAIL_NOTE,
+        totalPhotos: counts.total,
+        stillAnalyzing: counts.analyzing,
+        failedAnalysis: counts.failed,
+        byCategory: photoCategoryCounts(describedPhotos(photos)),
+        matching: matching.length,
+        offset,
+        returned: page.length,
+        ...(offset + page.length < matching.length ? { nextOffset: offset + page.length } : {}),
+        photos: page.map(photoRow),
       };
     },
   },
