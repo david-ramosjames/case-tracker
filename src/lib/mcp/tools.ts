@@ -24,6 +24,7 @@ import {
   EVIDENCE_PHOTO_CATEGORIES,
   countEvidencePhotos,
   isEvidencePhotoCategory,
+  isHiddenNonEvidence,
   type EvidencePhoto,
 } from "@/lib/evidence-photos/types";
 import { type McpCaller } from "@/lib/mcp/identity";
@@ -219,8 +220,15 @@ const PHOTO_GUARDRAIL_NOTE =
   "AI-generated descriptions of visual evidence (staff-edited where verifiedByStaff is true). They describe only what is visible, not fault, liability, causation, injury severity, or diagnosis. Phrase findings as 'Case photos show…'.";
 const GET_CASE_PHOTO_PREVIEW = 15;
 
+/** Photos the file-sorter flagged as non-evidence (logos, signatures, notifications…) are left out for Slackbot. */
+function evidencePhotosOnly(photos: EvidencePhoto[]) {
+  return photos.filter((photo) => !isHiddenNonEvidence(photo));
+}
+
 function describedPhotos(photos: EvidencePhoto[]) {
-  return photos.filter((photo) => photo.status === "complete" && (photo.title || photo.description));
+  return evidencePhotosOnly(photos).filter(
+    (photo) => photo.status === "complete" && (photo.title || photo.description),
+  );
 }
 
 function photoRow(photo: EvidencePhoto) {
@@ -261,13 +269,15 @@ function photoCategoryCounts(photos: EvidencePhoto[]) {
 /** Stored descriptions only; photos are never re-analyzed for Slackbot. Large cases are previewed — see get_case_photos. */
 function casePhotosSummary(photos: EvidencePhoto[]) {
   if (photos.length === 0) return null;
-  const counts = countEvidencePhotos(photos);
+  const visible = evidencePhotosOnly(photos);
+  const counts = countEvidencePhotos(visible);
   const described = describedPhotos(photos);
   return {
     note: PHOTO_GUARDRAIL_NOTE,
     total: counts.total,
     described: counts.ready,
     stillAnalyzing: counts.analyzing,
+    hiddenNonEvidence: photos.length - visible.length,
     byCategory: photoCategoryCounts(described),
     photos: [...described]
       .sort((a, b) => photoPreviewRank(a) - photoPreviewRank(b))
@@ -607,7 +617,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
       const offset = Math.max(Math.floor(Number(args.offset ?? 0)) || 0, 0);
 
       const photos = await listEvidencePhotosForCase(record.shared.caseNumber);
-      const counts = countEvidencePhotos(photos);
+      const counts = countEvidencePhotos(evidencePhotosOnly(photos));
       const matching = describedPhotos(photos).filter(
         (photo) =>
           (!category || photo.category === category) &&
@@ -624,6 +634,7 @@ export const MCP_TOOLS: McpToolDefinition[] = [
         totalPhotos: counts.total,
         stillAnalyzing: counts.analyzing,
         failedAnalysis: counts.failed,
+        hiddenNonEvidence: photos.length - counts.total,
         byCategory: photoCategoryCounts(describedPhotos(photos)),
         matching: matching.length,
         offset,

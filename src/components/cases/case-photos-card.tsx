@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronDown,
   ChevronLeft,
@@ -21,7 +21,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   EVIDENCE_PHOTO_CATEGORIES,
   countEvidencePhotos,
+  getEvidencePhotoDropboxUrl,
   getEvidencePhotoThumbnailUrl,
+  isHiddenNonEvidence,
   type EvidencePhoto,
   type EvidencePhotoCounts,
 } from "@/lib/evidence-photos/types";
@@ -29,7 +31,6 @@ import { formatDate } from "@/lib/utils";
 
 type PhotosResponse = {
   photos: EvidencePhoto[];
-  counts: EvidencePhotoCounts;
   canEdit: boolean;
 };
 
@@ -78,6 +79,7 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [showHidden, setShowHidden] = useState(false);
   const accessToken = useSupabaseAccessToken(isExpanded);
 
   const load = useCallback(async () => {
@@ -96,7 +98,7 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
     void load();
   }, [load]);
 
-  const analyzing = data?.counts.analyzing ?? 0;
+  const analyzing = data ? countEvidencePhotos(data.photos).analyzing : 0;
   useEffect(() => {
     if (!isExpanded || analyzing === 0) return;
     const timer = window.setInterval(() => void load(), POLL_INTERVAL_MS);
@@ -106,14 +108,22 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
   const replacePhoto = useCallback((updated: EvidencePhoto) => {
     setData((current) => {
       if (!current) return current;
-      const photos = current.photos.map((photo) => (photo.id === updated.id ? updated : photo));
-      return { ...current, photos, counts: countEvidencePhotos(photos) };
+      return { ...current, photos: current.photos.map((photo) => (photo.id === updated.id ? updated : photo)) };
     });
   }, []);
 
-  const photos = data?.photos ?? [];
-  const counts = data?.counts;
+  const allPhotos = useMemo(() => data?.photos ?? [], [data]);
+  const visiblePhotos = useMemo(() => allPhotos.filter((photo) => !isHiddenNonEvidence(photo)), [allPhotos]);
+  const hiddenCount = allPhotos.length - visiblePhotos.length;
+  const photos = showHidden ? allPhotos : visiblePhotos;
+  const counts = data ? countEvidencePhotos(visiblePhotos) : null;
   const viewerPhoto = viewerIndex !== null ? photos[viewerIndex] ?? null : null;
+
+  function toggleHidden() {
+    setViewerIndex(null);
+    setShowHidden((current) => !current);
+    setIsExpanded(true);
+  }
 
   return (
     <Card>
@@ -136,6 +146,16 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
               {counts && counts.total > 0 ? (
                 <span className="ml-2 text-sm font-normal text-muted-foreground">{statusSummary(counts)}</span>
               ) : null}
+              {hiddenCount > 0 ? (
+                <button
+                  type="button"
+                  onClick={toggleHidden}
+                  aria-pressed={showHidden}
+                  className="ml-2 text-sm font-normal text-pink-600 underline-offset-2 hover:underline"
+                >
+                  {showHidden ? `Hide ${hiddenCount} non-evidence` : `Show ${hiddenCount} hidden`}
+                </button>
+              ) : null}
             </CardTitle>
             <CardDescription>
               Case photos from Dropbox with AI-written descriptions of what is visible. Descriptions are not legal or
@@ -152,9 +172,14 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
               <Loader2 className="h-4 w-4 animate-spin" /> Loading photos…
             </p>
           ) : null}
-          {data && photos.length === 0 ? (
+          {data && allPhotos.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No photos imported yet. Photos added to this case&apos;s Dropbox folder appear here automatically.
+            </p>
+          ) : null}
+          {data && allPhotos.length > 0 && photos.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              All {hiddenCount} photos were flagged as non-evidence (logos, signatures, notifications).
             </p>
           ) : null}
           {photos.length > 0 ? (
@@ -164,7 +189,9 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
                   key={photo.id}
                   type="button"
                   onClick={() => setViewerIndex(index)}
-                  className="group flex min-w-0 flex-col overflow-hidden rounded-md border bg-white text-left transition hover:border-pink-400 hover:shadow-sm"
+                  className={`group flex min-w-0 flex-col overflow-hidden rounded-md border bg-white text-left transition hover:border-pink-400 hover:shadow-sm ${
+                    isHiddenNonEvidence(photo) ? "opacity-50 hover:opacity-80" : ""
+                  }`}
                 >
                   <PhotoImage
                     photo={photo}
@@ -178,6 +205,7 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
                       {photo.originalFilename}
                     </p>
                     {photo.status !== "complete" ? <PhotoStatusBadge photo={photo} /> : null}
+                    <HiddenReasonLabel photo={photo} />
                   </div>
                 </button>
               ))}
@@ -206,6 +234,15 @@ export function CasePhotosCard({ caseId }: { caseId: string }) {
         />
       ) : null}
     </Card>
+  );
+}
+
+function HiddenReasonLabel({ photo }: { photo: EvidencePhoto }) {
+  if (!isHiddenNonEvidence(photo)) return null;
+  return (
+    <p className="text-[11px] font-medium text-muted-foreground">
+      Hidden: {photo.evidenceReason ?? "not evidence"}
+    </p>
   );
 }
 
@@ -342,23 +379,13 @@ function PhotoViewer({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="relative flex min-h-[240px] flex-1 items-center justify-center bg-neutral-900">
-          {photo.dropboxPermalink ? (
-            <a
-              href={photo.dropboxPermalink}
-              target="_blank"
-              rel="noreferrer"
-              className="flex w-full items-center justify-center"
-              title="Open original in Dropbox"
-            >
-              <PhotoImage
-                key={photo.id}
-                photo={photo}
-                size="w1024h768"
-                accessToken={accessToken}
-                className="max-h-[60vh] w-full object-contain lg:max-h-[92vh]"
-              />
-            </a>
-          ) : (
+          <a
+            href={getEvidencePhotoDropboxUrl(photo)}
+            target="_blank"
+            rel="noreferrer"
+            className="flex w-full items-center justify-center"
+            title="Open original in Dropbox"
+          >
             <PhotoImage
               key={photo.id}
               photo={photo}
@@ -366,7 +393,7 @@ function PhotoViewer({
               accessToken={accessToken}
               className="max-h-[60vh] w-full object-contain lg:max-h-[92vh]"
             />
-          )}
+          </a>
           {onPrevious ? (
             <button
               type="button"
@@ -421,6 +448,9 @@ function PhotoViewer({
               <Badge variant="pink">{photo.category}</Badge>
             ) : null}
             {!isEditing ? <PhotoStatusBadge photo={photo} /> : null}
+            {isHiddenNonEvidence(photo) ? (
+              <Badge variant="outline">Hidden: {photo.evidenceReason ?? "not evidence"}</Badge>
+            ) : null}
           </div>
 
           {isEditing ? (
@@ -454,14 +484,12 @@ function PhotoViewer({
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
           <div className="mt-auto flex flex-wrap gap-2">
-            {photo.dropboxPermalink ? (
-              <Button asChild variant="outline" size="sm">
-                <a href={photo.dropboxPermalink} target="_blank" rel="noreferrer">
-                  <ExternalLink className="h-4 w-4" />
-                  Open in Dropbox
-                </a>
-              </Button>
-            ) : null}
+            <Button asChild variant="outline" size="sm">
+              <a href={getEvidencePhotoDropboxUrl(photo)} target="_blank" rel="noreferrer">
+                <ExternalLink className="h-4 w-4" />
+                Open in Dropbox
+              </a>
+            </Button>
             {canEdit && photo.status === "failed" ? (
               <Button variant="outline" size="sm" onClick={retry} disabled={isBusy}>
                 <RefreshCw className={`h-4 w-4 ${isBusy ? "animate-spin" : ""}`} />

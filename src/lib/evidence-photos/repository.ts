@@ -17,6 +17,8 @@ const PHOTO_COLUMNS = [
   "category",
   "analysis_status",
   "analysis_error",
+  "ai_is_evidence",
+  "ai_evidence_reason",
   "human_edited",
   "edited_by",
   "edited_at",
@@ -35,6 +37,8 @@ type EvidencePhotoRow = {
   category: string | null;
   analysis_status: EvidencePhotoStatus;
   analysis_error: string | null;
+  ai_is_evidence: boolean | null;
+  ai_evidence_reason: string | null;
   human_edited: boolean;
   edited_by: string | null;
   edited_at: string | null;
@@ -54,6 +58,8 @@ function rowToPhoto(row: EvidencePhotoRow): EvidencePhoto {
     category: isEvidencePhotoCategory(row.category) ? row.category : null,
     status: row.analysis_status,
     error: row.analysis_error,
+    isEvidence: row.ai_is_evidence,
+    evidenceReason: row.ai_is_evidence === false ? row.ai_evidence_reason : null,
     humanEdited: row.human_edited,
     editedBy: row.edited_by,
     editedAt: row.edited_at,
