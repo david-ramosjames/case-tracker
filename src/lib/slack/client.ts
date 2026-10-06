@@ -12,14 +12,24 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** Form-encoded so read methods (users.info, users.list, conversations.info/history) see their args; they ignore JSON bodies. */
+function toSlackForm(body: Record<string, unknown>) {
+  const form = new URLSearchParams();
+  for (const [key, value] of Object.entries(body)) {
+    if (value === undefined || value === null) continue;
+    form.set(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+  }
+  return form;
+}
+
 async function slackApi<T>(method: string, body: Record<string, unknown>, attempt = 0): Promise<T> {
   const response = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${getSlackBotToken()}`,
-      "Content-Type": "application/json; charset=utf-8",
+      "Content-Type": "application/x-www-form-urlencoded",
     },
-    body: JSON.stringify(body),
+    body: toSlackForm(body),
   });
 
   const payload = (await response.json()) as T & { ok?: boolean; error?: string };

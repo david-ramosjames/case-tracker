@@ -54,9 +54,13 @@ export async function resolveMcpCaller(slackUserId: string): Promise<McpCaller |
   const userId = slackUserId.trim().toUpperCase();
   if (!/^[UW][A-Z0-9]+$/.test(userId)) return null;
 
-  const contact = await findContactEmailBySlackUserId(userId);
-  const email = (await lookupSlackUserEmail(userId)) ?? contact?.email ?? null;
-  if (!email || !isAllowedEmail(email)) return null;
+  // Some staff use a personal email on Slack; the contact's firm email (matched by Slack ID) still counts.
+  const [contact, slackEmail] = await Promise.all([
+    findContactEmailBySlackUserId(userId),
+    lookupSlackUserEmail(userId),
+  ]);
+  const email = [slackEmail, contact?.email].find((candidate) => candidate && isAllowedEmail(candidate)) ?? null;
+  if (!email) return null;
 
   const authUserId = await findAuthUserIdByEmail(email);
   const role = await getUserRole(authUserId, email);
