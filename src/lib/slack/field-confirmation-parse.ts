@@ -11,9 +11,11 @@ import {
   parseStrictPolicyLimits,
   parseStrictTargetQuarter,
 } from "@/lib/slack/enum-replies";
+import { normalizeConfirmationText } from "@/lib/slack/confirmation-text";
 import { type FieldReminderKey, type TrackerUpdateInput } from "@/lib/types";
 
-const CONFIRM_RE = /^(?:yes|yeah|yep|confirmed?|correct|approve[d]?|ok(?:ay)?|✅|👍|still\s+correct|unchanged)$/i;
+const CONFIRM_RE =
+  /^(?:(?:yes|yeah|yep|confirmed?|correct|approve[d]?|ok(?:ay)?|still\s+correct|unchanged)(?:\s*✅)?|✅)$/iu;
 
 export type ParsedFieldReminderReply =
   | { kind: "confirm" }
@@ -33,7 +35,7 @@ export function parseFieldReminderReply(
     return { kind: "dismiss" };
   }
 
-  if (CONFIRM_RE.test(trimmed)) {
+  if (CONFIRM_RE.test(normalizeConfirmationText(trimmed))) {
     return { kind: "confirm" };
   }
 

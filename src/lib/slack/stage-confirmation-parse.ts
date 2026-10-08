@@ -3,9 +3,10 @@ import {
   getStageSlackOptions,
   parseStrictSlackStage,
 } from "@/lib/slack/enum-replies";
+import { normalizeConfirmationText } from "@/lib/slack/confirmation-text";
 import { type CaseStage } from "@/lib/types";
 
-const CONFIRM_RE = /^(?:yes|yeah|yep|confirmed?|correct|approve[d]?|ok(?:ay)?|✅|👍)$/i;
+const CONFIRM_RE = /^(?:(?:yes|yeah|yep|confirmed?|correct|approve[d]?|ok(?:ay)?)(?:\s*✅)?|✅)$/iu;
 
 const STAGE_LINE_RE =
   /^(?:stage|status|case\s*stage)\s*:\s*(.+)$/i;
@@ -41,7 +42,7 @@ export function parseStageConfirmationText(text: string, suggestedStage?: CaseSt
     return invalidStage(attempted);
   }
 
-  if (CONFIRM_RE.test(trimmed)) {
+  if (CONFIRM_RE.test(normalizeConfirmationText(trimmed))) {
     return { kind: "confirm_suggested" };
   }
 
