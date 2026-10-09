@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Clock, Loader2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -18,6 +19,9 @@ import { type FieldReminderPreviewItem } from "@/lib/slack/field-reminder-notify
 import { type MissingFieldPreviewItem } from "@/lib/slack/missing-field-notify";
 import { type TreatmentPromotionPreviewItem } from "@/lib/slack/stage-workflow";
 import { cn, errorMessage, formatOptionalDate } from "@/lib/utils";
+
+/** Mirrors the two `/api/cron/slack-reminders` schedules in vercel.json (15:00 and 21:20 UTC, Central Daylight). */
+const DAILY_CRON_TIMES = ["10:00 AM CT", "4:20 PM CT"];
 
 type JobRow = {
   step: DailyJobStep;
@@ -560,9 +564,18 @@ export function DailyJobsCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Daily cron jobs</CardTitle>
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle>Daily cron jobs</CardTitle>
+          <span className="text-xs font-medium text-muted-foreground">Runs daily</span>
+          {DAILY_CRON_TIMES.map((time) => (
+            <Badge key={time} variant="pink">
+              <Clock className="mr-1 h-3 w-3" />
+              {time}
+            </Badge>
+          ))}
+        </div>
         <CardDescription>
-          Manual triggers for each step in the daily cron (`/api/cron/slack-reminders`, 10 AM and 4:20 PM Central). Preview shows what
+          Manual triggers for each step in the daily cron (`/api/cron/slack-reminders`). Preview shows what
           would change without saving or posting. Run full job executes each step separately to avoid server timeouts.
           Completed runs (not previews) post a success or failure summary to `#daily-pulse`.
         </CardDescription>
