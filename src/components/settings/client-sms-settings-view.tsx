@@ -649,7 +649,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
           <CardDescription>
             Pull client phone numbers from the Quo directory. Names ending in a case number (e.g. &quot;Mara Hernandez 1570&quot; or
             &quot;Kisha Williams 1277 &amp; 1280&quot;) are matched to tracker cases. Sync runs automatically each morning with the daily
-            daily cron (15:00 UTC ≈ 10 AM Central) when Quo is configured; use the button below after bulk Quo imports or when you need an immediate refresh.
+            daily cron (10 AM and 4:20 PM Central) when Quo is configured; use the button below after bulk Quo imports or when you need an immediate refresh.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
