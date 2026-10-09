@@ -4,7 +4,7 @@ export const maxDuration = 800;
 export const dynamic = "force-dynamic";
 
 import { startDailyCronChain } from "@/lib/cron/daily-cron-executor";
-import { getDailyCronRunId } from "@/lib/cron/daily-cron-run";
+import { getCentralHour, getDailyCronRunId, isDailyCronSlot, isDailyCronSlotDue } from "@/lib/cron/daily-cron-run";
 import { getCronSecret } from "@/lib/slack/config";
 import { errorMessage } from "@/lib/utils";
 
@@ -22,6 +22,15 @@ export async function GET(request: Request) {
   }
 
   const { searchParams } = new URL(request.url);
+  const slot = searchParams.get("slot");
+  if (isDailyCronSlot(slot) && !isDailyCronSlotDue(slot)) {
+    console.info("Daily cron skipped: other daylight-saving variant of this slot", {
+      slot,
+      centralHour: getCentralHour(),
+    });
+    return NextResponse.json({ ok: true, skipped: true, slot, reason: "Not this slot's Central-time hour." });
+  }
+
   const force = searchParams.get("force") === "true";
   const skipSheetSync = searchParams.get("syncSheet") === "false";
   const caseNumber = searchParams.get("caseNumber")?.trim();

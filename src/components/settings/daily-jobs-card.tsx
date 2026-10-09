@@ -20,7 +20,7 @@ import { type MissingFieldPreviewItem } from "@/lib/slack/missing-field-notify";
 import { type TreatmentPromotionPreviewItem } from "@/lib/slack/stage-workflow";
 import { cn, errorMessage, formatOptionalDate } from "@/lib/utils";
 
-/** Mirrors the two `/api/cron/slack-reminders` schedules in vercel.json (15:00 and 21:20 UTC, Central Daylight). */
+/** Central-time slots for `/api/cron/slack-reminders` (vercel.json + DST guard in the route keep these year-round). */
 const DAILY_CRON_TIMES = ["10:00 AM CT", "4:20 PM CT"];
 
 type JobRow = {

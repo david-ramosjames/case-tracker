@@ -77,6 +77,27 @@ export function getDailyCronRunId(now = new Date()) {
   }).format(now);
 }
 
+/**
+ * Vercel crons are UTC-only, so vercel.json schedules each slot at both its CDT and CST UTC time.
+ * Only the call landing in the slot's Central-time hour runs; the other is skipped.
+ */
+const DAILY_CRON_SLOT_CENTRAL_HOURS = { morning: 10, afternoon: 16 } as const;
+export type DailyCronSlot = keyof typeof DAILY_CRON_SLOT_CENTRAL_HOURS;
+
+export function isDailyCronSlot(value: string | null): value is DailyCronSlot {
+  return value === "morning" || value === "afternoon";
+}
+
+export function getCentralHour(now = new Date()) {
+  return Number(
+    new Intl.DateTimeFormat("en-US", { timeZone: "America/Chicago", hour: "numeric", hourCycle: "h23" }).format(now),
+  );
+}
+
+export function isDailyCronSlotDue(slot: DailyCronSlot, now = new Date()) {
+  return getCentralHour(now) === DAILY_CRON_SLOT_CENTRAL_HOURS[slot];
+}
+
 export function getNextDailyCronGroup(current: DailyCronGroup): DailyCronGroup | null {
   const index = DAILY_CRON_GROUP_ORDER.indexOf(current);
   if (index < 0 || index >= DAILY_CRON_GROUP_ORDER.length - 1) return null;
