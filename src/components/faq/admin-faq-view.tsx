@@ -60,7 +60,7 @@ export function AdminFaqView() {
         <p className="font-medium text-navy-950">Entered in Case Tracker (attorney / admin)</p>
         <BulletList
           items={[
-            "Liability, expected disbursement quarter, minimum value, policy limits, expected lit, referral fee.",
+            "Liability, expected disbursement quarter, minimum value, policy limits, referral fee, policy source.",
             "Sources, injuries, description — optional, no scheduled reminders.",
             "Settlement results — mostly auto-filled from the RJL Cases Disbursing Google Sheet.",
           ]}
@@ -79,7 +79,7 @@ export function AdminFaqView() {
       <FaqSection title="Case Tracker Score (0–100%)">
         <BulletList
           items={[
-            "40% completeness — eight fields filled in (case type, liability, quarter, minimum, referral fee, policy limits, expected lit, sources).",
+            "40% completeness — seven fields filled in (case type, liability, quarter, minimum, referral fee, policy limits, policy source).",
             "60% freshness — quarter, minimum, and policy limits confirmed within 90 days (liability counts once set to Accepted, Denied, or Disputed).",
             "Shown on each case, cases table, and dashboard attorney rollups.",
           ]}
@@ -105,7 +105,6 @@ export function AdminFaqView() {
           items={[
             "Liability — set once to Accepted, Denied, or Disputed (no recurring Slack reminder).",
             "Expected disbursement quarter, minimum value, policy limits — every 90 days.",
-            "Expected lit — every 90 days unless the case is or was Litigation (then locked to Lit).",
             "Each post shows Case Tracker Score and which fields still need attention.",
             "Attorney confirms with ✅ or replies confirmed / yes, or posts an update (e.g. Minimum: 85000).",
           ]}

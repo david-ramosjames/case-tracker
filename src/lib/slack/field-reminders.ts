@@ -1,5 +1,4 @@
 import {
-  ATTORNEY_SCORE_VALIDATION_DAYS,
   COMPLETENESS_FIELDS,
   getCaseAttorneyScore,
   getValidationFieldLabel,
@@ -17,7 +16,7 @@ import {
   getTargetQuarterSlackOptions,
 } from "@/lib/slack/enum-replies";
 import { type CaseRecord, type FieldReminderKey } from "@/lib/types";
-import { daysSince, formatCurrency } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 
 export const FIELD_REMINDER_COOLDOWN_DAYS = 3;
 
@@ -63,15 +62,6 @@ function validationFieldReminderDue(record: CaseRecord, fieldId: "targetResoluti
   return !isValidationFieldFresh(record, fieldId);
 }
 
-function expectedLitigationReminderDue(record: CaseRecord) {
-  if (caseHasEverBeenLitigation(record)) return false;
-  if (record.tracker.expectedLitigation === "Lit") return false;
-  const validatedAt = record.tracker.expectedLitigationValidatedAt;
-  if (!record.tracker.expectedLitigation) return true;
-  if (!validatedAt) return daysSince(record.tracker.updatedAt) >= ATTORNEY_SCORE_VALIDATION_DAYS;
-  return daysSince(validatedAt) >= ATTORNEY_SCORE_VALIDATION_DAYS;
-}
-
 /** Fields that need a Slack reminder post today. */
 export function getDueFieldReminders(record: CaseRecord): FieldReminderKey[] {
   if (!record.tracker.isActive || !caseRequiresOngoingUpdates(record)) return [];
@@ -81,7 +71,7 @@ export function getDueFieldReminders(record: CaseRecord): FieldReminderKey[] {
   if (validationFieldReminderDue(record, "targetResolutionQuarter")) due.push("targetResolutionQuarter");
   if (validationFieldReminderDue(record, "minimumValue")) due.push("minimumValue");
   if (validationFieldReminderDue(record, "policyLimits")) due.push("policyLimits");
-  if (expectedLitigationReminderDue(record)) due.push("expectedLitigation");
+  // expectedLitigation is no longer an attorney-facing field; do not Slack-remind it.
   return due;
 }
 
