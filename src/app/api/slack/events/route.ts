@@ -18,6 +18,7 @@ import { claimSlackEventId, claimTopicApplyLock } from "@/lib/slack/event-dedupe
 import { applySlackChannelTopicChange } from "@/lib/slack/topic-inbound";
 import { formatSlackThreadAppliedMessage, formatSlackThreadValidationErrors, parseSlackThreadUpdate } from "@/lib/slack/thread-update";
 import { applySlackThreadUpdate } from "@/lib/supabase/services";
+import { logSlackClientContactMention } from "@/lib/client-contact/slack";
 
 type SlackEventPayload = {
   type?: string;
@@ -151,6 +152,15 @@ export async function POST(request: Request) {
   }
 
   const event = payload.event;
+
+  if (event?.type === "app_mention" && event.channel && event.text?.trim() && event.ts && !event.bot_id) {
+    const contact = await logSlackClientContactMention({
+      channelId: event.channel,
+      text: event.text,
+      ts: event.ts,
+    });
+    return NextResponse.json({ ok: true, contact });
+  }
 
   if (isChannelTopicChange(event)) {
     if (!claimTopicApplyLock(event.channel, event.topic)) {

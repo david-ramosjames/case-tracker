@@ -412,6 +412,54 @@ async function listRecentQuoConversations(maxPages = 5) {
   return conversations;
 }
 
+export type QuoClientActivity = {
+  conversationId: string;
+  phone: string;
+  lastActivityAt: string;
+};
+
+/** Client-side of recent inbox threads, newest activity first. Stops once a page is entirely older than `newerThan`. */
+export async function listRecentQuoClientActivity(options?: { maxPages?: number; newerThan?: string }) {
+  const fromPhone = getQuoFromPhone();
+  const firmLine = normalizePhoneForComparison(fromPhone);
+  const cutoff = options?.newerThan ? Date.parse(options.newerThan) : 0;
+  const maxPages = options?.maxPages ?? 40;
+  const activity: QuoClientActivity[] = [];
+  let pageToken: string | undefined;
+  let pages = 0;
+
+  do {
+    const params = new URLSearchParams({ maxResults: "100", phoneNumbers: fromPhone });
+    if (pageToken) params.set("pageToken", pageToken);
+
+    const response = await quoApiFetch(`${QUO_API_BASE}/conversations?${params.toString()}`, {
+      headers: quoHeaders(),
+    });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Quo list conversations failed (${response.status}): ${body}`);
+    }
+
+    const payload = (await response.json()) as QuoListConversationsResponse;
+    const page = payload.data ?? [];
+    let newestOnPage = 0;
+    for (const conversation of page) {
+      const at = Date.parse(conversation.lastActivityAt ?? "");
+      if (Number.isFinite(at)) newestOnPage = Math.max(newestOnPage, at);
+      const phone = pickClientParticipant(conversation.participants, firmLine);
+      if (!conversation.id || !phone || !Number.isFinite(at)) continue;
+      if (cutoff && at < cutoff) continue;
+      activity.push({ conversationId: conversation.id, phone, lastActivityAt: conversation.lastActivityAt! });
+    }
+
+    pageToken = payload.nextPageToken?.trim() || undefined;
+    pages += 1;
+    if (cutoff && page.length > 0 && newestOnPage < cutoff) break;
+  } while (pageToken && pages < maxPages);
+
+  return activity;
+}
+
 /** For Quo contacts without a profile phone, match recent inbox threads by contact label. */
 export async function lookupQuoInboxByContactDisplayName(displayName: string): Promise<QuoInboxMatch | null> {
   const target = normalizeContactLabel(displayName);
@@ -439,6 +487,74 @@ export async function lookupQuoInboxByContactDisplayName(displayName: string): P
   }
 
   return null;
+}
+
+export type QuoCallActivity = {
+  createdAt: string;
+  direction: "incoming" | "outgoing";
+  answered: boolean;
+};
+
+export type QuoMessageActivity = {
+  createdAt: string;
+  direction: "incoming" | "outgoing";
+};
+
+const UNFINISHED_CALL_STATUSES = new Set(["queued", "initiated", "ringing", "in-progress"]);
+
+/** Latest calls with one client. Participants is required by Quo, so this is one request per phone. */
+export async function listQuoCallsForPhone(clientPhone: string): Promise<QuoCallActivity[]> {
+  const participant = normalizePhoneForComparison(clientPhone);
+  if (!participant) return [];
+  const phoneNumberId = await resolveQuoPhoneNumberId();
+  const params = new URLSearchParams({ phoneNumberId, maxResults: "20" });
+  params.append("participants", participant);
+  const response = await quoApiFetch(`${QUO_API_BASE}/calls?${params.toString()}`, { headers: quoHeaders() });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Quo list calls failed (${response.status}): ${body}`);
+  }
+  const payload = (await response.json()) as {
+    data?: Array<{
+      createdAt?: string | null;
+      direction?: string | null;
+      status?: string | null;
+      answeredAt?: string | null;
+      duration?: number | null;
+      aiHandled?: boolean | string | null;
+    }>;
+  };
+  return (payload.data ?? []).flatMap((call) => {
+    if (!call.createdAt || UNFINISHED_CALL_STATUSES.has(call.status ?? "")) return [];
+    const direction = call.direction === "outgoing" ? "outgoing" : call.direction === "incoming" ? "incoming" : null;
+    if (!direction) return [];
+    const aiHandled = call.aiHandled === true || call.aiHandled === "true";
+    const answered = !aiHandled && (Boolean(call.answeredAt) || (call.duration ?? 0) > 0);
+    return [{ createdAt: call.createdAt, direction, answered }];
+  });
+}
+
+/** Latest texts with one client. */
+export async function listQuoMessagesForPhone(clientPhone: string): Promise<QuoMessageActivity[]> {
+  const participant = normalizePhoneForComparison(clientPhone);
+  if (!participant) return [];
+  const phoneNumberId = await resolveQuoPhoneNumberId();
+  const params = new URLSearchParams({ phoneNumberId, maxResults: "30" });
+  params.append("participants", participant);
+  const response = await quoApiFetch(`${QUO_API_BASE}/messages?${params.toString()}`, { headers: quoHeaders() });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Quo list messages failed (${response.status}): ${body}`);
+  }
+  const payload = (await response.json()) as {
+    data?: Array<{ createdAt?: string | null; direction?: string | null }>;
+  };
+  return (payload.data ?? []).flatMap((message) => {
+    if (!message.createdAt) return [];
+    const direction = message.direction === "outgoing" ? "outgoing" : message.direction === "incoming" ? "incoming" : null;
+    if (!direction) return [];
+    return [{ createdAt: message.createdAt, direction }];
+  });
 }
 
 /** Resolve inbox thread for one client phone via the messages API (most recent activity). */

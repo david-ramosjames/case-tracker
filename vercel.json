@@ -15,6 +15,22 @@
     {
       "path": "/api/cron/slack-reminders?slot=afternoon",
       "schedule": "20 22 * * *"
+    },
+    {
+      "path": "/api/cron/client-contact?slot=morning",
+      "schedule": "30 15 * * *"
+    },
+    {
+      "path": "/api/cron/client-contact?slot=morning",
+      "schedule": "30 16 * * *"
+    },
+    {
+      "path": "/api/cron/client-contact?slot=afternoon",
+      "schedule": "50 21 * * *"
+    },
+    {
+      "path": "/api/cron/client-contact?slot=afternoon",
+      "schedule": "50 22 * * *"
     }
   ],
   "functions": {
@@ -25,6 +41,9 @@
       "maxDuration": 800
     },
     "src/app/api/cron/slack-reminders/route.ts": {
+      "maxDuration": 800
+    },
+    "src/app/api/cron/client-contact/route.ts": {
       "maxDuration": 800
     },
     "src/app/api/admin/slack-topic-sync-all/route.ts": {
