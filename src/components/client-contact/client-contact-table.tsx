@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CLIENT_CONTACT_WINDOW_DAYS, contactNeedsFollowUp, daysSinceContact } from "@/lib/client-contact/types";
 import { formatDate } from "@/lib/utils";
@@ -13,6 +14,8 @@ export type ClientContactRow = {
   caseNumber: string;
   clientName: string;
   attorneyName: string;
+  paralegalName: string;
+  legalAssistantName: string;
   lastAttempt: string | null;
   lastInteraction: string | null;
   lastOutboundCall: string | null;
@@ -22,29 +25,47 @@ export type ClientContactRow = {
 export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
   const [query, setQuery] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(true);
+  const [attorney, setAttorney] = useState("all");
+  const [paralegal, setParalegal] = useState("all");
+  const [legalAssistant, setLegalAssistant] = useState("all");
+
+  const attorneys = useMemo(() => uniqueNames(rows.map((row) => row.attorneyName)), [rows]);
+  const paralegals = useMemo(() => uniqueNames(rows.map((row) => row.paralegalName)), [rows]);
+  const legalAssistants = useMemo(() => uniqueNames(rows.map((row) => row.legalAssistantName)), [rows]);
+
+  const staffFiltered = useMemo(() => {
+    return rows.filter((row) => {
+      if (attorney !== "all" && row.attorneyName !== attorney) return false;
+      if (paralegal !== "all" && row.paralegalName !== paralegal) return false;
+      if (legalAssistant !== "all" && row.legalAssistantName !== legalAssistant) return false;
+      return true;
+    });
+  }, [rows, attorney, paralegal, legalAssistant]);
 
   const counted = useMemo(() => {
     let overdue = 0;
-    for (const row of rows) {
+    for (const row of staffFiltered) {
       if (contactNeedsFollowUp(row.lastAttempt)) overdue += 1;
     }
-    return { overdue, current: rows.length - overdue };
-  }, [rows]);
+    return { overdue, current: staffFiltered.length - overdue };
+  }, [staffFiltered]);
 
   const visible = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    return rows
+    return staffFiltered
       .filter((row) => !overdueOnly || contactNeedsFollowUp(row.lastAttempt))
       .filter((row) => {
         if (!needle) return true;
         return (
           row.caseNumber.toLowerCase().includes(needle) ||
           row.clientName.toLowerCase().includes(needle) ||
-          row.attorneyName.toLowerCase().includes(needle)
+          row.attorneyName.toLowerCase().includes(needle) ||
+          row.paralegalName.toLowerCase().includes(needle) ||
+          row.legalAssistantName.toLowerCase().includes(needle)
         );
       })
       .sort((left, right) => contactAge(right.lastAttempt) - contactAge(left.lastAttempt));
-  }, [rows, overdueOnly, query]);
+  }, [staffFiltered, overdueOnly, query]);
 
   return (
     <div className="space-y-4">
@@ -65,9 +86,14 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
         <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search case, client, or attorney"
-          className="ml-auto w-full sm:w-72"
+          placeholder="Search case, client, or staff"
+          className="w-full sm:w-72"
         />
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <StaffFilter label="Attorney" value={attorney} onChange={setAttorney} options={attorneys} />
+        <StaffFilter label="Paralegal" value={paralegal} onChange={setParalegal} options={paralegals} />
+        <StaffFilter label="Legal assistant" value={legalAssistant} onChange={setLegalAssistant} options={legalAssistants} />
       </div>
 
       <div className="rounded-lg border">
@@ -118,6 +144,36 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
       </div>
     </div>
   );
+}
+
+function StaffFilter({
+  label,
+  value,
+  onChange,
+  options,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: string[];
+}) {
+  return (
+    <label className="flex min-w-44 flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      {label}
+      <Select className="h-9 text-sm font-normal normal-case tracking-normal text-navy-950" value={value} onChange={(event) => onChange(event.target.value)} aria-label={`Filter by ${label}`}>
+        <option value="all">All</option>
+        {options.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </Select>
+    </label>
+  );
+}
+
+function uniqueNames(names: string[]) {
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right));
 }
 
 function formatContactDate(value: string | null) {
