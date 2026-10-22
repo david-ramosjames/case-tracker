@@ -347,7 +347,16 @@ export function CaseTable({
   async function handleExportToExcel() {
     setIsExporting(true);
     try {
-      const response = await fetch("/api/cases/export-excel", { cache: "no-store" });
+      // Send the filtered case IDs to export only visible cases
+      const caseIds = filteredRecords.map((record) => record.shared.id);
+      
+      const response = await fetch("/api/cases/export-excel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caseIds }),
+        cache: "no-store",
+      });
+      
       if (!response.ok) {
         const json = await response.json();
         throw new Error(json.error ?? "Export failed");
@@ -357,14 +366,14 @@ export function CaseTable({
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.download = `Cases_Export_${new Date().toISOString().split("T")[0]}.xlsx`;
+      link.download = `Case_Summary_Report_${new Date().toISOString().split("T")[0]}.xlsx`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       window.URL.revokeObjectURL(url);
     } catch (error) {
-      console.error("Excel export failed:", error);
-      setSaveMessage(error instanceof Error ? error.message : "Excel export failed");
+      console.error("Case summary export failed:", error);
+      setSaveMessage(error instanceof Error ? error.message : "Case summary export failed");
     } finally {
       setIsExporting(false);
     }
@@ -707,18 +716,18 @@ export function CaseTable({
             <Button
               variant="outline"
               onClick={handleExportToExcel}
-              disabled={isExporting || records.length === 0}
+              disabled={isExporting || filteredRecords.length === 0}
               className="shrink-0"
             >
               {isExporting ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  Exporting...
+                  Generating...
                 </>
               ) : (
                 <>
                   <Download className="h-4 w-4" />
-                  Export to Excel
+                  Case Summary Report
                 </>
               )}
             </Button>
