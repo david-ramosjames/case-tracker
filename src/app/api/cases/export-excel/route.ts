@@ -121,9 +121,7 @@ async function addCaseSheet(
   sheet.columns = [
     { width: 25 }, // A: Labels
     { width: 50 }, // B: Values
-    { width: 15 }, // C: Photo thumbnails column 1
-    { width: 15 }, // D: Photo thumbnails column 2
-    { width: 15 }, // E: Photo thumbnails column 3
+    { width: 46 }, // C: Evidence photos, stacked
   ];
   
   let currentRow = 1;
@@ -211,13 +209,10 @@ async function addCaseSheet(
       .slice(0, MAX_PHOTOS_PER_CASE);
     
     if (readyPhotos.length > 0) {
-      currentRow += 2;
-      const photosHeaderCell = sheet.getCell(`A${currentRow}`);
+      const photosHeaderCell = sheet.getCell("C1");
       photosHeaderCell.value = `Evidence Photos (${readyPhotos.length}${photos.length > MAX_PHOTOS_PER_CASE ? ` of ${photos.length}` : ""})`;
-      photosHeaderCell.font = { bold: true, size: 14 };
-      currentRow += 2;
-      
-      // Fetch photos in parallel batch for better performance
+      photosHeaderCell.font = { bold: true, size: 12 };
+
       const photoData = readyPhotos.map((photo) => ({
         id: photo.id,
         title: photo.title,
@@ -225,64 +220,55 @@ async function addCaseSheet(
         originalFilename: photo.originalFilename,
       }));
       const fetchedPhotos = await fetchPhotoBatch(photoData, accessToken);
-      
-      // Add photos in a grid layout
-      const photosPerRow = 3;
-      const photoStartRow = currentRow;
-      
+
+      // Default rows are ~20px. A 100px image fills five of them, so the
+      // caption starts on the next row instead of several rows below.
+      const imageRows = 5;
+      let row = 3;
+
       for (let i = 0; i < readyPhotos.length; i++) {
         const photo = readyPhotos[i];
         const photoBuffer = fetchedPhotos[i]?.buffer;
-        const colIndex = (i % photosPerRow);
-        const rowOffset = Math.floor(i / photosPerRow);
-        const photoRow = photoStartRow + (rowOffset * 8);
-        const photoCol = String.fromCharCode(67 + colIndex);
-        
-        // Try to embed photo if available
+
         if (photoBuffer) {
           try {
             const imageId = workbook.addImage({
               buffer: photoBuffer as unknown as ArrayBuffer,
               extension: "jpeg",
             });
-            
             sheet.addImage(imageId, {
-              tl: { col: colIndex + 2, row: photoRow - 1 },
-              ext: { width: 100, height: 75 },
+              tl: { col: 2, row: row - 1 },
+              ext: { width: 300, height: 100 },
               editAs: "oneCell",
             });
           } catch (error) {
             console.warn(`Failed to add image for photo ${photo.id}:`, error);
           }
         }
-        
-        // Add photo title and description below image
-        const titleRow = photoRow + 5;
-        const titleCell = sheet.getCell(`${photoCol}${titleRow}`);
+
+        const titleRow = photoBuffer ? row + imageRows : row;
+        const titleCell = sheet.getCell(`C${titleRow}`);
         titleCell.value = photo.title || photo.originalFilename;
         titleCell.font = { bold: true, size: 9 };
         titleCell.alignment = { wrapText: true, vertical: "top" };
-        
+
         const descRow = titleRow + 1;
-        const descCell = sheet.getCell(`${photoCol}${descRow}`);
+        const descCell = sheet.getCell(`C${descRow}`);
         descCell.value = photo.description || "";
-        descCell.font = { size: 8 };
+        descCell.font = { size: 9 };
         descCell.alignment = { wrapText: true, vertical: "top" };
-        
-        // Add Dropbox link
+        sheet.getRow(descRow).height = 32;
+
         const linkRow = descRow + 1;
-        const linkCell = sheet.getCell(`${photoCol}${linkRow}`);
+        const linkCell = sheet.getCell(`C${linkRow}`);
         const dropboxUrl = getEvidencePhotoDropboxUrl(photo);
         linkCell.value = {
           text: "View in Dropbox",
           hyperlink: dropboxUrl,
         };
-        linkCell.font = { size: 8, color: { argb: "FF0000FF" }, underline: true };
-        
-        sheet.getRow(photoRow).height = 60;
-        sheet.getRow(titleRow).height = 25;
-        sheet.getRow(descRow).height = 40;
-        sheet.getRow(linkRow).height = 15;
+        linkCell.font = { size: 9, color: { argb: "FF0563C1" }, underline: true };
+
+        row = linkRow + 2;
       }
     }
   } catch (error) {
