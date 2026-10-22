@@ -8,6 +8,14 @@ import {
   getUsers,
 } from "@/lib/supabase/services";
 
+/** Session, staff, and goals — no full case list. Use this on a single-case page. */
+export async function loadViewerDirectory() {
+  const sessionUser = await getSessionUser();
+  if (!sessionUser) redirect("/login");
+  const [users, goals] = await Promise.all([getUsers(), getAttorneyGoals()]);
+  return { sessionUser, users, goals };
+}
+
 export async function loadViewerCaseBundle() {
   const sessionUser = await getSessionUser();
   if (!sessionUser) redirect("/login");

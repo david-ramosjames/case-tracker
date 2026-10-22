@@ -4,7 +4,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { canViewerAccessCase } from "@/lib/auth/access";
 import { getEventAttorneyCaseIds } from "@/lib/auth/event-attorney";
 import { dataRepository } from "@/lib/data/repository";
-import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
+import { loadViewerDirectory } from "@/lib/data/viewer-data";
 import { getDocketFlowCaseUrl } from "@/lib/docketflow/links";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
 import { isOrphanTrackerRecord } from "@/lib/supabase/services";
@@ -13,8 +13,8 @@ export const dynamic = "force-dynamic";
 
 export default async function CaseDetailPage({ params }: { params: Promise<{ caseId: string }> }) {
   const { caseId } = await params;
-  const { sessionUser, users, goals } = await loadViewerCaseBundle();
-  const [record, comments, activity, settings] = await Promise.all([
+  const [{ sessionUser, users, goals }, record, comments, activity, settings] = await Promise.all([
+    loadViewerDirectory(),
     dataRepository.getCaseById(caseId),
     dataRepository.getCaseComments(caseId),
     dataRepository.getCaseActivity(caseId),

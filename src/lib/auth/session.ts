@@ -1,7 +1,16 @@
+import { cache } from "react";
 import { displayNameFromEmail, isAllowedEmail } from "@/lib/auth/constants";
 import { getUserRole, provisionUserRole } from "@/lib/auth/provision-user";
 import { type SessionUser } from "@/lib/auth/types";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+const getAuthUser = cache(async () => {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user;
+});
 
 function initials(name: string) {
   return name
@@ -12,11 +21,8 @@ function initials(name: string) {
     .join("");
 }
 
-export async function getSessionUser(): Promise<SessionUser | null> {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
+  const user = await getAuthUser();
 
   if (!user?.email || !isAllowedEmail(user.email)) return null;
 
@@ -30,7 +36,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     role,
     avatarInitials: initials(name),
   };
-}
+});
 
 export async function requireSessionUser(): Promise<SessionUser> {
   const sessionUser = await getSessionUser();
@@ -39,10 +45,7 @@ export async function requireSessionUser(): Promise<SessionUser> {
 }
 
 export async function ensureProvisionedSessionUser(): Promise<SessionUser | null> {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthUser();
 
   if (!user?.email || !isAllowedEmail(user.email)) return null;
 

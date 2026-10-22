@@ -1,6 +1,8 @@
+import { Suspense } from "react";
 import { Bell, LogOut } from "lucide-react";
 import { GlobalCaseSearch } from "@/components/layout/global-case-search";
 import { AppMobileNav, AppTopNav } from "@/components/layout/app-top-nav";
+import { NavigationProgress } from "@/components/layout/navigation-progress";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { isAdminRole } from "@/lib/auth/access";
@@ -9,6 +11,9 @@ import { type SessionUser } from "@/lib/auth/types";
 export function AppShell({ children, sessionUser }: { children: React.ReactNode; sessionUser: SessionUser }) {
   return (
     <div className="min-h-screen bg-background">
+      <Suspense fallback={null}>
+        <NavigationProgress />
+      </Suspense>
       <header className="sticky top-0 z-20 border-b bg-white/88 backdrop-blur">
         <div className="flex min-h-16 items-center gap-4 px-4 py-3 sm:px-6 lg:px-8">
           <div className="min-w-0 flex-1">
