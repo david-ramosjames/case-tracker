@@ -6,6 +6,8 @@ import { CLIENT_CONTACT_WINDOW_DAYS, clientContactDates } from "@/lib/client-con
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
+import { getQuoClientSmsUrl, getQuoContactUrl } from "@/lib/quo/links";
+import { loadSlackChannelMapByCaseNumber } from "@/lib/slack/channels";
 import { type CaseRecord } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -18,11 +20,52 @@ function isAssignedToViewer(record: CaseRecord, contactId: string) {
   );
 }
 
+/** Referred-out cases are stored under the placeholder attorney/paralegal named Referred. */
+function isReferredAssignment(name: string | null | undefined) {
+  return /^\s*referred\b/i.test(name ?? "");
+}
+
+function isReferredCase(record: CaseRecord, topicStage: string | null | undefined) {
+  if (record.tracker.caseStage === "Referred") return true;
+  if (topicStage && /\breferred\b/i.test(topicStage)) return true;
+  return (
+    isReferredAssignment(record.attorney.name) ||
+    isReferredAssignment(record.paralegal.name) ||
+    isReferredAssignment(record.legalAssistant?.name)
+  );
+}
+
+function quoUrlForCase(record: CaseRecord) {
+  const candidates = [
+    {
+      quoConversationId: record.tracker.quoConversationId,
+      quoPhoneNumberId: record.tracker.quoPhoneNumberId,
+    },
+    ...record.tracker.quoContacts.map((contact) => ({
+      quoConversationId: contact.quoConversationId,
+      quoPhoneNumberId: contact.quoPhoneNumberId,
+    })),
+  ];
+  for (const candidate of candidates) {
+    const inboxUrl = getQuoClientSmsUrl(candidate);
+    if (inboxUrl) return inboxUrl;
+  }
+  return (
+    getQuoContactUrl(record.tracker.quoContactId) ??
+    record.tracker.quoContacts.map((contact) => getQuoContactUrl(contact.quoContactId)).find((url) => url) ??
+    null
+  );
+}
+
 export default async function ClientContactPage() {
-  const { records, sessionUser, users } = await loadViewerCaseBundle();
+  const [{ records, sessionUser, users }, slackChannels] = await Promise.all([
+    loadViewerCaseBundle(),
+    loadSlackChannelMapByCaseNumber(),
+  ]);
   const viewer = buildViewerContext(sessionUser, users);
   const open = records.filter((record) => {
-    if (record.tracker.caseStage === "Referred") return false;
+    const topicStage = slackChannels.get(cleanCaseNumber(record.shared.caseNumber))?.topicStage;
+    if (isReferredCase(record, topicStage)) return false;
     if (!caseRequiresOngoingUpdates(record)) return false;
     if (viewer.isAdmin) return true;
     return viewer.contactId ? isAssignedToViewer(record, viewer.contactId) : false;
@@ -43,6 +86,7 @@ export default async function ClientContactPage() {
       lastInteraction: dates.lastInteraction,
       lastOutboundCall: stored?.lastOutboundCallAt ?? null,
       lastOutboundText: stored?.lastOutboundTextAt ?? null,
+      quoUrl: quoUrlForCase(record),
     };
   });
 

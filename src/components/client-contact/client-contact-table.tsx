@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CLIENT_CONTACT_WINDOW_DAYS, contactNeedsFollowUp, daysSinceContact } from "@/lib/client-contact/types";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 export type ClientContactRow = {
   caseId: string;
@@ -20,7 +21,11 @@ export type ClientContactRow = {
   lastInteraction: string | null;
   lastOutboundCall: string | null;
   lastOutboundText: string | null;
+  quoUrl: string | null;
 };
+
+type SortKey = "case" | "days";
+type SortDirection = "asc" | "desc";
 
 export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
   const [query, setQuery] = useState("");
@@ -28,6 +33,17 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
   const [attorney, setAttorney] = useState("all");
   const [paralegal, setParalegal] = useState("all");
   const [legalAssistant, setLegalAssistant] = useState("all");
+  const [sortKey, setSortKey] = useState<SortKey>("days");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+
+  function requestSort(nextKey: SortKey) {
+    if (sortKey === nextKey) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDirection(nextKey === "case" ? "asc" : "desc");
+  }
 
   const attorneys = useMemo(() => uniqueNames(rows.map((row) => row.attorneyName)), [rows]);
   const paralegals = useMemo(() => uniqueNames(rows.map((row) => row.paralegalName)), [rows]);
@@ -64,8 +80,8 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
           row.legalAssistantName.toLowerCase().includes(needle)
         );
       })
-      .sort((left, right) => contactAge(right.lastAttempt) - contactAge(left.lastAttempt));
-  }, [staffFiltered, overdueOnly, query]);
+      .sort((left, right) => compareRows(left, right, sortKey, sortDirection));
+  }, [staffFiltered, overdueOnly, query, sortKey, sortDirection]);
 
   return (
     <div className="space-y-4">
@@ -100,11 +116,12 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Case</TableHead>
+              <SortableHead label="Case" sortKey="case" active={sortKey} direction={sortDirection} onSort={requestSort} />
               <TableHead>Client</TableHead>
+              <TableHead>Quo</TableHead>
               <TableHead>Attorney</TableHead>
               <TableHead>Last attempt</TableHead>
-              <TableHead>Days</TableHead>
+              <SortableHead label="Days" sortKey="days" active={sortKey} direction={sortDirection} onSort={requestSort} />
               <TableHead>Last interaction</TableHead>
               <TableHead>Outbound call</TableHead>
               <TableHead>Outbound text</TableHead>
@@ -113,7 +130,7 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
           <TableBody>
             {visible.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="text-muted-foreground">
+                <TableCell colSpan={9} className="text-muted-foreground">
                   {overdueOnly ? "Every open case has a contact attempt in the last 30 days." : "No matching cases."}
                 </TableCell>
               </TableRow>
@@ -127,6 +144,21 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
                       <CaseNumberLink caseId={row.caseId} caseNumber={row.caseNumber} />
                     </TableCell>
                     <TableCell>{row.clientName}</TableCell>
+                    <TableCell>
+                      {row.quoUrl ? (
+                        <a
+                          href={row.quoUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 font-medium text-pink-600 hover:text-pink-500"
+                        >
+                          Open
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      ) : (
+                        "—"
+                      )}
+                    </TableCell>
                     <TableCell>{row.attorneyName}</TableCell>
                     <TableCell>{formatContactDate(row.lastAttempt)}</TableCell>
                     <TableCell>
@@ -185,4 +217,42 @@ function formatContactDate(value: string | null) {
 function contactAge(value: string | null) {
   const days = daysSinceContact(value);
   return days === null ? Number.POSITIVE_INFINITY : days;
+}
+
+function compareRows(left: ClientContactRow, right: ClientContactRow, sortKey: SortKey, direction: SortDirection) {
+  const result =
+    sortKey === "case"
+      ? left.caseNumber.localeCompare(right.caseNumber, undefined, { numeric: true })
+      : contactAge(left.lastAttempt) - contactAge(right.lastAttempt);
+  if (Number.isNaN(result)) return 0;
+  return direction === "asc" ? result : -result;
+}
+
+function SortableHead({
+  label,
+  sortKey,
+  active,
+  direction,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  active: SortKey;
+  direction: SortDirection;
+  onSort: (key: SortKey) => void;
+}) {
+  const isActive = active === sortKey;
+  const Icon = !isActive ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <TableHead className="align-middle">
+      <button
+        type="button"
+        className="inline-flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground"
+        onClick={() => onSort(sortKey)}
+      >
+        {label}
+        <Icon className={cn("h-3.5 w-3.5", isActive && "text-pink-500")} />
+      </button>
+    </TableHead>
+  );
 }
