@@ -117,13 +117,14 @@ async function addCaseSheet(
 ) {
   const sheet = workbook.addWorksheet(sheetName);
   
-  // Set column widths
+  // Set column widths - photos will be on the right side
   sheet.columns = [
     { width: 25 }, // A: Labels
-    { width: 50 }, // B: Values
-    { width: 15 }, // C: Photo thumbnails column 1
-    { width: 15 }, // D: Photo thumbnails column 2
-    { width: 15 }, // E: Photo thumbnails column 3
+    { width: 40 }, // B: Values (reduced to make room for photos)
+    { width: 20 }, // C: Photo column 1
+    { width: 20 }, // D: Photo column 2
+    { width: 20 }, // E: Photo column 3
+    { width: 20 }, // F: Photo column 4
   ];
   
   let currentRow = 1;
@@ -203,7 +204,7 @@ async function addCaseSheet(
     currentRow++;
   }
   
-  // Fetch and add photos (limit for performance)
+  // Fetch and add photos on the right side (limit for performance)
   try {
     const photos = await listEvidencePhotosForCase(caseRecord.shared.caseNumber);
     const readyPhotos = photos
@@ -211,11 +212,11 @@ async function addCaseSheet(
       .slice(0, MAX_PHOTOS_PER_CASE);
     
     if (readyPhotos.length > 0) {
-      currentRow += 2;
-      const photosHeaderCell = sheet.getCell(`A${currentRow}`);
+      // Add photos header in column C, starting from row 1
+      const photosHeaderCell = sheet.getCell("C1");
       photosHeaderCell.value = `Evidence Photos (${readyPhotos.length}${photos.length > MAX_PHOTOS_PER_CASE ? ` of ${photos.length}` : ""})`;
-      photosHeaderCell.font = { bold: true, size: 14 };
-      currentRow += 2;
+      photosHeaderCell.font = { bold: true, size: 12 };
+      sheet.mergeCells("C1:F1");
       
       // Fetch photos in parallel batch for better performance
       const photoData = readyPhotos.map((photo) => ({
@@ -226,17 +227,23 @@ async function addCaseSheet(
       }));
       const fetchedPhotos = await fetchPhotoBatch(photoData, accessToken);
       
-      // Add photos in a grid layout
-      const photosPerRow = 3;
-      const photoStartRow = currentRow;
+      // Add photos in a vertical layout on the right side (2 per row)
+      const photosPerRow = 2;
+      const photoStartRow = 2;
+      const photoStartCol = 2; // Column C (0-indexed: A=0, B=1, C=2)
       
       for (let i = 0; i < readyPhotos.length; i++) {
         const photo = readyPhotos[i];
         const photoBuffer = fetchedPhotos[i]?.buffer;
-        const colIndex = (i % photosPerRow);
+        const colOffset = i % photosPerRow;
         const rowOffset = Math.floor(i / photosPerRow);
-        const photoRow = photoStartRow + (rowOffset * 8);
-        const photoCol = String.fromCharCode(67 + colIndex);
+        const baseRow = photoStartRow + (rowOffset * 10); // 10 rows per photo row
+        const colIndex = photoStartCol + (colOffset * 2); // 2 columns per photo
+        const photoCol = String.fromCharCode(67 + (colOffset * 2)); // C or E
+        
+        // Add border and styling to photo cell area
+        const photoCellStart = `${photoCol}${baseRow}`;
+        const photoCellEnd = `${String.fromCharCode(photoCol.charCodeAt(0) + 1)}${baseRow + 8}`;
         
         // Try to embed photo if available
         if (photoBuffer) {
@@ -247,8 +254,8 @@ async function addCaseSheet(
             });
             
             sheet.addImage(imageId, {
-              tl: { col: colIndex + 2, row: photoRow - 1 },
-              ext: { width: 100, height: 75 },
+              tl: { col: colIndex, row: baseRow - 1 },
+              ext: { width: 130, height: 100 },
               editAs: "oneCell",
             });
           } catch (error) {
@@ -256,33 +263,55 @@ async function addCaseSheet(
           }
         }
         
-        // Add photo title and description below image
-        const titleRow = photoRow + 5;
+        // Add photo title below image
+        const titleRow = baseRow + 6;
         const titleCell = sheet.getCell(`${photoCol}${titleRow}`);
         titleCell.value = photo.title || photo.originalFilename;
         titleCell.font = { bold: true, size: 9 };
         titleCell.alignment = { wrapText: true, vertical: "top" };
+        sheet.mergeCells(`${photoCol}${titleRow}:${String.fromCharCode(photoCol.charCodeAt(0) + 1)}${titleRow}`);
         
+        // Add photo description
         const descRow = titleRow + 1;
         const descCell = sheet.getCell(`${photoCol}${descRow}`);
         descCell.value = photo.description || "";
         descCell.font = { size: 8 };
         descCell.alignment = { wrapText: true, vertical: "top" };
+        sheet.mergeCells(`${photoCol}${descRow}:${String.fromCharCode(photoCol.charCodeAt(0) + 1)}${descRow + 1}`);
         
         // Add Dropbox link
-        const linkRow = descRow + 1;
+        const linkRow = descRow + 2;
         const linkCell = sheet.getCell(`${photoCol}${linkRow}`);
         const dropboxUrl = getEvidencePhotoDropboxUrl(photo);
         linkCell.value = {
           text: "View in Dropbox",
           hyperlink: dropboxUrl,
         };
-        linkCell.font = { size: 8, color: { argb: "FF0000FF" }, underline: true };
+        linkCell.font = { size: 8, color: { argb: "FF0563C1" }, underline: true };
         
-        sheet.getRow(photoRow).height = 60;
-        sheet.getRow(titleRow).height = 25;
-        sheet.getRow(descRow).height = 40;
-        sheet.getRow(linkRow).height = 15;
+        // Set row heights
+        sheet.getRow(baseRow).height = 75;
+        sheet.getRow(titleRow).height = 20;
+        sheet.getRow(descRow).height = 35;
+        sheet.getRow(linkRow).height = 18;
+        
+        // Add subtle border around photo area
+        for (let r = baseRow; r <= baseRow + 8; r++) {
+          for (let c = 0; c < 2; c++) {
+            const cell = sheet.getCell(r, colIndex + c + 1);
+            cell.border = {
+              top: r === baseRow ? { style: "thin", color: { argb: "FFD3D3D3" } } : undefined,
+              bottom: r === baseRow + 8 ? { style: "thin", color: { argb: "FFD3D3D3" } } : undefined,
+              left: c === 0 ? { style: "thin", color: { argb: "FFD3D3D3" } } : undefined,
+              right: c === 1 ? { style: "thin", color: { argb: "FFD3D3D3" } } : undefined,
+            };
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFFAFAFA" },
+            };
+          }
+        }
       }
     }
   } catch (error) {
