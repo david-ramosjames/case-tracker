@@ -88,6 +88,7 @@ async function addCaseSheet(
   caseRecord: CaseRecord,
   sheetName: string,
   accessToken: string,
+  users: Array<{ id: string; name: string }>,
 ) {
   const sheet = workbook.addWorksheet(sheetName);
   
@@ -108,12 +109,20 @@ async function addCaseSheet(
   titleCell.font = { bold: true, size: 16 };
   currentRow += 2;
   
+  // Resolve user names
+  const attorneyName = users.find((u) => u.id === caseRecord.shared.attorneyId)?.name || caseRecord.shared.attorneyId;
+  const paralegalName = users.find((u) => u.id === caseRecord.shared.paralegalId)?.name || caseRecord.shared.paralegalId;
+  const legalAssistantName = caseRecord.shared.legalAssistantId 
+    ? users.find((u) => u.id === caseRecord.shared.legalAssistantId)?.name || caseRecord.shared.legalAssistantId
+    : "";
+
   // Case details
   const details = [
     ["Case Number", caseRecord.shared.caseNumber],
     ["Client Name", caseRecord.shared.clientName],
-    ["Attorney", caseRecord.shared.attorneyId],
-    ["Paralegal", caseRecord.shared.paralegalId],
+    ["Attorney", attorneyName],
+    ["Paralegal", paralegalName],
+    ["Legal Assistant", legalAssistantName],
     ["Case Type", caseRecord.shared.caseType],
     ["Date Signed", formatDate(caseRecord.shared.dateSigned)],
     ["Date of Incident", formatDate(caseRecord.shared.dateOfIncident)],
@@ -258,7 +267,7 @@ export async function GET() {
   if (!sessionUser) return unauthorizedResponse();
   
   try {
-    const { records, sessionUser: user } = await loadViewerCaseBundle();
+    const { records, sessionUser: user, users } = await loadViewerCaseBundle();
     
     if (records.length === 0) {
       return NextResponse.json(
@@ -297,7 +306,7 @@ export async function GET() {
         clientName: caseRecord.shared.clientName,
       });
       
-      await addCaseSheet(workbook, caseRecord, sheetName, accessToken);
+      await addCaseSheet(workbook, caseRecord, sheetName, accessToken, users);
     }
     
     // Add summary sheet at the beginning
