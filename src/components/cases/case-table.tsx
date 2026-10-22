@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
-import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Eye, Loader2 } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Download, Eye, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeaderFilter, HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Card, CardContent } from "@/components/ui/card";
@@ -133,6 +133,7 @@ export function CaseTable({
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [rowSaveErrors, setRowSaveErrors] = useState<Record<string, string>>({});
   const [rowSaveStatus, setRowSaveStatus] = useState<Record<string, RowSaveStatus>>({});
+  const [isExporting, setIsExporting] = useState(false);
   const pendingPatchesRef = useRef(new Map<string, CaseTablePersistPatch>());
   const preEditSnapshotsRef = useRef(new Map<string, CaseRecord>());
   const persistChainRef = useRef(new Map<string, Promise<void>>());
@@ -341,6 +342,32 @@ export function CaseTable({
     setCaseSize("all");
     setQuarter("all");
     setQualityFilter(null);
+  }
+
+  async function handleExportToExcel() {
+    setIsExporting(true);
+    try {
+      const response = await fetch("/api/cases/export-excel", { cache: "no-store" });
+      if (!response.ok) {
+        const json = await response.json();
+        throw new Error(json.error ?? "Export failed");
+      }
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Cases_Export_${new Date().toISOString().split("T")[0]}.xlsx`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error("Excel export failed:", error);
+      setSaveMessage(error instanceof Error ? error.message : "Excel export failed");
+    } finally {
+      setIsExporting(false);
+    }
   }
 
   useEffect(() => {
@@ -677,6 +704,24 @@ export function CaseTable({
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
+            <Button
+              variant="outline"
+              onClick={handleExportToExcel}
+              disabled={isExporting || records.length === 0}
+              className="shrink-0"
+            >
+              {isExporting ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Exporting...
+                </>
+              ) : (
+                <>
+                  <Download className="h-4 w-4" />
+                  Export to Excel
+                </>
+              )}
+            </Button>
             {activeFilterCount > 0 ? (
               <Button variant="ghost" onClick={clearFilters}>
                 Clear column filters
