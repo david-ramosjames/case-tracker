@@ -7,7 +7,10 @@ import { getEvidencePhotoDropboxUrl } from "@/lib/evidence-photos/types";
 import { type CaseRecord } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300;
+export const maxDuration = 60;
+
+const MAX_PHOTOS_PER_CASE = 10;
+const PHOTO_FETCH_TIMEOUT_MS = 3000;
 
 const DEFAULT_FILE_SORTER_URL = "https://email-attachment-sorter-production.up.railway.app";
 
@@ -50,11 +53,17 @@ async function fetchPhotoThumbnail(
 ): Promise<Buffer | null> {
   try {
     const base = (process.env.NEXT_PUBLIC_FILE_SORTER_URL?.trim() || DEFAULT_FILE_SORTER_URL).replace(/\/$/, "");
-    const url = `${base}/evidence-photos/${photoId}/thumbnail?size=w480h320&access_token=${encodeURIComponent(accessToken)}`;
+    const url = `${base}/evidence-photos/${photoId}/thumbnail?size=w256h256&access_token=${encodeURIComponent(accessToken)}`;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), PHOTO_FETCH_TIMEOUT_MS);
     
     const response = await fetch(url, {
       headers: { Accept: "image/*" },
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
     
     if (!response.ok) {
       console.warn(`Failed to fetch photo ${photoId}: ${response.status}`);
@@ -64,9 +73,25 @@ async function fetchPhotoThumbnail(
     const arrayBuffer = await response.arrayBuffer();
     return Buffer.from(arrayBuffer) as Buffer;
   } catch (error) {
-    console.warn(`Error fetching photo ${photoId}:`, error);
+    if (error instanceof Error && error.name === "AbortError") {
+      console.warn(`Photo fetch timeout for ${photoId}`);
+    } else {
+      console.warn(`Error fetching photo ${photoId}:`, error);
+    }
     return null;
   }
+}
+
+async function fetchPhotoBatch(
+  photos: Array<{ id: string; title: string | null; description: string | null; originalFilename: string }>,
+  accessToken: string,
+): Promise<Array<{ photo: typeof photos[0]; buffer: Buffer | null }>> {
+  const promises = photos.map(async (photo) => ({
+    photo,
+    buffer: await fetchPhotoThumbnail(photo.id, accessToken),
+  }));
+  
+  return await Promise.all(promises);
 }
 
 function formatCurrency(value: number | null): string {
@@ -178,17 +203,28 @@ async function addCaseSheet(
     currentRow++;
   }
   
-  // Fetch and add photos
+  // Fetch and add photos (limit for performance)
   try {
     const photos = await listEvidencePhotosForCase(caseRecord.shared.caseNumber);
-    const readyPhotos = photos.filter((photo) => photo.status === "complete" && photo.isEvidence !== false);
+    const readyPhotos = photos
+      .filter((photo) => photo.status === "complete" && photo.isEvidence !== false)
+      .slice(0, MAX_PHOTOS_PER_CASE);
     
     if (readyPhotos.length > 0) {
       currentRow += 2;
       const photosHeaderCell = sheet.getCell(`A${currentRow}`);
-      photosHeaderCell.value = "Evidence Photos";
+      photosHeaderCell.value = `Evidence Photos (${readyPhotos.length}${photos.length > MAX_PHOTOS_PER_CASE ? ` of ${photos.length}` : ""})`;
       photosHeaderCell.font = { bold: true, size: 14 };
       currentRow += 2;
+      
+      // Fetch photos in parallel batch for better performance
+      const photoData = readyPhotos.map((photo) => ({
+        id: photo.id,
+        title: photo.title,
+        description: photo.description,
+        originalFilename: photo.originalFilename,
+      }));
+      const fetchedPhotos = await fetchPhotoBatch(photoData, accessToken);
       
       // Add photos in a grid layout
       const photosPerRow = 3;
@@ -196,16 +232,13 @@ async function addCaseSheet(
       
       for (let i = 0; i < readyPhotos.length; i++) {
         const photo = readyPhotos[i];
+        const photoBuffer = fetchedPhotos[i]?.buffer;
         const colIndex = (i % photosPerRow);
         const rowOffset = Math.floor(i / photosPerRow);
-        const photoRow = photoStartRow + (rowOffset * 8); // 8 rows per photo (image + description)
+        const photoRow = photoStartRow + (rowOffset * 8);
+        const photoCol = String.fromCharCode(67 + colIndex);
         
-        // Column for this photo (C, D, or E for photos 0, 1, 2)
-        const photoCol = String.fromCharCode(67 + colIndex); // C = 67
-        
-        // Try to fetch and embed photo
-        const photoBuffer = await fetchPhotoThumbnail(photo.id, accessToken);
-        
+        // Try to embed photo if available
         if (photoBuffer) {
           try {
             const imageId = workbook.addImage({
@@ -213,10 +246,9 @@ async function addCaseSheet(
               extension: "jpeg",
             });
             
-            // Add image to worksheet
             sheet.addImage(imageId, {
               tl: { col: colIndex + 2, row: photoRow - 1 },
-              ext: { width: 120, height: 90 },
+              ext: { width: 100, height: 75 },
               editAs: "oneCell",
             });
           } catch (error) {
@@ -224,8 +256,8 @@ async function addCaseSheet(
           }
         }
         
-        // Add photo title and description below image (offset by 6 rows for image space)
-        const titleRow = photoRow + 6;
+        // Add photo title and description below image
+        const titleRow = photoRow + 5;
         const titleCell = sheet.getCell(`${photoCol}${titleRow}`);
         titleCell.value = photo.title || photo.originalFilename;
         titleCell.font = { bold: true, size: 9 };
@@ -247,8 +279,7 @@ async function addCaseSheet(
         };
         linkCell.font = { size: 8, color: { argb: "FF0000FF" }, underline: true };
         
-        // Set row heights
-        sheet.getRow(photoRow).height = 70; // Image row
+        sheet.getRow(photoRow).height = 60;
         sheet.getRow(titleRow).height = 25;
         sheet.getRow(descRow).height = 40;
         sheet.getRow(linkRow).height = 15;
@@ -262,12 +293,21 @@ async function addCaseSheet(
   sheet.views = [{ state: "frozen", xSplit: 0, ySplit: 3 }];
 }
 
-export async function GET() {
+export async function POST(request: Request) {
   const sessionUser = await requireApiSession();
   if (!sessionUser) return unauthorizedResponse();
   
   try {
-    const { records, sessionUser: user, users } = await loadViewerCaseBundle();
+    // Get the filtered case IDs from the request body
+    const body = await request.json();
+    const requestedCaseIds = new Set(body.caseIds as string[] || []);
+    
+    const { records: allRecords, sessionUser: user, users } = await loadViewerCaseBundle();
+    
+    // Filter to only the requested cases (if provided)
+    const records = requestedCaseIds.size > 0
+      ? allRecords.filter((record) => requestedCaseIds.has(record.shared.id))
+      : allRecords;
     
     if (records.length === 0) {
       return NextResponse.json(
@@ -344,7 +384,7 @@ export async function GET() {
     const buffer = await workbook.xlsx.writeBuffer();
     
     const timestamp = new Date().toISOString().split("T")[0];
-    const filename = `Cases_Export_${timestamp}.xlsx`;
+    const filename = `Case_Summary_Report_${timestamp}.xlsx`;
     
     return new NextResponse(buffer, {
       status: 200,
