@@ -119,9 +119,8 @@ async function addCaseSheet(
   
   // Set column widths
   sheet.columns = [
-    { width: 25 }, // A: Labels
-    { width: 50 }, // B: Values
-    { width: 46 }, // C: Evidence photos, stacked
+    { width: 28 }, // A: Labels
+    { width: 55 }, // B: Values and evidence photos
   ];
   
   let currentRow = 1;
@@ -209,9 +208,11 @@ async function addCaseSheet(
       .slice(0, MAX_PHOTOS_PER_CASE);
     
     if (readyPhotos.length > 0) {
-      const photosHeaderCell = sheet.getCell("C1");
+      currentRow += 1;
+      const photosHeaderCell = sheet.getCell(`A${currentRow}`);
       photosHeaderCell.value = `Evidence Photos (${readyPhotos.length}${photos.length > MAX_PHOTOS_PER_CASE ? ` of ${photos.length}` : ""})`;
-      photosHeaderCell.font = { bold: true, size: 12 };
+      photosHeaderCell.font = { bold: true, size: 14 };
+      currentRow += 1;
 
       const photoData = readyPhotos.map((photo) => ({
         id: photo.id,
@@ -221,54 +222,58 @@ async function addCaseSheet(
       }));
       const fetchedPhotos = await fetchPhotoBatch(photoData, accessToken);
 
-      // Default rows are ~20px. A 100px image fills five of them, so the
-      // caption starts on the next row instead of several rows below.
-      const imageRows = 5;
-      let row = 3;
+      // Thumbnails are square. Keep width and height equal so Excel does not stretch them.
+      const imagePx = 180;
+      const imageRowHeight = 140;
 
       for (let i = 0; i < readyPhotos.length; i++) {
         const photo = readyPhotos[i];
         const photoBuffer = fetchedPhotos[i]?.buffer;
+        let textRow = currentRow;
 
         if (photoBuffer) {
+          sheet.getRow(currentRow).height = imageRowHeight;
           try {
             const imageId = workbook.addImage({
               buffer: photoBuffer as unknown as ArrayBuffer,
               extension: "jpeg",
             });
             sheet.addImage(imageId, {
-              tl: { col: 2, row: row - 1 },
-              ext: { width: 300, height: 100 },
-              editAs: "oneCell",
+              tl: { col: 1, row: currentRow - 1 },
+              ext: { width: imagePx, height: imagePx },
+              editAs: "absolute",
             });
           } catch (error) {
             console.warn(`Failed to add image for photo ${photo.id}:`, error);
           }
+          textRow = currentRow + 1;
         }
 
-        const titleRow = photoBuffer ? row + imageRows : row;
-        const titleCell = sheet.getCell(`C${titleRow}`);
+        const titleCell = sheet.getCell(`B${textRow}`);
         titleCell.value = photo.title || photo.originalFilename;
-        titleCell.font = { bold: true, size: 9 };
+        titleCell.font = { bold: true, size: 11 };
         titleCell.alignment = { wrapText: true, vertical: "top" };
+        sheet.getRow(textRow).height = 18;
 
-        const descRow = titleRow + 1;
-        const descCell = sheet.getCell(`C${descRow}`);
-        descCell.value = photo.description || "";
-        descCell.font = { size: 9 };
+        const descRow = textRow + 1;
+        const description = photo.description || "";
+        const descCell = sheet.getCell(`B${descRow}`);
+        descCell.value = description;
+        descCell.font = { size: 10 };
         descCell.alignment = { wrapText: true, vertical: "top" };
-        sheet.getRow(descRow).height = 32;
+        const descLines = Math.max(1, Math.ceil(description.length / 80));
+        sheet.getRow(descRow).height = Math.min(64, Math.max(18, descLines * 14));
 
         const linkRow = descRow + 1;
-        const linkCell = sheet.getCell(`C${linkRow}`);
-        const dropboxUrl = getEvidencePhotoDropboxUrl(photo);
+        const linkCell = sheet.getCell(`B${linkRow}`);
         linkCell.value = {
           text: "View in Dropbox",
-          hyperlink: dropboxUrl,
+          hyperlink: getEvidencePhotoDropboxUrl(photo),
         };
-        linkCell.font = { size: 9, color: { argb: "FF0563C1" }, underline: true };
+        linkCell.font = { size: 10, color: { argb: "FF0563C1" }, underline: true };
+        sheet.getRow(linkRow).height = 18;
 
-        row = linkRow + 2;
+        currentRow = linkRow + 2;
       }
     }
   } catch (error) {
