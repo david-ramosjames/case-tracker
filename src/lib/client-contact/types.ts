@@ -70,3 +70,13 @@ export function contactNeedsFollowUp(contactedAt: string | null, now = Date.now(
   const days = daysSinceContact(contactedAt, now);
   return days === null || days > CLIENT_CONTACT_WINDOW_DAYS;
 }
+
+export type ClientSentimentLabel = "Positive" | "Neutral" | "Negative" | "Unknown" | "—";
+
+/** A sentiment reading only counts when the client was contacted within 30 days. */
+export function contactSentimentLabel(contactedAt: string | null, sentiment: string | null, now = Date.now()): ClientSentimentLabel {
+  const days = daysSinceContact(contactedAt, now);
+  if (days === null || days > CLIENT_CONTACT_WINDOW_DAYS) return "Unknown";
+  if (sentiment === "Positive" || sentiment === "Neutral" || sentiment === "Negative") return sentiment;
+  return "—";
+}

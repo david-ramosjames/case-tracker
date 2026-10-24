@@ -148,6 +148,60 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
   return { cases: rows.length };
 }
 
+export type ClientSentimentReading = {
+  caseNumber: string;
+  sentiment: string;
+  score: number | null;
+  reasonSummary: string | null;
+  scoredAt: string;
+};
+
+type SentimentRow = {
+  case_number: string;
+  sentiment: string;
+  score: number | null;
+  reason_summary: string | null;
+  scored_at: string;
+};
+
+/** Latest stored reading per case. The page turns stale readings into Unknown. */
+export async function listLatestClientSentiments(caseNumbers: string[]) {
+  const readings = new Map<string, ClientSentimentReading>();
+  const keys = [...new Set(caseNumbers.map((value) => cleanCaseNumber(value)).filter(Boolean))];
+  if (keys.length === 0) return readings;
+
+  const admin = requireAdmin();
+  for (let index = 0; index < keys.length; index += 200) {
+    const chunk = keys.slice(index, index + 200);
+    const pending = new Set(chunk);
+    let from = 0;
+    while (pending.size > 0) {
+      const { data, error } = await admin
+        .from("case_client_sentiment")
+        .select("case_number, sentiment, score, reason_summary, scored_at")
+        .in("case_number", chunk)
+        .order("scored_at", { ascending: false })
+        .range(from, from + 999);
+      if (error) throw new Error(error.message);
+      const page = (data ?? []) as SentimentRow[];
+      for (const row of page) {
+        if (readings.has(row.case_number)) continue;
+        readings.set(row.case_number, {
+          caseNumber: row.case_number,
+          sentiment: row.sentiment,
+          score: row.score,
+          reasonSummary: row.reason_summary,
+          scoredAt: row.scored_at,
+        });
+        pending.delete(row.case_number);
+      }
+      if (page.length < 1000) break;
+      from += page.length;
+    }
+  }
+  return readings;
+}
+
 /** Stores one manual contact. Repeating the same Slack message does not create a second row. */
 export async function insertClientContactNote(note: ClientContactNoteInput) {
   const caseNumber = cleanCaseNumber(note.caseNumber);

@@ -11,6 +11,7 @@ import {
   CLIENT_CONTACT_LONG_GAP_DAYS,
   CLIENT_CONTACT_WINDOW_DAYS,
   contactNeedsFollowUp,
+  contactSentimentLabel,
   daysSinceContact,
 } from "@/lib/client-contact/types";
 import { cn, formatDate } from "@/lib/utils";
@@ -28,6 +29,9 @@ export type ClientContactRow = {
   lastOtherAt: string | null;
   lastOtherType: string | null;
   lastOtherDetails: string | null;
+  sentiment: string | null;
+  sentimentScore: number | null;
+  sentimentReason: string | null;
   quoUrl: string | null;
 };
 
@@ -55,6 +59,7 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
     setSortDirection(nextKey === "case" ? "asc" : "desc");
   }
 
+  const scoreboard = useMemo(() => attorneyScoreboard(rows), [rows]);
   const attorneyOptions = useMemo(() => nameOptions(rows.map((row) => row.attorneyName)), [rows]);
   const paralegalOptions = useMemo(() => nameOptions(rows.map((row) => row.paralegalName)), [rows]);
   const legalAssistantOptions = useMemo(() => nameOptions(rows.map((row) => row.legalAssistantName)), [rows]);
@@ -110,6 +115,29 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
 
   return (
     <div className="space-y-3">
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {scoreboard.map((item) => {
+          const selected = attorneys.length === 1 && attorneys[0] === item.name;
+          return (
+            <button
+              key={item.name}
+              type="button"
+              onClick={() => setAttorneys(selected ? [] : [item.name])}
+              className={cn(
+                "min-w-36 shrink-0 rounded-md border bg-white px-2.5 py-1.5 text-left",
+                selected && "border-pink-300 bg-pink-50",
+              )}
+            >
+              <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{item.name}</div>
+              <div className="text-sm font-semibold text-navy-950">
+                {item.overdue}
+                <span className="ml-1 text-[10px] font-normal text-muted-foreground">need contact</span>
+              </div>
+              <div className="text-[10px] text-muted-foreground">{item.total} open</div>
+            </button>
+          );
+        })}
+      </div>
       <div className="flex flex-wrap items-center gap-1.5">
         <Badge variant="danger" className="px-2 py-0 text-[11px]">
           {counted.over30} over {CLIENT_CONTACT_WINDOW_DAYS} days
@@ -161,6 +189,7 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
               <TableHead className={compactHead}>Legal assistant</TableHead>
               <TableHead className={compactHead}>Last attempt</TableHead>
               <SortableHead label="Days" sortKey="days" active={sortKey} direction={sortDirection} onSort={requestSort} />
+              <TableHead className={compactHead}>Sentiment</TableHead>
               <TableHead className={compactHead}>Other</TableHead>
               <TableHead className={compactHead}>Outbound call</TableHead>
               <TableHead className={compactHead}>Outbound text</TableHead>
@@ -169,7 +198,7 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
           <TableBody>
             {visible.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className={cn(compactCell, "text-muted-foreground")}>
+                <TableCell colSpan={12} className={cn(compactCell, "text-muted-foreground")}>
                   {overdueOnly ? "Every open case has a contact attempt in the last 30 days." : "No matching cases."}
                 </TableCell>
               </TableRow>
@@ -206,6 +235,9 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
                         {days === null ? "Never" : days}
                       </Badge>
                     </TableCell>
+                    <TableCell className={cn(compactCell, "whitespace-nowrap")}>
+                      <SentimentCell row={row} />
+                    </TableCell>
                     <TableCell className={cn(compactCell, "max-w-44 truncate whitespace-nowrap")} title={row.lastOtherDetails ?? undefined}>
                       {formatOtherContact(row.lastOtherAt, row.lastOtherType)}
                     </TableCell>
@@ -220,6 +252,40 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
       </div>
     </div>
   );
+}
+
+function attorneyScoreboard(rows: ClientContactRow[]) {
+  const byAttorney = new Map<string, { overdue: number; total: number }>();
+  for (const row of rows) {
+    const name = row.attorneyName.trim() || "Unassigned";
+    const current = byAttorney.get(name) ?? { overdue: 0, total: 0 };
+    current.total += 1;
+    if (contactNeedsFollowUp(row.lastAttempt)) current.overdue += 1;
+    byAttorney.set(name, current);
+  }
+  return [...byAttorney.entries()]
+    .map(([name, counts]) => ({ name, ...counts }))
+    .sort((left, right) => right.overdue - left.overdue || left.name.localeCompare(right.name));
+}
+
+function SentimentCell({ row }: { row: ClientContactRow }) {
+  const label = contactSentimentLabel(row.lastAttempt, row.sentiment);
+  const showScore = label !== "Unknown" && label !== "—" && row.sentimentScore != null;
+  return (
+    <span className="inline-flex items-center gap-1" title={label === "Unknown" ? undefined : (row.sentimentReason ?? undefined)}>
+      <Badge variant={sentimentBadgeVariant(label)} className="px-1.5 py-0 text-[10px]">
+        {label}
+      </Badge>
+      {showScore ? <span className="text-[10px] text-muted-foreground">{row.sentimentScore}</span> : null}
+    </span>
+  );
+}
+
+function sentimentBadgeVariant(label: string) {
+  if (label === "Positive") return "success" as const;
+  if (label === "Negative") return "danger" as const;
+  if (label === "Neutral") return "warning" as const;
+  return "outline" as const;
 }
 
 function matchesSelection(name: string, selected: string[]) {

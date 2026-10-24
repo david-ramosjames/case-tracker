@@ -1,7 +1,7 @@
 import { ClientContactTable } from "@/components/client-contact/client-contact-table";
 import { PageHeader } from "@/components/layout/page-header";
 import { buildViewerContext } from "@/lib/auth/access";
-import { listClientContactSummaries } from "@/lib/client-contact/repository";
+import { listClientContactSummaries, listLatestClientSentiments } from "@/lib/client-contact/repository";
 import { CLIENT_CONTACT_WINDOW_DAYS, clientContactDates } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
@@ -70,11 +70,17 @@ export default async function ClientContactPage() {
     if (viewer.isAdmin) return true;
     return viewer.contactId ? isAssignedToViewer(record, viewer.contactId) : false;
   });
-  const summary = await listClientContactSummaries(open.map((record) => record.shared.caseNumber));
+  const caseNumbers = open.map((record) => record.shared.caseNumber);
+  const [summary, sentiments] = await Promise.all([
+    listClientContactSummaries(caseNumbers),
+    listLatestClientSentiments(caseNumbers),
+  ]);
 
   const rows = open.map((record) => {
-    const dates = clientContactDates(summary.get(cleanCaseNumber(record.shared.caseNumber)) ?? null);
-    const stored = summary.get(cleanCaseNumber(record.shared.caseNumber));
+    const caseNumber = cleanCaseNumber(record.shared.caseNumber);
+    const dates = clientContactDates(summary.get(caseNumber) ?? null);
+    const stored = summary.get(caseNumber);
+    const sentiment = sentiments.get(caseNumber);
     return {
       caseId: record.shared.id,
       caseNumber: record.shared.caseNumber,
@@ -88,6 +94,9 @@ export default async function ClientContactPage() {
       lastOtherAt: stored?.lastOtherAt ?? null,
       lastOtherType: stored?.lastOtherType ?? null,
       lastOtherDetails: stored?.lastOtherDetails ?? null,
+      sentiment: sentiment?.sentiment ?? null,
+      sentimentScore: sentiment?.score ?? null,
+      sentimentReason: sentiment?.reasonSummary ?? null,
       quoUrl: quoUrlForCase(record),
     };
   });
