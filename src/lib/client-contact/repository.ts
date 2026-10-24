@@ -11,6 +11,8 @@ type SummaryRow = {
   last_outbound_text_at: string | null;
   last_conversation_at: string | null;
   last_other_at: string | null;
+  last_other_type: string | null;
+  last_other_details: string | null;
 };
 
 export type ContactStamp = {
@@ -22,6 +24,20 @@ export type ContactStamp = {
   outboundTextAt?: string | null;
   conversationAt?: string | null;
   otherAt?: string | null;
+  otherType?: string | null;
+  otherDetails?: string | null;
+};
+
+export type ClientContactNoteInput = {
+  caseNumber: string;
+  caseId?: string | null;
+  contactType: string;
+  details?: string | null;
+  loggedAt: string;
+  slackChannelId?: string | null;
+  slackTs?: string | null;
+  eventKey: string;
+  source: "slack" | "sheet";
 };
 
 function requireAdmin() {
@@ -40,6 +56,29 @@ function rowToSummary(row: SummaryRow): ClientContactSummary {
     lastOutboundTextAt: row.last_outbound_text_at,
     lastConversationAt: row.last_conversation_at,
     lastOtherAt: row.last_other_at,
+    lastOtherType: row.last_other_type,
+    lastOtherDetails: row.last_other_details,
+  };
+}
+
+function otherMoment(at: string | null | undefined) {
+  if (!at) return Number.NEGATIVE_INFINITY;
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
+}
+
+function mergedOther(current: ContactStamp, stamp: ContactStamp) {
+  if (otherMoment(stamp.otherAt) >= otherMoment(current.otherAt)) {
+    return {
+      otherAt: stamp.otherAt ?? current.otherAt,
+      otherType: stamp.otherType ?? current.otherType,
+      otherDetails: stamp.otherDetails ?? current.otherDetails,
+    };
+  }
+  return {
+    otherAt: current.otherAt ?? stamp.otherAt,
+    otherType: current.otherType ?? stamp.otherType,
+    otherDetails: current.otherDetails ?? stamp.otherDetails,
   };
 }
 
@@ -73,7 +112,7 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
       inboundTextAt: latestDate([current.inboundTextAt, stamp.inboundTextAt]),
       outboundTextAt: latestDate([current.outboundTextAt, stamp.outboundTextAt]),
       conversationAt: latestDate([current.conversationAt, stamp.conversationAt]),
-      otherAt: latestDate([current.otherAt, stamp.otherAt]),
+      ...mergedOther(current, stamp),
     });
   }
   if (merged.size === 0) return { cases: 0 };
@@ -83,6 +122,8 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
   const now = new Date().toISOString();
   const rows = [...merged.values()].map((stamp) => {
     const previous = existing.get(stamp.caseNumber);
+    const nextOtherAt = latestDate([previous?.lastOtherAt, stamp.otherAt]);
+    const stampIsLatestOther = otherMoment(stamp.otherAt) >= otherMoment(previous?.lastOtherAt) && Boolean(stamp.otherAt);
     return {
       case_number: stamp.caseNumber,
       case_id: stamp.caseId ?? previous?.caseId ?? null,
@@ -91,7 +132,9 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
       last_inbound_text_at: latestDate([previous?.lastInboundTextAt, stamp.inboundTextAt]),
       last_outbound_text_at: latestDate([previous?.lastOutboundTextAt, stamp.outboundTextAt]),
       last_conversation_at: latestDate([previous?.lastConversationAt, stamp.conversationAt]),
-      last_other_at: latestDate([previous?.lastOtherAt, stamp.otherAt]),
+      last_other_at: nextOtherAt,
+      last_other_type: stampIsLatestOther ? (stamp.otherType?.trim() || previous?.lastOtherType || null) : (previous?.lastOtherType ?? null),
+      last_other_details: stampIsLatestOther ? (stamp.otherDetails?.trim() || previous?.lastOtherDetails || null) : (previous?.lastOtherDetails ?? null),
       updated_at: now,
     };
   });
@@ -103,4 +146,29 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
     if (error) throw new Error(error.message);
   }
   return { cases: rows.length };
+}
+
+/** Stores one manual contact. Repeating the same Slack message does not create a second row. */
+export async function insertClientContactNote(note: ClientContactNoteInput) {
+  const caseNumber = cleanCaseNumber(note.caseNumber);
+  const contactType = note.contactType.trim();
+  if (!caseNumber || !contactType || !note.eventKey) return { inserted: false as const };
+
+  const admin = requireAdmin();
+  const { error } = await admin.from("case_client_contact_notes").upsert(
+    {
+      case_number: caseNumber,
+      case_id: note.caseId ?? null,
+      contact_type: contactType,
+      details: note.details?.trim() || null,
+      logged_at: note.loggedAt,
+      slack_channel_id: note.slackChannelId ?? null,
+      slack_ts: note.slackTs ?? null,
+      event_key: note.eventKey,
+      source: note.source,
+    },
+    { onConflict: "event_key", ignoreDuplicates: true },
+  );
+  if (error) throw new Error(error.message);
+  return { inserted: true as const };
 }

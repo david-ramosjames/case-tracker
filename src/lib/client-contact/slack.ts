@@ -1,4 +1,4 @@
-import { applyContactStamps } from "@/lib/client-contact/repository";
+import { applyContactStamps, insertClientContactNote } from "@/lib/client-contact/repository";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -16,6 +16,13 @@ export function parseSlackContactMention(text: string) {
     contactType: parts[0] || "",
     details: parts.slice(1).join(" - "),
   };
+}
+
+/** "@Case Assignment Sync phone call - client called about court date" */
+export function isManualContactLog(text: string) {
+  const trimmed = text.trim();
+  if (!/^<@[A-Z0-9]+(?:\|[^>]+)?>/i.test(trimmed) || !trimmed.includes(" - ")) return false;
+  return Boolean(parseSlackContactMention(trimmed).contactType);
 }
 
 async function caseForSlackChannel(channelId: string) {
@@ -48,15 +55,28 @@ export async function logSlackClientContactMention(input: { channelId: string; t
   if (!contactCase) return { logged: false as const, reason: "not_case_channel" };
 
   const contactedAt = slackTsToIso(input.ts);
+  await insertClientContactNote({
+    caseNumber: contactCase.caseNumber,
+    caseId: contactCase.caseId,
+    contactType: parsed.contactType || "Other",
+    details: parsed.details,
+    loggedAt: contactedAt,
+    slackChannelId: input.channelId,
+    slackTs: input.ts,
+    eventKey: `${input.channelId}:${input.ts}`,
+    source: "slack",
+  });
   await applyContactStamps([
     {
       caseId: contactCase.caseId,
       caseNumber: contactCase.caseNumber,
       otherAt: contactedAt,
+      otherType: parsed.contactType || "Other",
+      otherDetails: parsed.details,
       conversationAt: contactedAt,
     },
   ]);
-  return { logged: true as const, caseNumber: contactCase.caseNumber };
+  return { logged: true as const, caseNumber: contactCase.caseNumber, contactType: parsed.contactType };
 }
 
 function slackTsToIso(ts: string) {

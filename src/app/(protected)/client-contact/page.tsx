@@ -83,9 +83,11 @@ export default async function ClientContactPage() {
       paralegalName: record.paralegal.name,
       legalAssistantName: record.legalAssistant?.name ?? "",
       lastAttempt: dates.lastAttempt,
-      lastInteraction: dates.lastInteraction,
       lastOutboundCall: stored?.lastOutboundCallAt ?? null,
       lastOutboundText: stored?.lastOutboundTextAt ?? null,
+      lastOtherAt: stored?.lastOtherAt ?? null,
+      lastOtherType: stored?.lastOtherType ?? null,
+      lastOtherDetails: stored?.lastOtherDetails ?? null,
       quoUrl: quoUrlForCase(record),
     };
   });
@@ -95,7 +97,7 @@ export default async function ClientContactPage() {
       <PageHeader
         eyebrow="Client contact"
         title="Last client contact"
-        description={`Open cases that need client contact within ${CLIENT_CONTACT_WINDOW_DAYS} days. Last attempt matches the Contact Summary sheet: latest of last interaction, last outbound call, and last outbound text.`}
+        description={`Open cases that need client contact within ${CLIENT_CONTACT_WINDOW_DAYS} days. Last attempt is the latest of a Quo call or text and a manual Slack note such as “phone call - client called about the court date.”`}
       />
       <ClientContactTable rows={rows} />
     </>

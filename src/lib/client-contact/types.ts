@@ -1,4 +1,5 @@
 export const CLIENT_CONTACT_WINDOW_DAYS = 30;
+export const CLIENT_CONTACT_LONG_GAP_DAYS = 45;
 
 /** Stored dates. Each column is one kind of contact, same as the Contact Summary sheet. */
 export type ClientContactSummary = {
@@ -10,6 +11,8 @@ export type ClientContactSummary = {
   lastOutboundTextAt: string | null;
   lastConversationAt: string | null;
   lastOtherAt: string | null;
+  lastOtherType: string | null;
+  lastOtherDetails: string | null;
 };
 
 export type ClientContactDates = {

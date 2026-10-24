@@ -4,10 +4,15 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { Badge } from "@/components/ui/badge";
+import { HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CLIENT_CONTACT_WINDOW_DAYS, contactNeedsFollowUp, daysSinceContact } from "@/lib/client-contact/types";
+import {
+  CLIENT_CONTACT_LONG_GAP_DAYS,
+  CLIENT_CONTACT_WINDOW_DAYS,
+  contactNeedsFollowUp,
+  daysSinceContact,
+} from "@/lib/client-contact/types";
 import { cn, formatDate } from "@/lib/utils";
 
 export type ClientContactRow = {
@@ -18,21 +23,26 @@ export type ClientContactRow = {
   paralegalName: string;
   legalAssistantName: string;
   lastAttempt: string | null;
-  lastInteraction: string | null;
   lastOutboundCall: string | null;
   lastOutboundText: string | null;
+  lastOtherAt: string | null;
+  lastOtherType: string | null;
+  lastOtherDetails: string | null;
   quoUrl: string | null;
 };
 
 type SortKey = "case" | "days";
 type SortDirection = "asc" | "desc";
 
+const compactHead = "h-8 px-2";
+const compactCell = "px-2 py-1.5";
+
 export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
   const [query, setQuery] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(true);
-  const [attorney, setAttorney] = useState("all");
-  const [paralegal, setParalegal] = useState("all");
-  const [legalAssistant, setLegalAssistant] = useState("all");
+  const [attorneys, setAttorneys] = useState<string[]>([]);
+  const [paralegals, setParalegals] = useState<string[]>([]);
+  const [legalAssistants, setLegalAssistants] = useState<string[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("days");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
@@ -45,25 +55,39 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
     setSortDirection(nextKey === "case" ? "asc" : "desc");
   }
 
-  const attorneys = useMemo(() => uniqueNames(rows.map((row) => row.attorneyName)), [rows]);
-  const paralegals = useMemo(() => uniqueNames(rows.map((row) => row.paralegalName)), [rows]);
-  const legalAssistants = useMemo(() => uniqueNames(rows.map((row) => row.legalAssistantName)), [rows]);
+  const attorneyOptions = useMemo(() => nameOptions(rows.map((row) => row.attorneyName)), [rows]);
+  const paralegalOptions = useMemo(() => nameOptions(rows.map((row) => row.paralegalName)), [rows]);
+  const legalAssistantOptions = useMemo(() => nameOptions(rows.map((row) => row.legalAssistantName)), [rows]);
 
   const staffFiltered = useMemo(() => {
     return rows.filter((row) => {
-      if (attorney !== "all" && row.attorneyName !== attorney) return false;
-      if (paralegal !== "all" && row.paralegalName !== paralegal) return false;
-      if (legalAssistant !== "all" && row.legalAssistantName !== legalAssistant) return false;
+      if (!matchesSelection(row.attorneyName, attorneys)) return false;
+      if (!matchesSelection(row.paralegalName, paralegals)) return false;
+      if (!matchesSelection(row.legalAssistantName, legalAssistants)) return false;
       return true;
     });
-  }, [rows, attorney, paralegal, legalAssistant]);
+  }, [rows, attorneys, paralegals, legalAssistants]);
 
   const counted = useMemo(() => {
-    let overdue = 0;
+    let never = 0;
+    let over45 = 0;
+    let over30 = 0;
+    let within = 0;
     for (const row of staffFiltered) {
-      if (contactNeedsFollowUp(row.lastAttempt)) overdue += 1;
+      const days = daysSinceContact(row.lastAttempt);
+      if (days === null) {
+        never += 1;
+        over30 += 1;
+      } else if (days > CLIENT_CONTACT_LONG_GAP_DAYS) {
+        over45 += 1;
+        over30 += 1;
+      } else if (days > CLIENT_CONTACT_WINDOW_DAYS) {
+        over30 += 1;
+      } else {
+        within += 1;
+      }
     }
-    return { overdue, current: staffFiltered.length - overdue };
+    return { never, over45, over30, within };
   }, [staffFiltered]);
 
   const visible = useMemo(() => {
@@ -77,25 +101,32 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
           row.clientName.toLowerCase().includes(needle) ||
           row.attorneyName.toLowerCase().includes(needle) ||
           row.paralegalName.toLowerCase().includes(needle) ||
-          row.legalAssistantName.toLowerCase().includes(needle)
+          row.legalAssistantName.toLowerCase().includes(needle) ||
+          (row.lastOtherType ?? "").toLowerCase().includes(needle)
         );
       })
       .sort((left, right) => compareRows(left, right, sortKey, sortDirection));
   }, [staffFiltered, overdueOnly, query, sortKey, sortDirection]);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="danger">
-          {counted.overdue} over {CLIENT_CONTACT_WINDOW_DAYS} days
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="danger" className="px-2 py-0 text-[11px]">
+          {counted.over30} over {CLIENT_CONTACT_WINDOW_DAYS} days
         </Badge>
-        <Badge variant="success">
-          {counted.current} within {CLIENT_CONTACT_WINDOW_DAYS} days
+        <Badge variant="danger" className="px-2 py-0 text-[11px]">
+          {counted.over45} over {CLIENT_CONTACT_LONG_GAP_DAYS} days
+        </Badge>
+        <Badge variant="outline" className="px-2 py-0 text-[11px]">
+          {counted.never} never
+        </Badge>
+        <Badge variant="success" className="px-2 py-0 text-[11px]">
+          {counted.within} within {CLIENT_CONTACT_WINDOW_DAYS} days
         </Badge>
         <button
           type="button"
           onClick={() => setOverdueOnly((current) => !current)}
-          className="text-sm font-medium text-pink-600 underline-offset-2 hover:underline"
+          className="text-xs font-medium text-pink-600 underline-offset-2 hover:underline"
         >
           {overdueOnly ? "Show all open cases" : "Show only cases needing contact"}
         </button>
@@ -103,48 +134,55 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search case, client, or staff"
-          className="w-full sm:w-72"
+          className="h-8 w-full text-xs sm:w-64"
         />
       </div>
       <div className="flex flex-wrap gap-2">
-        <StaffFilter label="Attorney" value={attorney} onChange={setAttorney} options={attorneys} />
-        <StaffFilter label="Paralegal" value={paralegal} onChange={setParalegal} options={paralegals} />
-        <StaffFilter label="Legal assistant" value={legalAssistant} onChange={setLegalAssistant} options={legalAssistants} />
+        <HeaderMultiFilter label="Attorney" selected={attorneys} onChange={setAttorneys} options={attorneyOptions} className="w-44" />
+        <HeaderMultiFilter label="Paralegal" selected={paralegals} onChange={setParalegals} options={paralegalOptions} className="w-44" />
+        <HeaderMultiFilter
+          label="Legal assistant"
+          selected={legalAssistants}
+          onChange={setLegalAssistants}
+          options={legalAssistantOptions}
+          className="w-44"
+        />
       </div>
 
       <div className="rounded-lg border">
-        <Table>
+        <Table className="text-xs">
           <TableHeader>
             <TableRow>
               <SortableHead label="Case" sortKey="case" active={sortKey} direction={sortDirection} onSort={requestSort} />
-              <TableHead>Client</TableHead>
-              <TableHead>Quo</TableHead>
-              <TableHead>Attorney</TableHead>
-              <TableHead>Last attempt</TableHead>
+              <TableHead className={compactHead}>Client</TableHead>
+              <TableHead className={compactHead}>Quo</TableHead>
+              <TableHead className={compactHead}>Attorney</TableHead>
+              <TableHead className={compactHead}>Paralegal</TableHead>
+              <TableHead className={compactHead}>Legal assistant</TableHead>
+              <TableHead className={compactHead}>Last attempt</TableHead>
               <SortableHead label="Days" sortKey="days" active={sortKey} direction={sortDirection} onSort={requestSort} />
-              <TableHead>Last interaction</TableHead>
-              <TableHead>Outbound call</TableHead>
-              <TableHead>Outbound text</TableHead>
+              <TableHead className={compactHead}>Other</TableHead>
+              <TableHead className={compactHead}>Outbound call</TableHead>
+              <TableHead className={compactHead}>Outbound text</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {visible.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={9} className="text-muted-foreground">
+                <TableCell colSpan={11} className={cn(compactCell, "text-muted-foreground")}>
                   {overdueOnly ? "Every open case has a contact attempt in the last 30 days." : "No matching cases."}
                 </TableCell>
               </TableRow>
             ) : (
               visible.map((row) => {
                 const days = daysSinceContact(row.lastAttempt);
-                const overdue = contactNeedsFollowUp(row.lastAttempt);
                 return (
                   <TableRow key={row.caseId}>
-                    <TableCell>
+                    <TableCell className={compactCell}>
                       <CaseNumberLink caseId={row.caseId} caseNumber={row.caseNumber} />
                     </TableCell>
-                    <TableCell>{row.clientName}</TableCell>
-                    <TableCell>
+                    <TableCell className={cn(compactCell, "max-w-40 truncate")}>{row.clientName}</TableCell>
+                    <TableCell className={compactCell}>
                       {row.quoUrl ? (
                         <a
                           href={row.quoUrl}
@@ -153,20 +191,26 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
                           className="inline-flex items-center gap-1 font-medium text-pink-600 hover:text-pink-500"
                         >
                           Open
-                          <ExternalLink className="h-3.5 w-3.5" />
+                          <ExternalLink className="h-3 w-3" />
                         </a>
                       ) : (
                         "—"
                       )}
                     </TableCell>
-                    <TableCell>{row.attorneyName}</TableCell>
-                    <TableCell>{formatContactDate(row.lastAttempt)}</TableCell>
-                    <TableCell>
-                      <Badge variant={overdue ? "danger" : "success"}>{days === null ? "Never" : days}</Badge>
+                    <TableCell className={cn(compactCell, "max-w-36 truncate")}>{row.attorneyName}</TableCell>
+                    <TableCell className={cn(compactCell, "max-w-36 truncate")}>{row.paralegalName || "—"}</TableCell>
+                    <TableCell className={cn(compactCell, "max-w-36 truncate")}>{row.legalAssistantName || "—"}</TableCell>
+                    <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastAttempt)}</TableCell>
+                    <TableCell className={compactCell}>
+                      <Badge variant={daysBadgeVariant(days)} className="px-1.5 py-0 text-[10px]">
+                        {days === null ? "Never" : days}
+                      </Badge>
                     </TableCell>
-                    <TableCell>{formatContactDate(row.lastInteraction)}</TableCell>
-                    <TableCell>{formatContactDate(row.lastOutboundCall)}</TableCell>
-                    <TableCell>{formatContactDate(row.lastOutboundText)}</TableCell>
+                    <TableCell className={cn(compactCell, "max-w-44 truncate whitespace-nowrap")} title={row.lastOtherDetails ?? undefined}>
+                      {formatOtherContact(row.lastOtherAt, row.lastOtherType)}
+                    </TableCell>
+                    <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastOutboundCall)}</TableCell>
+                    <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastOutboundText)}</TableCell>
                   </TableRow>
                 );
               })
@@ -178,40 +222,32 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
   );
 }
 
-function StaffFilter({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: string[];
-}) {
-  return (
-    <label className="flex min-w-44 flex-col gap-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-      {label}
-      <Select className="h-9 text-sm font-normal normal-case tracking-normal text-navy-950" value={value} onChange={(event) => onChange(event.target.value)} aria-label={`Filter by ${label}`}>
-        <option value="all">All</option>
-        {options.map((name) => (
-          <option key={name} value={name}>
-            {name}
-          </option>
-        ))}
-      </Select>
-    </label>
-  );
+function matchesSelection(name: string, selected: string[]) {
+  return selected.length === 0 || selected.includes(name);
 }
 
-function uniqueNames(names: string[]) {
-  return [...new Set(names.map((name) => name.trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right));
+function nameOptions(names: string[]) {
+  return [...new Set(names.map((name) => name.trim()).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right))
+    .map((name) => ({ value: name, label: name }));
 }
 
 function formatContactDate(value: string | null) {
   if (!value) return "—";
   const formatted = formatDate(value);
   return formatted === "Not reviewed" ? "—" : formatted;
+}
+
+function formatOtherContact(value: string | null, contactType: string | null) {
+  const when = formatContactDate(value);
+  if (when === "—") return "—";
+  return contactType ? `${when} · ${contactType}` : when;
+}
+
+function daysBadgeVariant(days: number | null) {
+  if (days === null || days > CLIENT_CONTACT_LONG_GAP_DAYS) return "danger" as const;
+  if (days > CLIENT_CONTACT_WINDOW_DAYS) return "warning" as const;
+  return "success" as const;
 }
 
 function contactAge(value: string | null) {
@@ -244,14 +280,14 @@ function SortableHead({
   const isActive = active === sortKey;
   const Icon = !isActive ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
   return (
-    <TableHead className="align-middle">
+    <TableHead className={cn("align-middle", compactHead)}>
       <button
         type="button"
-        className="inline-flex items-center gap-2 text-xs font-semibold uppercase text-muted-foreground"
+        className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase text-muted-foreground"
         onClick={() => onSort(sortKey)}
       >
         {label}
-        <Icon className={cn("h-3.5 w-3.5", isActive && "text-pink-500")} />
+        <Icon className={cn("h-3 w-3", isActive && "text-pink-500")} />
       </button>
     </TableHead>
   );
