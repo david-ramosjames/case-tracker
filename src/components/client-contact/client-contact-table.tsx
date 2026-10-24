@@ -16,9 +16,12 @@ import {
 } from "@/lib/client-contact/types";
 import { cn, formatDate } from "@/lib/utils";
 
+const SENTIMENT_FILTERS = ["Positive", "Neutral", "Negative", "Unknown", "No reading"] as const;
+
 export type ClientContactRow = {
   caseId: string;
   caseNumber: string;
+  attorneyId: string;
   clientName: string;
   attorneyName: string;
   paralegalName: string;
@@ -41,12 +44,19 @@ type SortDirection = "asc" | "desc";
 const compactHead = "h-8 px-2";
 const compactCell = "px-2 py-1.5";
 
-export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
+export function ClientContactTable({
+  rows,
+  scoreboardAttorneyIds,
+}: {
+  rows: ClientContactRow[];
+  scoreboardAttorneyIds: string[] | null;
+}) {
   const [query, setQuery] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(true);
   const [attorneys, setAttorneys] = useState<string[]>([]);
   const [paralegals, setParalegals] = useState<string[]>([]);
   const [legalAssistants, setLegalAssistants] = useState<string[]>([]);
+  const [sentimentFilters, setSentimentFilters] = useState<string[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("days");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
@@ -59,7 +69,7 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
     setSortDirection(nextKey === "case" ? "asc" : "desc");
   }
 
-  const scoreboard = useMemo(() => attorneyScoreboard(rows), [rows]);
+  const scoreboard = useMemo(() => attorneyScoreboard(rows, scoreboardAttorneyIds), [rows, scoreboardAttorneyIds]);
   const attorneyOptions = useMemo(() => nameOptions(rows.map((row) => row.attorneyName)), [rows]);
   const paralegalOptions = useMemo(() => nameOptions(rows.map((row) => row.paralegalName)), [rows]);
   const legalAssistantOptions = useMemo(() => nameOptions(rows.map((row) => row.legalAssistantName)), [rows]);
@@ -69,9 +79,10 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
       if (!matchesSelection(row.attorneyName, attorneys)) return false;
       if (!matchesSelection(row.paralegalName, paralegals)) return false;
       if (!matchesSelection(row.legalAssistantName, legalAssistants)) return false;
+      if (!matchesSelection(sentimentFilterValue(row), sentimentFilters)) return false;
       return true;
     });
-  }, [rows, attorneys, paralegals, legalAssistants]);
+  }, [rows, attorneys, paralegals, legalAssistants, sentimentFilters]);
 
   const counted = useMemo(() => {
     let never = 0;
@@ -120,7 +131,7 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
           const selected = attorneys.length === 1 && attorneys[0] === item.name;
           return (
             <button
-              key={item.name}
+              key={item.id}
               type="button"
               onClick={() => setAttorneys(selected ? [] : [item.name])}
               className={cn(
@@ -173,6 +184,13 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
           selected={legalAssistants}
           onChange={setLegalAssistants}
           options={legalAssistantOptions}
+          className="w-44"
+        />
+        <HeaderMultiFilter
+          label="Sentiment"
+          selected={sentimentFilters}
+          onChange={setSentimentFilters}
+          options={SENTIMENT_FILTERS.map((label) => ({ value: label, label }))}
           className="w-44"
         />
       </div>
@@ -254,18 +272,25 @@ export function ClientContactTable({ rows }: { rows: ClientContactRow[] }) {
   );
 }
 
-function attorneyScoreboard(rows: ClientContactRow[]) {
-  const byAttorney = new Map<string, { overdue: number; total: number }>();
+function attorneyScoreboard(rows: ClientContactRow[], allowlist: string[] | null) {
+  const allowed = allowlist ? new Set(allowlist) : null;
+  const byAttorney = new Map<string, { name: string; overdue: number; total: number }>();
   for (const row of rows) {
+    if (allowed && !allowed.has(row.attorneyId)) continue;
     const name = row.attorneyName.trim() || "Unassigned";
-    const current = byAttorney.get(name) ?? { overdue: 0, total: 0 };
+    const current = byAttorney.get(row.attorneyId) ?? { name, overdue: 0, total: 0 };
     current.total += 1;
     if (contactNeedsFollowUp(row.lastAttempt)) current.overdue += 1;
-    byAttorney.set(name, current);
+    byAttorney.set(row.attorneyId, current);
   }
   return [...byAttorney.entries()]
-    .map(([name, counts]) => ({ name, ...counts }))
+    .map(([id, counts]) => ({ id, ...counts }))
     .sort((left, right) => right.overdue - left.overdue || left.name.localeCompare(right.name));
+}
+
+function sentimentFilterValue(row: ClientContactRow) {
+  const label = contactSentimentLabel(row.lastAttempt, row.sentiment);
+  return label === "—" ? "No reading" : label;
 }
 
 function SentimentCell({ row }: { row: ClientContactRow }) {

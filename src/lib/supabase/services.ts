@@ -140,6 +140,7 @@ const DEFAULT_SETTINGS: CaseTrackerSettings = {
   paralegalLimitedEditEnabled: false,
   slackFieldAlertGraceDays: DEFAULT_SLACK_FIELD_ALERT_GRACE_DAYS,
   attorneySlackFieldAlertsDisabled: [],
+  contactScoreboardAttorneyIds: null,
 };
 
 async function createTrackerClient() {
@@ -3193,6 +3194,7 @@ export async function getSettings(): Promise<CaseTrackerSettings> {
   const settings = new Map(((data ?? []) as Array<{ key: string; value: unknown }>).map((row) => [row.key, row.value]));
   const thresholds = asObject(settings.get("review_thresholds"));
   const slackFieldAlerts = asObject(settings.get("slack_field_alerts"));
+  const contactScoreboard = settings.has("contact_scoreboard") ? asObject(settings.get("contact_scoreboard")) : null;
 
   return {
     ...DEFAULT_SETTINGS,
@@ -3202,6 +3204,7 @@ export async function getSettings(): Promise<CaseTrackerSettings> {
       slackFieldAlerts.grace_days ?? DEFAULT_SETTINGS.slackFieldAlertGraceDays,
     ),
     attorneySlackFieldAlertsDisabled: asStringArray(slackFieldAlerts.disabled_attorney_ids),
+    contactScoreboardAttorneyIds: contactScoreboard ? asStringArray(contactScoreboard.attorney_ids) : null,
   };
 }
 
@@ -3234,6 +3237,25 @@ export async function updateSlackFieldAlertSettings(input: {
     slackFieldAlertGraceDays: value.grace_days,
     attorneySlackFieldAlertsDisabled: value.disabled_attorney_ids,
   };
+}
+
+export async function updateContactScoreboardAttorneys(attorneyIds: string[]) {
+  const client = await createTrackerClient();
+  const value = {
+    attorney_ids: [...new Set(attorneyIds.filter(Boolean))],
+  };
+
+  const { error } = await client.from("case_tracker_settings").upsert(
+    {
+      key: "contact_scoreboard",
+      value,
+      description: "Attorneys shown on the Contact page scoreboard.",
+    },
+    { onConflict: "key" },
+  );
+
+  if (error) throw new Error(error.message);
+  return value.attorney_ids;
 }
 
 async function createActivityEntry(

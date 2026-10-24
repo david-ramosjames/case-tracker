@@ -58,7 +58,7 @@ function quoUrlForCase(record: CaseRecord) {
 }
 
 export default async function ClientContactPage() {
-  const [{ records, sessionUser, users }, slackChannels] = await Promise.all([
+  const [{ records, sessionUser, users, settings }, slackChannels] = await Promise.all([
     loadViewerCaseBundle(),
     loadSlackChannelMapByCaseNumber(),
   ]);
@@ -84,6 +84,7 @@ export default async function ClientContactPage() {
     return {
       caseId: record.shared.id,
       caseNumber: record.shared.caseNumber,
+      attorneyId: record.attorney.id,
       clientName: record.shared.clientName,
       attorneyName: record.attorney.name,
       paralegalName: record.paralegal.name,
@@ -108,7 +109,7 @@ export default async function ClientContactPage() {
         title="Last client contact"
         description={`Open cases that need client contact within ${CLIENT_CONTACT_WINDOW_DAYS} days. Last attempt is the latest of a Quo call or text and a manual Slack note such as “phone call - client called about the court date.”`}
       />
-      <ClientContactTable rows={rows} />
+      <ClientContactTable rows={rows} scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds} />
     </>
   );
 }

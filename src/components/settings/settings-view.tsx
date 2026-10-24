@@ -9,6 +9,7 @@ import { AttorneyScoreExplainer } from "@/components/attorney-score/attorney-sco
 import { BackfillImportCard } from "@/components/settings/backfill-import-card";
 import { DailyJobsCard } from "@/components/settings/daily-jobs-card";
 import { SettlementSyncCard } from "@/components/settings/settlement-sync-card";
+import { ContactScoreboardCard } from "@/components/settings/contact-scoreboard-card";
 import { SlackFieldAlertsCard } from "@/components/settings/slack-field-alerts-card";
 import { SlackSyncCard } from "@/components/settings/slack-sync-card";
 import { UserRolesCard } from "@/components/settings/user-roles-card";
@@ -38,6 +39,7 @@ export function SettingsView({
 
         <SlackSyncCard />
         <SlackFieldAlertsCard settings={settings} users={users} />
+        <ContactScoreboardCard settings={settings} users={users} />
         <SettlementSyncCard />
 
         <AttorneyGoalsManager users={users} goals={goals} canDeleteGoals={canDeleteGoals} />

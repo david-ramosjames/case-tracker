@@ -342,6 +342,11 @@ export type CaseTrackerSettings = {
   slackFieldAlertGraceDays: number;
   /** Attorney contact IDs that should not receive Slack field-input alerts on their cases. */
   attorneySlackFieldAlertsDisabled: string[];
+  /**
+   * Attorney contact IDs shown on the Contact scoreboard.
+   * Null means the list has not been saved yet, so every attorney is shown.
+   */
+  contactScoreboardAttorneyIds: string[] | null;
 };
 
 export type CaseTrackerSnapshot = {
