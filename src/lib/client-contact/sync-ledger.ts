@@ -1,4 +1,5 @@
 import { loadCaseContactMaps, type ContactCase } from "@/lib/client-contact/case-phones";
+import { mergeQuoDirectoryContacts } from "@/lib/client-contact/directory-contacts";
 import { applyContactStamps, type ContactStamp } from "@/lib/client-contact/repository";
 import { latestDate } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
@@ -27,6 +28,7 @@ type LedgerCall = {
       object?: {
         from?: string;
         to?: string | string[];
+        participants?: string[];
         contactIds?: string[];
         answeredAt?: string | null;
         duration?: number | null;
@@ -109,12 +111,15 @@ export async function syncClientContactsFromLedger() {
   if (!connectionString) return { configured: false as const, cases: 0, calls: 0, messages: 0 };
 
   const maps = await loadCaseContactMaps();
-  const openCases = new Set(
-    (await getCases())
-      .filter((record) => caseRequiresOngoingUpdates(record))
-      .map((record) => cleanCaseNumber(record.shared.caseNumber))
-      .filter(Boolean),
-  );
+  const openList: ContactCase[] = (await getCases())
+    .filter((record) => caseRequiresOngoingUpdates(record))
+    .map((record) => ({
+      caseId: record.shared.id,
+      caseNumber: cleanCaseNumber(record.shared.caseNumber),
+    }))
+    .filter((record) => record.caseNumber);
+  const openCases = new Set(openList.map((record) => record.caseNumber));
+  await mergeQuoDirectoryContacts(maps, openList);
 
   const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const local = /@(localhost|127\.0\.0\.1)[:/]/.test(connectionString);
@@ -164,6 +169,7 @@ export async function syncClientContactsFromLedger() {
         row.participants?.workspace,
         object?.from,
         object?.to,
+        object?.participants,
       );
       const contactIds = (object?.contactIds ?? []).map((id) => String(id).trim()).filter(Boolean);
       const matches = matchesFor(maps, openCases, phones, contactIds);

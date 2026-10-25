@@ -1,4 +1,5 @@
-import { loadCaseContactMaps } from "@/lib/client-contact/case-phones";
+import { loadCaseContactMaps, type ContactCase } from "@/lib/client-contact/case-phones";
+import { mergeQuoDirectoryContacts } from "@/lib/client-contact/directory-contacts";
 import { applyContactStamps, type ContactStamp } from "@/lib/client-contact/repository";
 import { syncClientContactsFromLedger } from "@/lib/client-contact/sync-ledger";
 import { latestDate } from "@/lib/client-contact/types";
@@ -7,7 +8,9 @@ import { cleanCaseNumber } from "@/lib/csv/parse";
 import { isQuoEnabled } from "@/lib/quo/config";
 import {
   listQuoCallsForPhone,
+  listQuoCallsForPhoneOnLine,
   listQuoMessagesForPhone,
+  listQuoPhoneNumberIds,
   listRecentQuoClientActivity,
 } from "@/lib/quo/client";
 import { getCases } from "@/lib/supabase/services";
@@ -16,13 +19,17 @@ const LOOKBACK_MS = 120 * 24 * 60 * 60 * 1000;
 
 /**
  * Refresh contact dates for open cases.
- * Prefers the existing Quo reporting ledger (webhook already feeding quo-reporting).
- * Falls back to the Quo API only when REPORTING_DATABASE_URL is not set.
+ * Reads the Quo reporting ledger, then asks Quo for calls by client phone.
+ * Some completed calls omit the client on the webhook, and some clients have
+ * more than one Quo contact whose name contains the case number.
  * Does not post to Slack.
  */
 export async function syncQuoClientContacts() {
   const fromLedger = await syncClientContactsFromLedger();
-  if (fromLedger.configured) return fromLedger;
+  const fromLines = process.env.QUO_API_KEY?.trim() ? await syncClientCallsAcrossLines() : null;
+  if (fromLedger.configured) {
+    return { ...fromLedger, linePhones: fromLines?.phones ?? 0, lineCases: fromLines?.cases ?? 0 };
+  }
 
   if (!isQuoEnabled()) return { configured: false as const, cases: 0, phones: 0, source: "none" as const };
 
@@ -106,4 +113,69 @@ export async function syncQuoClientContacts() {
     cases: saved.cases,
     phones: phonesRead,
   };
+}
+
+/** Calls Quo only returns when the request names the client, on every firm line. */
+async function syncClientCallsAcrossLines() {
+  const maps = await loadCaseContactMaps();
+  const openList: ContactCase[] = (await getCases())
+    .filter((record) => caseRequiresOngoingUpdates(record))
+    .map((record) => ({
+      caseId: record.shared.id,
+      caseNumber: cleanCaseNumber(record.shared.caseNumber),
+    }))
+    .filter((record) => record.caseNumber);
+  const openCases = new Set(openList.map((record) => record.caseNumber));
+  await mergeQuoDirectoryContacts(maps, openList);
+
+  const lines = await listQuoPhoneNumberIds();
+  const phones = [...maps.byPhone.entries()]
+    .filter(([, matches]) => matches.some((match) => openCases.has(match.caseNumber)))
+    .map(([phone, matches]) => ({
+      phone,
+      matches: matches.filter((match) => openCases.has(match.caseNumber)),
+    }))
+    .sort((left, right) => left.phone.localeCompare(right.phone));
+  const start = new Date().getUTCHours() % 2 === 0 ? 0 : Math.floor(phones.length / 2);
+  const ordered = [...phones.slice(start), ...phones.slice(0, start)];
+
+  const byCase = new Map<string, ContactStamp>();
+  function stampFor(match: ContactCase) {
+    const current = byCase.get(match.caseNumber) ?? { caseNumber: match.caseNumber, caseId: match.caseId };
+    byCase.set(match.caseNumber, current);
+    return current;
+  }
+
+  let savedCases = 0;
+  async function flush() {
+    if (byCase.size === 0) return;
+    const saved = await applyContactStamps([...byCase.values()]);
+    savedCases += saved.cases;
+    byCase.clear();
+  }
+
+  let processed = 0;
+  for (const entry of ordered) {
+    for (const lineId of lines) {
+      let calls: Awaited<ReturnType<typeof listQuoCallsForPhoneOnLine>> = [];
+      try {
+        calls = await listQuoCallsForPhoneOnLine(entry.phone, lineId);
+      } catch (error) {
+        console.error("[client-contact] quo line sync failed", error);
+        continue;
+      }
+      for (const call of calls) {
+        for (const match of entry.matches) {
+          const stamp = stampFor(match);
+          stamp.conversationAt = latestDate([stamp.conversationAt, call.createdAt]);
+          if (call.direction === "outgoing") stamp.outboundCallAt = latestDate([stamp.outboundCallAt, call.createdAt]);
+          if (call.answered) stamp.humanCallAt = latestDate([stamp.humanCallAt, call.createdAt]);
+        }
+      }
+    }
+    processed += 1;
+    if (processed % 25 === 0) await flush();
+  }
+  await flush();
+  return { phones: phones.length, lines: lines.length, cases: savedCases };
 }

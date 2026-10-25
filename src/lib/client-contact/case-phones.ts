@@ -32,7 +32,7 @@ export async function loadCaseContactMaps(): Promise<CaseContactMaps> {
     if (!caseNumber) continue;
     const contactCase = { caseId: row.case_id, caseNumber };
     trackerById.set(row.id, contactCase);
-    addCase(byPhone, normalizePhoneForComparison(row.client_phone ?? ""), contactCase);
+    addContactCase(byPhone, normalizePhoneForComparison(row.client_phone ?? ""), contactCase);
   }
 
   const { data: contacts, error: contactError } = await admin
@@ -46,9 +46,9 @@ export async function loadCaseContactMaps(): Promise<CaseContactMaps> {
   }>) {
     const contactCase = trackerById.get(row.tracker_entry_id);
     if (!contactCase) continue;
-    addCase(byPhone, normalizePhoneForComparison(row.phone ?? ""), contactCase);
+    addContactCase(byPhone, normalizePhoneForComparison(row.phone ?? ""), contactCase);
     const quoId = row.quo_contact_id?.trim();
-    if (quoId) addCase(byQuoContactId, quoId, contactCase);
+    if (quoId) addContactCase(byQuoContactId, quoId, contactCase);
   }
 
   return { byPhone, byQuoContactId };
@@ -59,7 +59,7 @@ export async function loadCasesByClientPhone() {
   return (await loadCaseContactMaps()).byPhone;
 }
 
-function addCase(map: Map<string, ContactCase[]>, key: string, contactCase: ContactCase) {
+export function addContactCase(map: Map<string, ContactCase[]>, key: string, contactCase: ContactCase) {
   if (!key) return;
   const list = map.get(key) ?? [];
   if (!list.some((item) => item.caseNumber === contactCase.caseNumber)) list.push(contactCase);

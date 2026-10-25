@@ -502,11 +502,31 @@ export type QuoMessageActivity = {
 
 const UNFINISHED_CALL_STATUSES = new Set(["queued", "initiated", "ringing", "in-progress"]);
 
+export async function listQuoPhoneNumberIds() {
+  const response = await quoApiFetch(`${QUO_API_BASE}/phone-numbers`, {
+    headers: quoHeaders(),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Quo list phone numbers failed (${response.status}): ${body}`);
+  }
+  const payload = (await response.json()) as QuoListPhoneNumbersResponse;
+  return [...new Set((payload.data ?? []).map((row) => row.id?.trim()).filter(Boolean))] as string[];
+}
+
 /** Latest calls with one client. Participants is required by Quo, so this is one request per phone. */
 export async function listQuoCallsForPhone(clientPhone: string): Promise<QuoCallActivity[]> {
-  const participant = normalizePhoneForComparison(clientPhone);
-  if (!participant) return [];
   const phoneNumberId = await resolveQuoPhoneNumberId();
+  return listQuoCallsForPhoneOnLine(clientPhone, phoneNumberId);
+}
+
+/**
+ * Calls on one Quo line. The returned call often lists only the firm's number,
+ * so the client is whoever was passed as `participants`.
+ */
+export async function listQuoCallsForPhoneOnLine(clientPhone: string, phoneNumberId: string): Promise<QuoCallActivity[]> {
+  const participant = normalizePhoneForComparison(clientPhone);
+  if (!participant || !phoneNumberId) return [];
   const params = new URLSearchParams({ phoneNumberId, maxResults: "20" });
   params.append("participants", participant);
   const response = await quoApiFetch(`${QUO_API_BASE}/calls?${params.toString()}`, { headers: quoHeaders() });

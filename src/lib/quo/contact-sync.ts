@@ -2,6 +2,16 @@ import { cleanCaseNumber } from "@/lib/csv/parse";
 import { listAllQuoContacts } from "@/lib/quo/client";
 
 /** Parse trailing case number(s) from Quo directory names, e.g. "Mara Hernandez 1570" or "Kisha Williams 1277 & 1280". */
+/** Case numbers written anywhere in a Quo name, same rule as the Contact Summary sheet. */
+export function caseNumbersInQuoContactName(name: string, caseNumbers: Set<string>) {
+  const found = new Set<string>();
+  for (const match of name.matchAll(/(?:^|[^0-9])(\d{3,6})(?=[^0-9]|$)/g)) {
+    const caseNumber = cleanCaseNumber(match[1] ?? "");
+    if (caseNumber && caseNumbers.has(caseNumber)) found.add(caseNumber);
+  }
+  return [...found];
+}
+
 export function parseCaseNumbersFromQuoContactName(name: string): string[] {
   const trimmed = name.trim();
   if (!trimmed) return [];
