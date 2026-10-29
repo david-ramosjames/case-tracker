@@ -35,7 +35,7 @@ export async function provisionUserRole(userId: string, email: string): Promise<
 
   const adminClient = createSupabaseAdminClient();
   if (!adminClient) {
-    throw new Error("SUPABASE_SERVICE_ROLE_KEY is required to provision user roles.");
+    throw new Error("SUPABASE_SECRET_KEY (or legacy SUPABASE_SERVICE_ROLE_KEY) is required to provision user roles.");
   }
 
   const adminRole = getAdminRoleForEmail(email);
