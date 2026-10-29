@@ -1,4 +1,4 @@
-import { ClientContactTable } from "@/components/client-contact/client-contact-table";
+import { ClientContactView } from "@/components/client-contact/client-contact-table";
 import { PageHeader } from "@/components/layout/page-header";
 import { buildViewerContext } from "@/lib/auth/access";
 import { listClientContactSummaries, listLatestClientSentiments } from "@/lib/client-contact/repository";
@@ -98,6 +98,8 @@ export default async function ClientContactPage() {
       sentiment: sentiment?.sentiment ?? null,
       sentimentScore: sentiment?.score ?? null,
       sentimentReason: sentiment?.reasonSummary ?? null,
+      sentimentWeekLabel: sentiment?.weekLabel ?? null,
+      sentimentScoredAt: sentiment?.scoredAt ?? null,
       quoUrl: quoUrlForCase(record),
     };
   });
@@ -109,7 +111,7 @@ export default async function ClientContactPage() {
         title="Last client contact"
         description={`Open cases that need client contact within ${CLIENT_CONTACT_WINDOW_DAYS} days. Last attempt is the latest of a Quo call or text and a manual Slack note such as “phone call - client called about the court date.”`}
       />
-      <ClientContactTable rows={rows} scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds} />
+      <ClientContactView rows={rows} scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds} />
     </>
   );
 }
