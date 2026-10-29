@@ -1,8 +1,7 @@
 import { ClientContactView } from "@/components/client-contact/client-contact-table";
-import { PageHeader } from "@/components/layout/page-header";
 import { buildViewerContext } from "@/lib/auth/access";
 import { listClientContactSummaries, listLatestClientSentiments } from "@/lib/client-contact/repository";
-import { CLIENT_CONTACT_WINDOW_DAYS, clientContactDates } from "@/lib/client-contact/types";
+import { clientContactDates } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
@@ -104,14 +103,5 @@ export default async function ClientContactPage() {
     };
   });
 
-  return (
-    <>
-      <PageHeader
-        eyebrow="Client contact"
-        title="Last client contact"
-        description={`Open cases that need client contact within ${CLIENT_CONTACT_WINDOW_DAYS} days. Last attempt is the latest of a Quo call or text and a manual Slack note such as “phone call - client called about the court date.”`}
-      />
-      <ClientContactView rows={rows} scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds} />
-    </>
-  );
+  return <ClientContactView rows={rows} scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds} />;
 }

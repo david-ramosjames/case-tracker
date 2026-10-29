@@ -25,7 +25,8 @@ const DAY_RANGE_FILTERS = [
 ] as const;
 
 type ContactTab = "calls" | "sentiment";
-type SortKey = "case" | "days";
+type CallSortKey = "case" | "days";
+type SentimentSortKey = "week" | "case";
 type SortDirection = "asc" | "desc";
 
 export type ClientContactRow = {
@@ -68,17 +69,28 @@ export function ClientContactView({
   const [legalAssistants, setLegalAssistants] = useState<string[]>([]);
   const [sentimentFilters, setSentimentFilters] = useState<string[]>([]);
   const [dayRanges, setDayRanges] = useState<string[]>([]);
-  const [sortKey, setSortKey] = useState<SortKey>("days");
+  const [sortKey, setSortKey] = useState<CallSortKey>("days");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [sentimentSortKey, setSentimentSortKey] = useState<SentimentSortKey>("week");
+  const [sentimentSortDirection, setSentimentSortDirection] = useState<SortDirection>("desc");
   const [focusedCaseNumber, setFocusedCaseNumber] = useState<string | null>(null);
 
-  function requestSort(nextKey: SortKey) {
+  function requestSort(nextKey: CallSortKey) {
     if (sortKey === nextKey) {
       setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
       return;
     }
     setSortKey(nextKey);
     setSortDirection(nextKey === "case" ? "asc" : "desc");
+  }
+
+  function requestSentimentSort(nextKey: SentimentSortKey) {
+    if (sentimentSortKey === nextKey) {
+      setSentimentSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSentimentSortKey(nextKey);
+    setSentimentSortDirection(nextKey === "case" ? "asc" : "desc");
   }
 
   function openSentimentForRow(row: ClientContactRow) {
@@ -160,13 +172,9 @@ export function ClientContactView({
           const rightFocus = right.caseNumber === focusedCaseNumber ? 0 : 1;
           if (leftFocus !== rightFocus) return leftFocus - rightFocus;
         }
-        const labelRank = sentimentSortRank(sentimentFilterValue(right)) - sentimentSortRank(sentimentFilterValue(left));
-        if (labelRank !== 0) return labelRank;
-        const scoreDelta = (right.sentimentScore ?? -1) - (left.sentimentScore ?? -1);
-        if (scoreDelta !== 0) return scoreDelta;
-        return left.caseNumber.localeCompare(right.caseNumber, undefined, { numeric: true });
+        return compareSentimentRows(left, right, sentimentSortKey, sentimentSortDirection);
       });
-  }, [sentimentFiltered, query, focusedCaseNumber]);
+  }, [sentimentFiltered, query, focusedCaseNumber, sentimentSortKey, sentimentSortDirection]);
 
   return (
     <div className="space-y-3">
@@ -333,7 +341,13 @@ export function ClientContactView({
           onOpenSentiment={openSentimentForRow}
         />
       ) : (
-        <SentimentTable rows={sentimentVisible} focusedCaseNumber={focusedCaseNumber} />
+        <SentimentTable
+          rows={sentimentVisible}
+          focusedCaseNumber={focusedCaseNumber}
+          sortKey={sentimentSortKey}
+          sortDirection={sentimentSortDirection}
+          onSort={requestSentimentSort}
+        />
       )}
     </div>
   );
@@ -352,9 +366,9 @@ function CallsTable({
 }: {
   rows: ClientContactRow[];
   overdueOnly: boolean;
-  sortKey: SortKey;
+  sortKey: CallSortKey;
   sortDirection: SortDirection;
-  onSort: (key: SortKey) => void;
+  onSort: (key: CallSortKey) => void;
   onOpenSentiment: (row: ClientContactRow) => void;
 }) {
   return (
@@ -434,18 +448,30 @@ function CallsTable({
   );
 }
 
-function SentimentTable({ rows, focusedCaseNumber }: { rows: ClientContactRow[]; focusedCaseNumber: string | null }) {
+function SentimentTable({
+  rows,
+  focusedCaseNumber,
+  sortKey,
+  sortDirection,
+  onSort,
+}: {
+  rows: ClientContactRow[];
+  focusedCaseNumber: string | null;
+  sortKey: SentimentSortKey;
+  sortDirection: SortDirection;
+  onSort: (key: SentimentSortKey) => void;
+}) {
   return (
     <div className="rounded-lg border">
       <Table className="text-xs">
         <TableHeader>
           <TableRow>
-            <TableHead className={compactHead}>Case</TableHead>
+            <SortableHead label="Case" sortKey="case" active={sortKey} direction={sortDirection} onSort={onSort} />
             <TableHead className={compactHead}>Client</TableHead>
             <TableHead className={compactHead}>Attorney</TableHead>
             <TableHead className={compactHead}>Sentiment</TableHead>
             <TableHead className={compactHead}>Score</TableHead>
-            <TableHead className={compactHead}>Week</TableHead>
+            <SortableHead label="Week" sortKey="week" active={sortKey} direction={sortDirection} onSort={onSort} />
             <TableHead className={compactHead}>Why</TableHead>
           </TableRow>
         </TableHeader>
@@ -460,6 +486,7 @@ function SentimentTable({ rows, focusedCaseNumber }: { rows: ClientContactRow[];
             rows.map((row) => {
               const label = contactSentimentLabel(row.lastAttempt, row.sentiment);
               const showScore = label !== "Unknown" && label !== "—" && row.sentimentScore != null;
+              const weekLabel = formatWeekLabel(row.sentimentWeekLabel, row.sentimentScoredAt);
               const reason =
                 label === "Unknown"
                   ? "Last contact attempt is older than 30 days, so this reading is not current enough."
@@ -479,9 +506,7 @@ function SentimentTable({ rows, focusedCaseNumber }: { rows: ClientContactRow[];
                     </Badge>
                   </TableCell>
                   <TableCell className={compactCell}>{showScore ? row.sentimentScore : "—"}</TableCell>
-                  <TableCell className={cn(compactCell, "max-w-48 truncate")} title={row.sentimentWeekLabel ?? undefined}>
-                    {row.sentimentWeekLabel?.trim() || formatContactDate(row.sentimentScoredAt)}
-                  </TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{weekLabel}</TableCell>
                   <TableCell className={cn(compactCell, "min-w-64 max-w-xl whitespace-normal text-[11px] leading-snug text-muted-foreground")}>
                     {reason}
                   </TableCell>
@@ -670,7 +695,7 @@ function contactAge(value: string | null) {
   return days === null ? Number.POSITIVE_INFINITY : days;
 }
 
-function compareRows(left: ClientContactRow, right: ClientContactRow, sortKey: SortKey, direction: SortDirection) {
+function compareRows(left: ClientContactRow, right: ClientContactRow, sortKey: CallSortKey, direction: SortDirection) {
   const result =
     sortKey === "case"
       ? left.caseNumber.localeCompare(right.caseNumber, undefined, { numeric: true })
@@ -679,16 +704,35 @@ function compareRows(left: ClientContactRow, right: ClientContactRow, sortKey: S
   return direction === "asc" ? result : -result;
 }
 
-function sentimentSortRank(label: string) {
-  if (label === "Negative") return 4;
-  if (label === "Unknown") return 3;
-  if (label === "No reading") return 2;
-  if (label === "Neutral") return 1;
-  if (label === "Positive") return 0;
-  return -1;
+function compareSentimentRows(
+  left: ClientContactRow,
+  right: ClientContactRow,
+  sortKey: SentimentSortKey,
+  direction: SortDirection,
+) {
+  const result =
+    sortKey === "case"
+      ? left.caseNumber.localeCompare(right.caseNumber, undefined, { numeric: true })
+      : sentimentWeekAge(left) - sentimentWeekAge(right);
+  if (Number.isNaN(result)) return 0;
+  return direction === "asc" ? result : -result;
 }
 
-function SortableHead({
+function sentimentWeekAge(row: ClientContactRow) {
+  const ms = Date.parse(row.sentimentScoredAt ?? "");
+  return Number.isFinite(ms) ? ms : Number.NEGATIVE_INFINITY;
+}
+
+function formatWeekLabel(label: string | null, scoredAt: string | null) {
+  const trimmed = label?.trim();
+  if (trimmed) {
+    const datesOnly = trimmed.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    if (datesOnly) return datesOnly;
+  }
+  return formatContactDate(scoredAt);
+}
+
+function SortableHead<T extends string>({
   label,
   sortKey,
   active,
@@ -696,10 +740,10 @@ function SortableHead({
   onSort,
 }: {
   label: string;
-  sortKey: SortKey;
-  active: SortKey;
+  sortKey: T;
+  active: T;
   direction: SortDirection;
-  onSort: (key: SortKey) => void;
+  onSort: (key: T) => void;
 }) {
   const isActive = active === sortKey;
   const Icon = !isActive ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
