@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { Badge } from "@/components/ui/badge";
-import { HeaderMultiFilter } from "@/components/ui/header-filter";
+import { HeaderFilter, HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -73,6 +73,7 @@ export function ClientContactView({
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [sentimentSortKey, setSentimentSortKey] = useState<SentimentSortKey>("week");
   const [sentimentSortDirection, setSentimentSortDirection] = useState<SortDirection>("desc");
+  const [selectedWeek, setSelectedWeek] = useState("");
   const [focusedCaseNumber, setFocusedCaseNumber] = useState<string | null>(null);
 
   function requestSort(nextKey: CallSortKey) {
@@ -95,17 +96,19 @@ export function ClientContactView({
 
   function openSentimentForRow(row: ClientContactRow) {
     const label = sentimentFilterValue(row);
+    const week = weekFilterKey(row);
     setTab("sentiment");
     setFocusedCaseNumber(row.caseNumber);
     setQuery(row.caseNumber);
     setSentimentFilters(label === "No reading" ? ["No reading"] : [label]);
+    if (week) setSelectedWeek(week);
   }
 
+  const weekOptions = useMemo(() => buildWeekOptions(rows), [rows]);
+  const latestWeek = weekOptions[0]?.value ?? "";
+  const weekFilter = selectedWeek && weekOptions.some((option) => option.value === selectedWeek) ? selectedWeek : latestWeek;
+
   const callScoreboard = useMemo(() => callAttorneyScoreboard(rows, scoreboardAttorneyIds), [rows, scoreboardAttorneyIds]);
-  const sentimentScoreboard = useMemo(
-    () => sentimentAttorneyScoreboard(rows, scoreboardAttorneyIds),
-    [rows, scoreboardAttorneyIds],
-  );
   const attorneyOptions = useMemo(() => nameOptions(rows.map((row) => row.attorneyName)), [rows]);
   const paralegalOptions = useMemo(() => nameOptions(rows.map((row) => row.paralegalName)), [rows]);
   const legalAssistantOptions = useMemo(() => nameOptions(rows.map((row) => row.legalAssistantName)), [rows]);
@@ -118,6 +121,16 @@ export function ClientContactView({
       return true;
     });
   }, [rows, attorneys, paralegals, legalAssistants]);
+
+  const sentimentStaffFiltered = useMemo(() => {
+    if (!weekFilter) return staffFiltered;
+    return staffFiltered.filter((row) => weekFilterKey(row) === weekFilter);
+  }, [staffFiltered, weekFilter]);
+
+  const sentimentScoreboard = useMemo(
+    () => sentimentAttorneyScoreboard(sentimentStaffFiltered, scoreboardAttorneyIds),
+    [sentimentStaffFiltered, scoreboardAttorneyIds],
+  );
 
   const callFiltered = useMemo(() => {
     return staffFiltered.filter((row) => {
@@ -159,8 +172,8 @@ export function ClientContactView({
   }, [callFiltered, overdueOnly, dayRanges, query, sortKey, sortDirection]);
 
   const sentimentFiltered = useMemo(() => {
-    return staffFiltered.filter((row) => matchesSelection(sentimentFilterValue(row), sentimentFilters));
-  }, [staffFiltered, sentimentFilters]);
+    return sentimentStaffFiltered.filter((row) => matchesSelection(sentimentFilterValue(row), sentimentFilters));
+  }, [sentimentStaffFiltered, sentimentFilters]);
 
   const sentimentVisible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -328,7 +341,15 @@ export function ClientContactView({
             options={DAY_RANGE_FILTERS.map((item) => ({ value: item.value, label: item.label }))}
             className="w-44"
           />
-        ) : null}
+        ) : (
+          <HeaderFilter
+            label="Week"
+            value={weekFilter || "all"}
+            onChange={setSelectedWeek}
+            options={weekOptions.length > 0 ? weekOptions : [{ value: "all", label: "No weeks yet" }]}
+            className="w-52"
+          />
+        )}
       </div>
 
       {tab === "calls" ? (
@@ -724,12 +745,30 @@ function sentimentWeekAge(row: ClientContactRow) {
 }
 
 function formatWeekLabel(label: string | null, scoredAt: string | null) {
-  const trimmed = label?.trim();
+  return weekFilterKey({ sentimentWeekLabel: label, sentimentScoredAt: scoredAt }) || formatContactDate(scoredAt);
+}
+
+function weekFilterKey(row: Pick<ClientContactRow, "sentimentWeekLabel" | "sentimentScoredAt">) {
+  const trimmed = row.sentimentWeekLabel?.trim();
   if (trimmed) {
     const datesOnly = trimmed.replace(/\s*\([^)]*\)\s*$/, "").trim();
     if (datesOnly) return datesOnly;
   }
-  return formatContactDate(scoredAt);
+  const scored = formatContactDate(row.sentimentScoredAt);
+  return scored === "—" ? "" : scored;
+}
+
+function buildWeekOptions(rows: ClientContactRow[]) {
+  const byWeek = new Map<string, number>();
+  for (const row of rows) {
+    const key = weekFilterKey(row);
+    if (!key) continue;
+    const scored = Date.parse(row.sentimentScoredAt ?? "");
+    byWeek.set(key, Math.max(byWeek.get(key) ?? 0, Number.isFinite(scored) ? scored : 0));
+  }
+  return [...byWeek.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([value]) => ({ value, label: value }));
 }
 
 function SortableHead<T extends string>({
