@@ -16,9 +16,16 @@ export type ClientContactSummary = {
 };
 
 export type ClientContactDates = {
-  /** Latest of a human call, conversation activity, a logged note, and the text dates. */
+  /**
+   * Contact Summary column F — we actually connected.
+   * MAX(J Last Human Call, L Conversation Activity, N Other, MIN(K Inbound Text, M Outbound Text)).
+   * Sheet MIN ignores blanks, so one text date still counts.
+   */
   lastInteraction: string | null;
-  /** Latest of last interaction, last outbound call, and last outbound text. */
+  /**
+   * Contact Summary column H — we tried.
+   * MAX(F Last Interaction, I Last Outbound Call, M Last Outbound Text).
+   */
   lastAttempt: string | null;
 };
 
@@ -47,12 +54,14 @@ export function latestDate(values: Array<string | null | undefined>) {
 
 export function clientContactDates(summary: ClientContactSummary | null): ClientContactDates {
   if (!summary) return { lastInteraction: null, lastAttempt: null };
+  // Same as Contact Summary F: MAX(J, L, N, MIN(K, M)).
   const lastInteraction = latestDate([
     summary.lastHumanCallAt,
     summary.lastConversationAt,
     summary.lastOtherAt,
     earlierDate(summary.lastInboundTextAt, summary.lastOutboundTextAt),
   ]);
+  // Same as Contact Summary H: MAX(F, I, M).
   return {
     lastInteraction,
     lastAttempt: latestDate([lastInteraction, summary.lastOutboundCallAt, summary.lastOutboundTextAt]),
@@ -66,16 +75,21 @@ export function daysSinceContact(contactedAt: string | null, now = Date.now()) {
   return Math.floor((now - ms) / (1000 * 60 * 60 * 24));
 }
 
-export function contactNeedsFollowUp(contactedAt: string | null, now = Date.now()) {
-  const days = daysSinceContact(contactedAt, now);
+/** Sheet column G (Days Since Contact) uses Last Interaction (F), not Last Attempt. */
+export function contactNeedsFollowUp(lastInteractionAt: string | null, now = Date.now()) {
+  const days = daysSinceContact(lastInteractionAt, now);
   return days === null || days > CLIENT_CONTACT_WINDOW_DAYS;
 }
 
 export type ClientSentimentLabel = "Positive" | "Neutral" | "Negative" | "Unknown" | "—";
 
-/** A sentiment reading only counts when the client was contacted within 30 days. */
-export function contactSentimentLabel(contactedAt: string | null, sentiment: string | null, now = Date.now()): ClientSentimentLabel {
-  const days = daysSinceContact(contactedAt, now);
+/** Sheet only shows sentiment when Days Since Contact (from Last Interaction) is under 30. */
+export function contactSentimentLabel(
+  lastInteractionAt: string | null,
+  sentiment: string | null,
+  now = Date.now(),
+): ClientSentimentLabel {
+  const days = daysSinceContact(lastInteractionAt, now);
   if (days === null || days > CLIENT_CONTACT_WINDOW_DAYS) return "Unknown";
   if (sentiment === "Positive" || sentiment === "Neutral" || sentiment === "Negative") return sentiment;
   return "—";

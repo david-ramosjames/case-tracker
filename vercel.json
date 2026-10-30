@@ -31,6 +31,22 @@
     {
       "path": "/api/cron/client-contact?slot=afternoon",
       "schedule": "50 22 * * *"
+    },
+    {
+      "path": "/api/cron/client-contact-backfill?slot=morning",
+      "schedule": "45 15 * * *"
+    },
+    {
+      "path": "/api/cron/client-contact-backfill?slot=morning",
+      "schedule": "45 16 * * *"
+    },
+    {
+      "path": "/api/cron/client-contact-backfill?slot=afternoon",
+      "schedule": "5 22 * * *"
+    },
+    {
+      "path": "/api/cron/client-contact-backfill?slot=afternoon",
+      "schedule": "5 23 * * *"
     }
   ],
   "functions": {
@@ -44,6 +60,9 @@
       "maxDuration": 800
     },
     "src/app/api/cron/client-contact/route.ts": {
+      "maxDuration": 800
+    },
+    "src/app/api/cron/client-contact-backfill/route.ts": {
       "maxDuration": 800
     },
     "src/app/api/admin/slack-topic-sync-all/route.ts": {

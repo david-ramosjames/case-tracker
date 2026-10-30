@@ -21,7 +21,11 @@ const DAY_RANGE_FILTERS = [
   { value: "0-10", label: "0–10 days" },
   { value: "10-20", label: "10–20 days" },
   { value: "20-30", label: "20–30 days" },
-  { value: "30+", label: "30+ days" },
+  { value: "30-45", label: "30–45 days" },
+  { value: "45-60", label: "45–60 days" },
+  { value: "60-90", label: "60–90 days" },
+  { value: "90+", label: "90+ days" },
+  { value: "never", label: "Never contacted" },
 ] as const;
 
 type ContactTab = "calls" | "sentiment";
@@ -37,7 +41,11 @@ export type ClientContactRow = {
   attorneyName: string;
   paralegalName: string;
   legalAssistantName: string;
+  lastInteraction: string | null;
   lastAttempt: string | null;
+  lastHumanCall: string | null;
+  lastConversation: string | null;
+  lastInboundText: string | null;
   lastOutboundCall: string | null;
   lastOutboundText: string | null;
   lastOtherAt: string | null;
@@ -135,7 +143,7 @@ export function ClientContactView({
   const callFiltered = useMemo(() => {
     return staffFiltered.filter((row) => {
       if (!matchesSelection(sentimentFilterValue(row), sentimentFilters)) return false;
-      if (!matchesDayRanges(row.lastAttempt, dayRanges)) return false;
+      if (!matchesDayRanges(row.lastInteraction, dayRanges)) return false;
       return true;
     });
   }, [staffFiltered, sentimentFilters, dayRanges]);
@@ -146,7 +154,7 @@ export function ClientContactView({
     let over30 = 0;
     let within = 0;
     for (const row of callFiltered) {
-      const days = daysSinceContact(row.lastAttempt);
+      const days = daysSinceContact(row.lastInteraction);
       if (days === null) {
         never += 1;
         over30 += 1;
@@ -166,7 +174,7 @@ export function ClientContactView({
     const needle = query.trim().toLowerCase();
     const enforceOverdue = overdueOnly && dayRanges.length === 0;
     return callFiltered
-      .filter((row) => !enforceOverdue || contactNeedsFollowUp(row.lastAttempt))
+      .filter((row) => !enforceOverdue || contactNeedsFollowUp(row.lastInteraction))
       .filter((row) => matchesSearch(row, needle))
       .sort((left, right) => compareRows(left, right, sortKey, sortDirection));
   }, [callFiltered, overdueOnly, dayRanges, query, sortKey, sortDirection]);
@@ -403,24 +411,28 @@ function CallsTable({
             <TableHead className={compactHead}>Attorney</TableHead>
             <TableHead className={compactHead}>Paralegal</TableHead>
             <TableHead className={compactHead}>Legal assistant</TableHead>
-            <TableHead className={compactHead}>Last attempt</TableHead>
+            <TableHead className={compactHead}>Last interaction</TableHead>
             <SortableHead label="Days" sortKey="days" active={sortKey} direction={sortDirection} onSort={onSort} />
-            <TableHead className={compactHead}>Sentiment</TableHead>
-            <TableHead className={compactHead}>Other</TableHead>
+            <TableHead className={compactHead}>Last attempt</TableHead>
             <TableHead className={compactHead}>Outbound call</TableHead>
+            <TableHead className={compactHead}>Human call</TableHead>
+            <TableHead className={compactHead}>Inbound text</TableHead>
+            <TableHead className={compactHead}>Conversation</TableHead>
             <TableHead className={compactHead}>Outbound text</TableHead>
+            <TableHead className={compactHead}>Other</TableHead>
+            <TableHead className={compactHead}>Sentiment</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={12} className={cn(compactCell, "text-muted-foreground")}>
-                {overdueOnly ? "Every open case has a contact attempt in the last 30 days." : "No matching cases."}
+              <TableCell colSpan={16} className={cn(compactCell, "text-muted-foreground")}>
+                {overdueOnly ? "Every open case has a client interaction in the last 30 days." : "No matching cases."}
               </TableCell>
             </TableRow>
           ) : (
             rows.map((row) => {
-              const days = daysSinceContact(row.lastAttempt);
+              const days = daysSinceContact(row.lastInteraction);
               return (
                 <TableRow key={row.caseId}>
                   <TableCell className={compactCell}>
@@ -445,20 +457,24 @@ function CallsTable({
                   <TableCell className={cn(compactCell, "max-w-36 truncate")}>{row.attorneyName}</TableCell>
                   <TableCell className={cn(compactCell, "max-w-36 truncate")}>{row.paralegalName || "—"}</TableCell>
                   <TableCell className={cn(compactCell, "max-w-36 truncate")}>{row.legalAssistantName || "—"}</TableCell>
-                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastAttempt)}</TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastInteraction)}</TableCell>
                   <TableCell className={compactCell}>
                     <Badge variant={daysBadgeVariant(days)} className="px-1.5 py-0 text-[10px]">
                       {days === null ? "Never" : days}
                     </Badge>
                   </TableCell>
-                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>
-                    <SentimentCell row={row} onOpen={() => onOpenSentiment(row)} />
-                  </TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastAttempt)}</TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastOutboundCall)}</TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastHumanCall)}</TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastInboundText)}</TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastConversation)}</TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastOutboundText)}</TableCell>
                   <TableCell className={cn(compactCell, "max-w-44 truncate whitespace-nowrap")} title={row.lastOtherDetails ?? undefined}>
                     {formatOtherContact(row.lastOtherAt, row.lastOtherType)}
                   </TableCell>
-                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastOutboundCall)}</TableCell>
-                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastOutboundText)}</TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>
+                    <SentimentCell row={row} onOpen={() => onOpenSentiment(row)} />
+                  </TableCell>
                 </TableRow>
               );
             })
@@ -505,12 +521,12 @@ function SentimentTable({
             </TableRow>
           ) : (
             rows.map((row) => {
-              const label = contactSentimentLabel(row.lastAttempt, row.sentiment);
+              const label = contactSentimentLabel(row.lastInteraction, row.sentiment);
               const showScore = label !== "Unknown" && label !== "—" && row.sentimentScore != null;
               const weekLabel = formatWeekLabel(row.sentimentWeekLabel, row.sentimentScoredAt);
               const reason =
                 label === "Unknown"
-                  ? "Last contact attempt is older than 30 days, so this reading is not current enough."
+                  ? "Last interaction is older than 30 days, so this reading is not current enough."
                   : label === "—"
                     ? "No weekly sentiment reading is stored for this case yet."
                     : row.sentimentReason?.trim() || "No explanation was stored with this reading.";
@@ -580,7 +596,7 @@ function callAttorneyScoreboard(rows: ClientContactRow[], allowlist: string[] | 
     const name = row.attorneyName.trim() || "Unassigned";
     const current = byAttorney.get(row.attorneyId) ?? { name, overdue: 0, total: 0 };
     current.total += 1;
-    if (contactNeedsFollowUp(row.lastAttempt)) current.overdue += 1;
+    if (contactNeedsFollowUp(row.lastInteraction)) current.overdue += 1;
     byAttorney.set(row.attorneyId, current);
   }
   return [...byAttorney.entries()]
@@ -625,12 +641,12 @@ function sentimentAttorneyScoreboard(rows: ClientContactRow[], allowlist: string
 }
 
 function sentimentFilterValue(row: ClientContactRow) {
-  const label = contactSentimentLabel(row.lastAttempt, row.sentiment);
+  const label = contactSentimentLabel(row.lastInteraction, row.sentiment);
   return label === "—" ? "No reading" : label;
 }
 
 function SentimentCell({ row, onOpen }: { row: ClientContactRow; onOpen: () => void }) {
-  const label = contactSentimentLabel(row.lastAttempt, row.sentiment);
+  const label = contactSentimentLabel(row.lastInteraction, row.sentiment);
   const showScore = label !== "Unknown" && label !== "—" && row.sentimentScore != null;
   return (
     <button
@@ -658,14 +674,21 @@ function matchesSelection(name: string, selected: string[]) {
   return selected.length === 0 || selected.includes(name);
 }
 
-function matchesDayRanges(lastAttempt: string | null, selected: string[]) {
+function matchesDayRanges(lastInteraction: string | null, selected: string[]) {
   if (selected.length === 0) return true;
-  const days = daysSinceContact(lastAttempt);
+  const days = daysSinceContact(lastInteraction);
   return selected.some((range) => {
-    if (range === "0-10") return days !== null && days <= 10;
-    if (range === "10-20") return days !== null && days > 10 && days <= 20;
-    if (range === "20-30") return days !== null && days > 20 && days <= 30;
-    if (range === "30+") return days === null || days > 30;
+    if (range === "never") return days === null;
+    if (days === null) return false;
+    if (range === "0-10") return days <= 10;
+    if (range === "10-20") return days > 10 && days <= 20;
+    if (range === "20-30") return days > 20 && days <= 30;
+    if (range === "30-45") return days > 30 && days <= 45;
+    if (range === "45-60") return days > 45 && days <= 60;
+    if (range === "60-90") return days > 60 && days <= 90;
+    if (range === "90+") return days > 90;
+    // Legacy bookmark/query values from the old filter.
+    if (range === "30+") return days > 30;
     return false;
   });
 }
@@ -720,7 +743,7 @@ function compareRows(left: ClientContactRow, right: ClientContactRow, sortKey: C
   const result =
     sortKey === "case"
       ? left.caseNumber.localeCompare(right.caseNumber, undefined, { numeric: true })
-      : contactAge(left.lastAttempt) - contactAge(right.lastAttempt);
+      : contactAge(left.lastInteraction) - contactAge(right.lastInteraction);
   if (Number.isNaN(result)) return 0;
   return direction === "asc" ? result : -result;
 }

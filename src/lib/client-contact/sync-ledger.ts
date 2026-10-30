@@ -4,13 +4,17 @@ import { applyContactStamps, type ContactStamp } from "@/lib/client-contact/repo
 import { latestDate } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
+import { getQuoCallById, listQuoPhoneNumbers } from "@/lib/quo/client";
 import { normalizePhoneForComparison } from "@/lib/quo/phone";
 import { getCases } from "@/lib/supabase/services";
 import { Client } from "pg";
 
 const LOOKBACK_DAYS = 120;
+/** Cap Quo GET lookups so orphan recovery stays inside the ledger cron budget. */
+const MAX_ORPHAN_ENRICHMENTS = 80;
 
 type LedgerCall = {
+  call_id: string | null;
   direction: string | null;
   status: string | null;
   ai_handled: boolean | null;
@@ -101,14 +105,21 @@ function matchesFor(
   return [...found.values()];
 }
 
+function clientPhones(phones: string[], firmNumbers: Set<string>) {
+  return phones.filter((phone) => !firmNumbers.has(phone));
+}
+
 /**
  * Fills contact dates from the existing Quo reporting ledger (same webhook store
  * intake-manager / quo-reporting already use). Joins phones and Quo contact ids
  * to cases via case_quo_contacts (name ends with case number).
+ *
+ * Some completed webhooks omit the client phone and contactIds. When Quo API is
+ * configured, those orphans are enriched with GET /calls/{id} before matching.
  */
 export async function syncClientContactsFromLedger() {
   const connectionString = process.env.REPORTING_DATABASE_URL?.trim();
-  if (!connectionString) return { configured: false as const, cases: 0, calls: 0, messages: 0 };
+  if (!connectionString) return { configured: false as const, cases: 0, calls: 0, messages: 0, orphansEnriched: 0 };
 
   const maps = await loadCaseContactMaps();
   const openList: ContactCase[] = (await getCases())
@@ -120,6 +131,17 @@ export async function syncClientContactsFromLedger() {
     .filter((record) => record.caseNumber);
   const openCases = new Set(openList.map((record) => record.caseNumber));
   await mergeQuoDirectoryContacts(maps, openList);
+
+  const firmNumbers = new Set<string>();
+  if (process.env.QUO_API_KEY?.trim()) {
+    try {
+      for (const line of await listQuoPhoneNumbers()) {
+        if (line.number) firmNumbers.add(line.number);
+      }
+    } catch (error) {
+      console.error("[client-contact] firm line lookup failed", error);
+    }
+  }
 
   const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const local = /@(localhost|127\.0\.0\.1)[:/]/.test(connectionString);
@@ -138,10 +160,12 @@ export async function syncClientContactsFromLedger() {
     return current;
   }
 
+  let orphansEnriched = 0;
+
   try {
     await client.connect();
     const calls = await client.query<LedgerCall>(
-      `select direction, status, ai_handled, created_at, answered_at, duration_sec, participants, payload_json
+      `select call_id, direction, status, ai_handled, created_at, answered_at, duration_sec, participants, payload_json
        from quo_calls
        where coalesce(created_at, updated_at) >= $1
        order by created_at asc nulls last`,
@@ -162,7 +186,7 @@ export async function syncClientContactsFromLedger() {
       if (["queued", "initiated", "ringing", "in-progress"].includes(status)) continue;
 
       const object = row.payload_json?.data?.object;
-      const phones = listPhones(
+      let phones = listPhones(
         row.participants?.from,
         row.participants?.to,
         row.participants?.external,
@@ -171,8 +195,31 @@ export async function syncClientContactsFromLedger() {
         object?.to,
         object?.participants,
       );
-      const contactIds = (object?.contactIds ?? []).map((id) => String(id).trim()).filter(Boolean);
-      const matches = matchesFor(maps, openCases, phones, contactIds);
+      let contactIds = (object?.contactIds ?? []).map((id) => String(id).trim()).filter(Boolean);
+      let matches = matchesFor(maps, openCases, phones, contactIds);
+
+      const needsEnrichment =
+        matches.length === 0 &&
+        Boolean(row.call_id?.trim()) &&
+        Boolean(process.env.QUO_API_KEY?.trim()) &&
+        contactIds.length === 0 &&
+        clientPhones(phones, firmNumbers).length === 0 &&
+        orphansEnriched < MAX_ORPHAN_ENRICHMENTS;
+
+      if (needsEnrichment) {
+        try {
+          const detail = await getQuoCallById(String(row.call_id));
+          if (detail) {
+            orphansEnriched += 1;
+            phones = listPhones(detail.participants, detail.from, detail.to, phones);
+            contactIds = [...new Set([...contactIds, ...detail.contactIds])];
+            matches = matchesFor(maps, openCases, phones, contactIds);
+          }
+        } catch (error) {
+          console.error("[client-contact] orphan call enrich failed", row.call_id, error);
+        }
+      }
+
       if (matches.length === 0) continue;
 
       const direction = (row.direction ?? "").toLowerCase();
@@ -215,6 +262,7 @@ export async function syncClientContactsFromLedger() {
       cases: saved.cases,
       calls: calls.rowCount ?? calls.rows.length,
       messages: messages.rowCount ?? messages.rows.length,
+      orphansEnriched,
     };
   } finally {
     await client.end().catch(() => undefined);

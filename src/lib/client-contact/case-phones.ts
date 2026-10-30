@@ -18,7 +18,7 @@ export async function loadCaseContactMaps(): Promise<CaseContactMaps> {
 
   const { data: entries, error: entryError } = await admin
     .from("case_tracker_entries")
-    .select("id, case_id, case_number, client_phone");
+    .select("id, case_id, case_number, client_phone, quo_contact_id");
   if (entryError) throw new Error(entryError.message);
 
   const trackerById = new Map<string, ContactCase>();
@@ -27,12 +27,15 @@ export async function loadCaseContactMaps(): Promise<CaseContactMaps> {
     case_id: string | null;
     case_number: string | null;
     client_phone: string | null;
+    quo_contact_id: string | null;
   }>) {
     const caseNumber = cleanCaseNumber(row.case_number ?? "");
     if (!caseNumber) continue;
     const contactCase = { caseId: row.case_id, caseNumber };
     trackerById.set(row.id, contactCase);
     addContactCase(byPhone, normalizePhoneForComparison(row.client_phone ?? ""), contactCase);
+    const quoId = row.quo_contact_id?.trim();
+    if (quoId) addContactCase(byQuoContactId, quoId, contactCase);
   }
 
   const { data: contacts, error: contactError } = await admin

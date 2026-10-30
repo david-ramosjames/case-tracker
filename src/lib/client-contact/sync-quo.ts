@@ -1,6 +1,10 @@
 import { loadCaseContactMaps, type ContactCase } from "@/lib/client-contact/case-phones";
 import { mergeQuoDirectoryContacts } from "@/lib/client-contact/directory-contacts";
-import { applyContactStamps, type ContactStamp } from "@/lib/client-contact/repository";
+import {
+  applyContactStamps,
+  listClientContactSummaries,
+  type ContactStamp,
+} from "@/lib/client-contact/repository";
 import { syncClientContactsFromLedger } from "@/lib/client-contact/sync-ledger";
 import { latestDate } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
@@ -13,23 +17,27 @@ import {
   listQuoPhoneNumberIds,
   listRecentQuoClientActivity,
 } from "@/lib/quo/client";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCases } from "@/lib/supabase/services";
 
 const LOOKBACK_MS = 120 * 24 * 60 * 60 * 1000;
+const BACKFILL_SETTINGS_KEY = "client_contact_line_backfill";
+/** Two daily runs at this size cover a few hundred open phones before morning review. */
+const DEFAULT_BACKFILL_PHONES = 220;
+const DEFAULT_BACKFILL_MS = 700_000;
+
+type BackfillCursor = {
+  nextPhone?: string | null;
+  updatedAt?: string;
+};
 
 /**
- * Refresh contact dates for open cases.
- * Reads the Quo reporting ledger, then asks Quo for calls by client phone.
- * Some completed calls omit the client on the webhook, and some clients have
- * more than one Quo contact whose name contains the case number.
- * Does not post to Slack.
+ * Refresh contact dates for open cases from the Railway Quo ledger.
+ * Slow Quo-by-phone orphan recovery runs on /api/cron/client-contact-backfill.
  */
 export async function syncQuoClientContacts() {
   const fromLedger = await syncClientContactsFromLedger();
-  const fromLines = process.env.QUO_API_KEY?.trim() ? await syncClientCallsAcrossLines() : null;
-  if (fromLedger.configured) {
-    return { ...fromLedger, linePhones: fromLines?.phones ?? 0, lineCases: fromLines?.cases ?? 0 };
-  }
+  if (fromLedger.configured) return fromLedger;
 
   if (!isQuoEnabled()) return { configured: false as const, cases: 0, phones: 0, source: "none" as const };
 
@@ -115,8 +123,46 @@ export async function syncQuoClientContacts() {
   };
 }
 
-/** Calls Quo only returns when the request names the client, on every firm line. */
-async function syncClientCallsAcrossLines() {
+async function loadBackfillCursor(): Promise<BackfillCursor> {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return {};
+  const { data } = await admin.from("case_tracker_settings").select("value").eq("key", BACKFILL_SETTINGS_KEY).maybeSingle();
+  const value = data?.value;
+  if (!value || typeof value !== "object") return {};
+  return value as BackfillCursor;
+}
+
+async function saveBackfillCursor(cursor: BackfillCursor) {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return;
+  const { error } = await admin.from("case_tracker_settings").upsert(
+    {
+      key: BACKFILL_SETTINGS_KEY,
+      value: { ...cursor, updatedAt: new Date().toISOString() },
+      description: "Cursor for Quo line-by-phone client-contact orphan backfill.",
+    },
+    { onConflict: "key" },
+  );
+  if (error) throw new Error(error.message);
+}
+
+/**
+ * Asks Quo for calls by client phone on every firm line.
+ * Persists a phone cursor so orphans are recovered across runs without
+ * timing out the ledger cron.
+ */
+export async function syncClientContactLineBackfill(options?: {
+  maxPhones?: number;
+  maxMs?: number;
+}) {
+  if (!process.env.QUO_API_KEY?.trim()) {
+    return { configured: false as const, phones: 0, lines: 0, cases: 0, processed: 0 };
+  }
+
+  const maxPhones = options?.maxPhones ?? DEFAULT_BACKFILL_PHONES;
+  const maxMs = options?.maxMs ?? DEFAULT_BACKFILL_MS;
+  const started = Date.now();
+
   const maps = await loadCaseContactMaps();
   const openList: ContactCase[] = (await getCases())
     .filter((record) => caseRequiresOngoingUpdates(record))
@@ -129,15 +175,38 @@ async function syncClientCallsAcrossLines() {
   await mergeQuoDirectoryContacts(maps, openList);
 
   const lines = await listQuoPhoneNumberIds();
-  const phones = [...maps.byPhone.entries()]
+  const phoneEntries = [...maps.byPhone.entries()]
     .filter(([, matches]) => matches.some((match) => openCases.has(match.caseNumber)))
     .map(([phone, matches]) => ({
       phone,
       matches: matches.filter((match) => openCases.has(match.caseNumber)),
-    }))
-    .sort((left, right) => left.phone.localeCompare(right.phone));
-  const start = new Date().getUTCHours() % 2 === 0 ? 0 : Math.floor(phones.length / 2);
-  const ordered = [...phones.slice(start), ...phones.slice(0, start)];
+    }));
+
+  const summaries = await listClientContactSummaries(
+    phoneEntries.flatMap((entry) => entry.matches.map((match) => match.caseNumber)),
+  );
+  phoneEntries.sort((left, right) => {
+    const leftAt = Math.min(
+      ...left.matches.map((match) => Date.parse(summaries.get(match.caseNumber)?.lastOutboundCallAt ?? "") || 0),
+    );
+    const rightAt = Math.min(
+      ...right.matches.map((match) => Date.parse(summaries.get(match.caseNumber)?.lastOutboundCallAt ?? "") || 0),
+    );
+    if (leftAt !== rightAt) return leftAt - rightAt;
+    return left.phone.localeCompare(right.phone);
+  });
+
+  const cursor = await loadBackfillCursor();
+  const startIndex = cursor.nextPhone
+    ? Math.max(
+        0,
+        phoneEntries.findIndex((entry) => entry.phone === cursor.nextPhone),
+      )
+    : 0;
+  const ordered =
+    startIndex > 0
+      ? [...phoneEntries.slice(startIndex), ...phoneEntries.slice(0, startIndex)]
+      : phoneEntries;
 
   const byCase = new Map<string, ContactStamp>();
   function stampFor(match: ContactCase) {
@@ -155,8 +224,19 @@ async function syncClientCallsAcrossLines() {
   }
 
   let processed = 0;
+  let nextPhone: string | null = null;
   for (const entry of ordered) {
+    if (processed >= maxPhones || Date.now() - started >= maxMs) {
+      nextPhone = entry.phone;
+      break;
+    }
+    let stoppedMidPhone = false;
     for (const lineId of lines) {
+      if (Date.now() - started >= maxMs) {
+        nextPhone = entry.phone;
+        stoppedMidPhone = true;
+        break;
+      }
       let calls: Awaited<ReturnType<typeof listQuoCallsForPhoneOnLine>> = [];
       try {
         calls = await listQuoCallsForPhoneOnLine(entry.phone, lineId);
@@ -173,9 +253,23 @@ async function syncClientCallsAcrossLines() {
         }
       }
     }
+    if (stoppedMidPhone) break;
     processed += 1;
-    if (processed % 25 === 0) await flush();
+    if (processed % 20 === 0) await flush();
   }
   await flush();
-  return { phones: phones.length, lines: lines.length, cases: savedCases };
+
+  // Full slice finished — wrap to the start of the stale-sorted phone list.
+  if (!nextPhone) nextPhone = phoneEntries[0]?.phone ?? null;
+  await saveBackfillCursor({ nextPhone });
+
+  return {
+    configured: true as const,
+    source: "quo_line_backfill" as const,
+    phones: phoneEntries.length,
+    lines: lines.length,
+    cases: savedCases,
+    processed,
+    nextPhone,
+  };
 }

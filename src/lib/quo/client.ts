@@ -502,7 +502,12 @@ export type QuoMessageActivity = {
 
 const UNFINISHED_CALL_STATUSES = new Set(["queued", "initiated", "ringing", "in-progress"]);
 
-export async function listQuoPhoneNumberIds() {
+export type QuoPhoneNumber = {
+  id: string;
+  number: string | null;
+};
+
+export async function listQuoPhoneNumbers(): Promise<QuoPhoneNumber[]> {
   const response = await quoApiFetch(`${QUO_API_BASE}/phone-numbers`, {
     headers: quoHeaders(),
   });
@@ -511,7 +516,59 @@ export async function listQuoPhoneNumberIds() {
     throw new Error(`Quo list phone numbers failed (${response.status}): ${body}`);
   }
   const payload = (await response.json()) as QuoListPhoneNumbersResponse;
-  return [...new Set((payload.data ?? []).map((row) => row.id?.trim()).filter(Boolean))] as string[];
+  const byId = new Map<string, QuoPhoneNumber>();
+  for (const row of payload.data ?? []) {
+    const id = row.id?.trim();
+    if (!id || byId.has(id)) continue;
+    byId.set(id, { id, number: normalizePhoneForComparison(row.number ?? "") || null });
+  }
+  return [...byId.values()];
+}
+
+export async function listQuoPhoneNumberIds() {
+  return (await listQuoPhoneNumbers()).map((row) => row.id);
+}
+
+/** Full call payload — used to recover webhook orphans that omit the client phone. */
+export async function getQuoCallById(callId: string): Promise<{
+  id: string;
+  participants: string[];
+  contactIds: string[];
+  from: string | null;
+  to: string | string[] | null;
+} | null> {
+  const id = callId.trim();
+  if (!id) return null;
+  const response = await quoApiFetch(`${QUO_API_BASE}/calls/${encodeURIComponent(id)}`, {
+    headers: quoHeaders(),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Quo get call failed (${response.status}): ${body}`);
+  }
+  const payload = (await response.json()) as {
+    data?: {
+      id?: string;
+      participants?: string[];
+      contactIds?: string[];
+      from?: string | null;
+      to?: string | string[] | null;
+    };
+    id?: string;
+    participants?: string[];
+    contactIds?: string[];
+    from?: string | null;
+    to?: string | string[] | null;
+  };
+  const row = payload.data ?? payload;
+  return {
+    id: row.id?.trim() || id,
+    participants: Array.isArray(row.participants) ? row.participants.filter((value): value is string => typeof value === "string") : [],
+    contactIds: Array.isArray(row.contactIds) ? row.contactIds.map((value) => String(value).trim()).filter(Boolean) : [],
+    from: typeof row.from === "string" ? row.from : null,
+    to: row.to ?? null,
+  };
 }
 
 /** Latest calls with one client. Participants is required by Quo, so this is one request per phone. */

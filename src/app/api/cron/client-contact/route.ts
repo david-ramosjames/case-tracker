@@ -7,7 +7,7 @@ import { errorMessage } from "@/lib/utils";
 export const maxDuration = 800;
 export const dynamic = "force-dynamic";
 
-/** Refresh contact dates from the Quo reporting ledger (or Quo API fallback). Does not post to Slack. */
+/** Refresh contact dates from the Railway Quo ledger (or Quo API fallback). Orphan phone backfill is a separate cron. */
 export async function GET(request: Request) {
   const secret = getCronSecret();
   if (!secret) return NextResponse.json({ error: "CRON_SECRET is not configured." }, { status: 500 });
