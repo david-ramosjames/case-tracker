@@ -75,22 +75,22 @@ export function daysSinceContact(contactedAt: string | null, now = Date.now()) {
   return Math.floor((now - ms) / (1000 * 60 * 60 * 24));
 }
 
-/** Sheet column G (Days Since Contact) uses Last Interaction (F), not Last Attempt. */
+/** Sheet column G (Days Since Contact) uses Last Interaction (F), not Last Attempt. Day 30 counts as overdue. */
 export function contactNeedsFollowUp(lastInteractionAt: string | null, now = Date.now()) {
   const days = daysSinceContact(lastInteractionAt, now);
-  return days === null || days > CLIENT_CONTACT_WINDOW_DAYS;
+  return days === null || days >= CLIENT_CONTACT_WINDOW_DAYS;
 }
 
 export type ClientSentimentLabel = "Positive" | "Neutral" | "Negative" | "Unknown" | "—";
 
-/** Sheet only shows sentiment when Days Since Contact (from Last Interaction) is under 30. */
+/** Sentiment only counts when last interaction is under 30 days; day 30+ is Unknown. */
 export function contactSentimentLabel(
   lastInteractionAt: string | null,
   sentiment: string | null,
   now = Date.now(),
 ): ClientSentimentLabel {
   const days = daysSinceContact(lastInteractionAt, now);
-  if (days === null || days > CLIENT_CONTACT_WINDOW_DAYS) return "Unknown";
+  if (days === null || days >= CLIENT_CONTACT_WINDOW_DAYS) return "Unknown";
   if (sentiment === "Positive" || sentiment === "Neutral" || sentiment === "Negative") return sentiment;
   return "—";
 }

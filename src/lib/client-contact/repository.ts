@@ -153,6 +153,7 @@ export type ClientSentimentReading = {
   sentiment: string;
   score: number | null;
   reasonSummary: string | null;
+  evidenceUrls: string[];
   weekLabel: string | null;
   scoredAt: string;
 };
@@ -162,9 +163,16 @@ type SentimentRow = {
   sentiment: string;
   score: number | null;
   reason_summary: string | null;
+  evidence_urls: string | null;
   week_label: string | null;
   scored_at: string;
 };
+
+function parseEvidenceUrls(value: string | null | undefined) {
+  if (!value?.trim()) return [];
+  const found = value.match(/https?:\/\/[^\s<>"']+/g) ?? [];
+  return [...new Set(found.map((url) => url.replace(/[),.;]+$/g, "")).filter(Boolean))];
+}
 
 /** Latest stored reading per case. The page turns stale readings into Unknown. */
 export async function listLatestClientSentiments(caseNumbers: string[]) {
@@ -180,7 +188,7 @@ export async function listLatestClientSentiments(caseNumbers: string[]) {
     while (pending.size > 0) {
       const { data, error } = await admin
         .from("case_client_sentiment")
-        .select("case_number, sentiment, score, reason_summary, week_label, scored_at")
+        .select("case_number, sentiment, score, reason_summary, evidence_urls, week_label, scored_at")
         .in("case_number", chunk)
         .order("scored_at", { ascending: false })
         .range(from, from + 999);
@@ -193,6 +201,7 @@ export async function listLatestClientSentiments(caseNumbers: string[]) {
           sentiment: row.sentiment,
           score: row.score,
           reasonSummary: row.reason_summary,
+          evidenceUrls: parseEvidenceUrls(row.evidence_urls),
           weekLabel: row.week_label,
           scoredAt: row.scored_at,
         });

@@ -54,6 +54,7 @@ export type ClientContactRow = {
   sentiment: string | null;
   sentimentScore: number | null;
   sentimentReason: string | null;
+  sentimentEvidenceUrls: string[];
   sentimentWeekLabel: string | null;
   sentimentScoredAt: string | null;
   quoUrl: string | null;
@@ -81,7 +82,7 @@ export function ClientContactView({
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [sentimentSortKey, setSentimentSortKey] = useState<SentimentSortKey>("week");
   const [sentimentSortDirection, setSentimentSortDirection] = useState<SortDirection>("desc");
-  const [selectedWeek, setSelectedWeek] = useState("");
+  const [selectedWeek, setSelectedWeek] = useState("all");
   const [focusedCaseNumber, setFocusedCaseNumber] = useState<string | null>(null);
 
   function requestSort(nextKey: CallSortKey) {
@@ -112,9 +113,12 @@ export function ClientContactView({
     if (week) setSelectedWeek(week);
   }
 
-  const weekOptions = useMemo(() => buildWeekOptions(rows), [rows]);
-  const latestWeek = weekOptions[0]?.value ?? "";
-  const weekFilter = selectedWeek && weekOptions.some((option) => option.value === selectedWeek) ? selectedWeek : latestWeek;
+  const weekOptions = useMemo(() => {
+    const weeks = buildWeekOptions(rows);
+    return [{ value: "all", label: "All weeks" }, ...weeks];
+  }, [rows]);
+  const weekFilter =
+    selectedWeek && weekOptions.some((option) => option.value === selectedWeek) ? selectedWeek : "all";
 
   const callScoreboard = useMemo(() => callAttorneyScoreboard(rows, scoreboardAttorneyIds), [rows, scoreboardAttorneyIds]);
   const attorneyOptions = useMemo(() => nameOptions(rows.map((row) => row.attorneyName)), [rows]);
@@ -130,14 +134,20 @@ export function ClientContactView({
     });
   }, [rows, attorneys, paralegals, legalAssistants]);
 
+  // Week filter is for the table; scoreboard always uses every open case so Unknown
+  // (no interaction in 30 days) still counts even when a specific week is selected.
   const sentimentStaffFiltered = useMemo(() => {
-    if (!weekFilter) return staffFiltered;
-    return staffFiltered.filter((row) => weekFilterKey(row) === weekFilter);
+    if (!weekFilter || weekFilter === "all") return staffFiltered;
+    return staffFiltered.filter((row) => {
+      if (weekFilterKey(row) === weekFilter) return true;
+      const label = sentimentFilterValue(row);
+      return label === "Unknown" || label === "No reading";
+    });
   }, [staffFiltered, weekFilter]);
 
   const sentimentScoreboard = useMemo(
-    () => sentimentAttorneyScoreboard(sentimentStaffFiltered, scoreboardAttorneyIds),
-    [sentimentStaffFiltered, scoreboardAttorneyIds],
+    () => sentimentAttorneyScoreboard(staffFiltered, scoreboardAttorneyIds),
+    [staffFiltered, scoreboardAttorneyIds],
   );
 
   const callFiltered = useMemo(() => {
@@ -158,10 +168,10 @@ export function ClientContactView({
       if (days === null) {
         never += 1;
         over30 += 1;
-      } else if (days > CLIENT_CONTACT_LONG_GAP_DAYS) {
+      } else if (days >= CLIENT_CONTACT_LONG_GAP_DAYS) {
         over45 += 1;
         over30 += 1;
-      } else if (days > CLIENT_CONTACT_WINDOW_DAYS) {
+      } else if (days >= CLIENT_CONTACT_WINDOW_DAYS) {
         over30 += 1;
       } else {
         within += 1;
@@ -263,7 +273,7 @@ export function ClientContactView({
       {tab === "calls" ? (
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant="danger" className="px-2 py-0 text-[11px]">
-            {counted.over30} over {CLIENT_CONTACT_WINDOW_DAYS} days
+            {counted.over30} {CLIENT_CONTACT_WINDOW_DAYS}+ days
           </Badge>
           <Badge variant="danger" className="px-2 py-0 text-[11px]">
             {counted.over45} over {CLIENT_CONTACT_LONG_GAP_DAYS} days
@@ -354,7 +364,7 @@ export function ClientContactView({
             label="Week"
             value={weekFilter || "all"}
             onChange={setSelectedWeek}
-            options={weekOptions.length > 0 ? weekOptions : [{ value: "all", label: "No weeks yet" }]}
+            options={weekOptions}
             className="w-52"
           />
         )}
@@ -436,7 +446,7 @@ function CallsTable({
               return (
                 <TableRow key={row.caseId}>
                   <TableCell className={compactCell}>
-                    <CaseNumberLink caseId={row.caseId} caseNumber={row.caseNumber} />
+                    <CaseNumberLink caseId={row.caseId} caseNumber={row.caseNumber} openInNewTab />
                   </TableCell>
                   <TableCell className={cn(compactCell, "max-w-40 truncate")}>{row.clientName}</TableCell>
                   <TableCell className={compactCell}>
@@ -510,12 +520,13 @@ function SentimentTable({
             <TableHead className={compactHead}>Score</TableHead>
             <SortableHead label="Week" sortKey="week" active={sortKey} direction={sortDirection} onSort={onSort} />
             <TableHead className={compactHead}>Why</TableHead>
+            <TableHead className={compactHead}>Evidence</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7} className={cn(compactCell, "text-muted-foreground")}>
+              <TableCell colSpan={8} className={cn(compactCell, "text-muted-foreground")}>
                 No matching sentiment readings.
               </TableCell>
             </TableRow>
@@ -533,7 +544,7 @@ function SentimentTable({
               return (
                 <TableRow key={row.caseId} className={cn(focusedCaseNumber === row.caseNumber && "bg-pink-50/70")}>
                   <TableCell className={compactCell}>
-                    <CaseNumberLink caseId={row.caseId} caseNumber={row.caseNumber} />
+                    <CaseNumberLink caseId={row.caseId} caseNumber={row.caseNumber} openInNewTab />
                   </TableCell>
                   <TableCell className={cn(compactCell, "max-w-40 truncate")}>{row.clientName}</TableCell>
                   <TableCell className={cn(compactCell, "max-w-36 truncate")}>{row.attorneyName}</TableCell>
@@ -546,6 +557,9 @@ function SentimentTable({
                   <TableCell className={cn(compactCell, "whitespace-nowrap")}>{weekLabel}</TableCell>
                   <TableCell className={cn(compactCell, "min-w-64 max-w-xl whitespace-normal text-[11px] leading-snug text-muted-foreground")}>
                     {reason}
+                  </TableCell>
+                  <TableCell className={cn(compactCell, "min-w-28 whitespace-nowrap")}>
+                    <EvidenceLinks urls={row.sentimentEvidenceUrls} />
                   </TableCell>
                 </TableRow>
               );
@@ -663,6 +677,35 @@ function SentimentCell({ row, onOpen }: { row: ClientContactRow; onOpen: () => v
   );
 }
 
+/** Compact Quo call/SMS evidence links — same sources as the weekly sentiment email. */
+function EvidenceLinks({ urls }: { urls: string[] }) {
+  if (!urls.length) return <span className="text-muted-foreground">—</span>;
+  return (
+    <span className="inline-flex flex-wrap gap-1">
+      {urls.slice(0, 8).map((url, index) => (
+        <a
+          key={`${url}-${index}`}
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-0.5 font-medium text-pink-600 hover:text-pink-500"
+          title={url}
+        >
+          {evidenceLinkLabel(url, index)}
+          <ExternalLink className="h-3 w-3" />
+        </a>
+      ))}
+    </span>
+  );
+}
+
+function evidenceLinkLabel(url: string, index: number) {
+  const lower = url.toLowerCase();
+  if (lower.includes("/message") || lower.includes("sms")) return `SMS${index + 1}`;
+  if (lower.includes("/call") || lower.includes("/inbox")) return `V${index + 1}`;
+  return `E${index + 1}`;
+}
+
 function sentimentBadgeVariant(label: string) {
   if (label === "Positive") return "success" as const;
   if (label === "Negative") return "danger" as const;
@@ -681,14 +724,14 @@ function matchesDayRanges(lastInteraction: string | null, selected: string[]) {
     if (range === "never") return days === null;
     if (days === null) return false;
     if (range === "0-10") return days <= 10;
-    if (range === "10-20") return days > 10 && days <= 20;
-    if (range === "20-30") return days > 20 && days <= 30;
-    if (range === "30-45") return days > 30 && days <= 45;
-    if (range === "45-60") return days > 45 && days <= 60;
-    if (range === "60-90") return days > 60 && days <= 90;
-    if (range === "90+") return days > 90;
+    if (range === "10-20") return days > 10 && days < 20;
+    if (range === "20-30") return days >= 20 && days < 30;
+    if (range === "30-45") return days >= 30 && days < 45;
+    if (range === "45-60") return days >= 45 && days < 60;
+    if (range === "60-90") return days >= 60 && days < 90;
+    if (range === "90+") return days >= 90;
     // Legacy bookmark/query values from the old filter.
-    if (range === "30+") return days > 30;
+    if (range === "30+") return days >= 30;
     return false;
   });
 }
@@ -729,8 +772,8 @@ function formatOtherContact(value: string | null, contactType: string | null) {
 }
 
 function daysBadgeVariant(days: number | null) {
-  if (days === null || days > CLIENT_CONTACT_LONG_GAP_DAYS) return "danger" as const;
-  if (days > CLIENT_CONTACT_WINDOW_DAYS) return "warning" as const;
+  if (days === null || days >= CLIENT_CONTACT_LONG_GAP_DAYS) return "danger" as const;
+  if (days >= CLIENT_CONTACT_WINDOW_DAYS) return "warning" as const;
   return "success" as const;
 }
 

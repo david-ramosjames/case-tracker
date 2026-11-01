@@ -101,6 +101,7 @@ export default async function ClientContactPage() {
       sentiment: sentiment?.sentiment ?? null,
       sentimentScore: sentiment?.score ?? null,
       sentimentReason: sentiment?.reasonSummary ?? null,
+      sentimentEvidenceUrls: sentiment?.evidenceUrls ?? [],
       sentimentWeekLabel: sentiment?.weekLabel ?? null,
       sentimentScoredAt: sentiment?.scoredAt ?? null,
       quoUrl: quoUrlForCase(record),
