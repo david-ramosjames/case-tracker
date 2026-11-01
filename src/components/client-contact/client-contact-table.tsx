@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { Badge } from "@/components/ui/badge";
 import { HeaderFilter, HeaderMultiFilter } from "@/components/ui/header-filter";
@@ -82,8 +82,20 @@ export function ClientContactView({
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [sentimentSortKey, setSentimentSortKey] = useState<SentimentSortKey>("week");
   const [sentimentSortDirection, setSentimentSortDirection] = useState<SortDirection>("desc");
-  const [selectedWeek, setSelectedWeek] = useState("all");
+  /** Empty means "use the newest week once options load." */
+  const [selectedWeek, setSelectedWeek] = useState("");
   const [focusedCaseNumber, setFocusedCaseNumber] = useState<string | null>(null);
+  const sentimentTabDefaultsApplied = useRef(false);
+
+  function openSentimentTab() {
+    setTab("sentiment");
+    // First visit: Negative + newest week (week falls back via empty selectedWeek).
+    if (!sentimentTabDefaultsApplied.current) {
+      sentimentTabDefaultsApplied.current = true;
+      setSentimentFilters(["Negative"]);
+      setSelectedWeek("");
+    }
+  }
 
   function requestSort(nextKey: CallSortKey) {
     if (sortKey === nextKey) {
@@ -106,6 +118,7 @@ export function ClientContactView({
   function openSentimentForRow(row: ClientContactRow) {
     const label = sentimentFilterValue(row);
     const week = weekFilterKey(row);
+    sentimentTabDefaultsApplied.current = true;
     setTab("sentiment");
     setFocusedCaseNumber(row.caseNumber);
     setQuery(row.caseNumber);
@@ -117,8 +130,9 @@ export function ClientContactView({
     const weeks = buildWeekOptions(rows);
     return [{ value: "all", label: "All weeks" }, ...weeks];
   }, [rows]);
+  const latestWeek = weekOptions.find((option) => option.value !== "all")?.value ?? "all";
   const weekFilter =
-    selectedWeek && weekOptions.some((option) => option.value === selectedWeek) ? selectedWeek : "all";
+    selectedWeek && weekOptions.some((option) => option.value === selectedWeek) ? selectedWeek : latestWeek;
 
   const callScoreboard = useMemo(() => callAttorneyScoreboard(rows, scoreboardAttorneyIds), [rows, scoreboardAttorneyIds]);
   const attorneyOptions = useMemo(() => nameOptions(rows.map((row) => row.attorneyName)), [rows]);
@@ -213,7 +227,7 @@ export function ClientContactView({
         <TabButton active={tab === "calls"} onClick={() => setTab("calls")}>
           Calls
         </TabButton>
-        <TabButton active={tab === "sentiment"} onClick={() => setTab("sentiment")}>
+        <TabButton active={tab === "sentiment"} onClick={openSentimentTab}>
           Sentiment
         </TabButton>
       </div>
@@ -331,7 +345,7 @@ export function ClientContactView({
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-end gap-2">
         <HeaderMultiFilter label="Attorney" selected={attorneys} onChange={setAttorneys} options={attorneyOptions} className="w-44" />
         <HeaderMultiFilter label="Paralegal" selected={paralegals} onChange={setParalegals} options={paralegalOptions} className="w-44" />
         <HeaderMultiFilter
@@ -362,7 +376,7 @@ export function ClientContactView({
         ) : (
           <HeaderFilter
             label="Week"
-            value={weekFilter || "all"}
+            value={weekFilter}
             onChange={setSelectedWeek}
             options={weekOptions}
             className="w-52"

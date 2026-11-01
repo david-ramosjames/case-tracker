@@ -23,12 +23,12 @@ export function HeaderFilter({
   const isActive = value !== "all";
 
   return (
-    <div className={cn("flex min-w-0 flex-col gap-1", className)}>
-      <span className={cn("text-[10px] font-semibold uppercase tracking-wide", isActive ? "text-pink-600" : "text-muted-foreground")}>
+    <div className={cn("relative flex min-w-0 flex-col gap-1", className)}>
+      <span className={cn("text-[10px] font-semibold uppercase leading-none tracking-wide", isActive ? "text-pink-600" : "text-muted-foreground")}>
         {label}
       </span>
       <Select
-        className={cn("h-8 min-w-0 text-xs", isActive && "border-pink-300 bg-pink-50/50")}
+        className={cn("h-8 min-w-0 px-2 py-0 text-xs", isActive && "border-pink-300 bg-pink-50/50")}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         aria-label={ariaLabel ?? `Filter by ${label}`}
@@ -72,11 +72,11 @@ export function HeaderMultiFilter({
   }
 
   return (
-    <div className={cn("relative min-w-0", className)}>
-      <span className={cn("text-[10px] font-semibold uppercase tracking-wide", isActive ? "text-pink-600" : "text-muted-foreground")}>
+    <div className={cn("relative flex min-w-0 flex-col gap-1", className)}>
+      <span className={cn("text-[10px] font-semibold uppercase leading-none tracking-wide", isActive ? "text-pink-600" : "text-muted-foreground")}>
         {label}
       </span>
-      <details className="group mt-1">
+      <details className="group">
         <summary
           className={cn(
             "flex h-8 cursor-pointer list-none items-center justify-between rounded-md border bg-white px-2 text-xs",
