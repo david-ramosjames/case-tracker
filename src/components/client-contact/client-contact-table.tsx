@@ -65,11 +65,15 @@ const compactCell = "px-2 py-1.5";
 
 export function ClientContactView({
   rows,
+  sentimentRows,
   scoreboardAttorneyIds,
 }: {
   rows: ClientContactRow[];
+  /** Quo-contact-level rows for the Sentiment tab (falls back to case rows). */
+  sentimentRows?: ClientContactRow[];
   scoreboardAttorneyIds: string[] | null;
 }) {
+  const sentimentSourceRows = sentimentRows ?? rows;
   const [tab, setTab] = useState<ContactTab>("calls");
   const [query, setQuery] = useState("");
   const [overdueOnly, setOverdueOnly] = useState(true);
@@ -127,9 +131,9 @@ export function ClientContactView({
   }
 
   const weekOptions = useMemo(() => {
-    const weeks = buildWeekOptions(rows);
+    const weeks = buildWeekOptions(sentimentSourceRows);
     return [{ value: "all", label: "All weeks" }, ...weeks];
-  }, [rows]);
+  }, [sentimentSourceRows]);
   const latestWeek = weekOptions.find((option) => option.value !== "all")?.value ?? "all";
   const weekFilter =
     selectedWeek && weekOptions.some((option) => option.value === selectedWeek) ? selectedWeek : latestWeek;
@@ -148,20 +152,29 @@ export function ClientContactView({
     });
   }, [rows, attorneys, paralegals, legalAssistants]);
 
-  // Week filter is for the table; scoreboard always uses every open case so Unknown
+  const sentimentStaffBase = useMemo(() => {
+    return sentimentSourceRows.filter((row) => {
+      if (!matchesSelection(row.attorneyName, attorneys)) return false;
+      if (!matchesSelection(row.paralegalName, paralegals)) return false;
+      if (!matchesSelection(row.legalAssistantName, legalAssistants)) return false;
+      return true;
+    });
+  }, [sentimentSourceRows, attorneys, paralegals, legalAssistants]);
+
+  // Week filter is for the table; scoreboard always uses every contact so Unknown
   // (no interaction in 30 days) still counts even when a specific week is selected.
   const sentimentStaffFiltered = useMemo(() => {
-    if (!weekFilter || weekFilter === "all") return staffFiltered;
-    return staffFiltered.filter((row) => {
+    if (!weekFilter || weekFilter === "all") return sentimentStaffBase;
+    return sentimentStaffBase.filter((row) => {
       if (weekFilterKey(row) === weekFilter) return true;
       const label = sentimentFilterValue(row);
       return label === "Unknown" || label === "No reading";
     });
-  }, [staffFiltered, weekFilter]);
+  }, [sentimentStaffBase, weekFilter]);
 
   const sentimentScoreboard = useMemo(
-    () => sentimentAttorneyScoreboard(staffFiltered, scoreboardAttorneyIds),
-    [staffFiltered, scoreboardAttorneyIds],
+    () => sentimentAttorneyScoreboard(sentimentStaffBase, scoreboardAttorneyIds),
+    [sentimentStaffBase, scoreboardAttorneyIds],
   );
 
   const callFiltered = useMemo(() => {
@@ -556,7 +569,7 @@ function SentimentTable({
                     ? "No weekly sentiment reading is stored for this case yet."
                     : row.sentimentReason?.trim() || "No explanation was stored with this reading.";
               return (
-                <TableRow key={row.caseId} className={cn(focusedCaseNumber === row.caseNumber && "bg-pink-50/70")}>
+                <TableRow key={`${row.caseId}:${row.clientName}`} className={cn(focusedCaseNumber === row.caseNumber && "bg-pink-50/70")}>
                   <TableCell className={compactCell}>
                     <CaseNumberLink caseId={row.caseId} caseNumber={row.caseNumber} openInNewTab />
                   </TableCell>

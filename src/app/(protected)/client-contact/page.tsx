@@ -1,6 +1,10 @@
 import { ClientContactView } from "@/components/client-contact/client-contact-table";
 import { buildViewerContext } from "@/lib/auth/access";
-import { listClientContactSummaries, listLatestClientSentiments } from "@/lib/client-contact/repository";
+import {
+  listClientContactSummaries,
+  listLatestClientSentiments,
+  worstSentimentByCaseNumber,
+} from "@/lib/client-contact/repository";
 import { clientContactDates } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
@@ -70,16 +74,18 @@ export default async function ClientContactPage() {
     return viewer.contactId ? isAssignedToViewer(record, viewer.contactId) : false;
   });
   const caseNumbers = open.map((record) => record.shared.caseNumber);
-  const [summary, sentiments] = await Promise.all([
+  const [summary, sentimentsByContact] = await Promise.all([
     listClientContactSummaries(caseNumbers),
     listLatestClientSentiments(caseNumbers),
   ]);
+  const sentimentsByCase = worstSentimentByCaseNumber(sentimentsByContact.values());
+  const openByCaseNumber = new Map(open.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
 
   const rows = open.map((record) => {
     const caseNumber = cleanCaseNumber(record.shared.caseNumber);
     const dates = clientContactDates(summary.get(caseNumber) ?? null);
     const stored = summary.get(caseNumber);
-    const sentiment = sentiments.get(caseNumber);
+    const sentiment = sentimentsByCase.get(caseNumber);
     return {
       caseId: record.shared.id,
       caseNumber: record.shared.caseNumber,
@@ -108,5 +114,55 @@ export default async function ClientContactPage() {
     };
   });
 
-  return <ClientContactView rows={rows} scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds} />;
+  // Sentiment tab: one row per Quo contact reading (same grain as the weekly reporter).
+  const sentimentRows = [...sentimentsByContact.values()]
+    .map((reading) => {
+      const record = openByCaseNumber.get(cleanCaseNumber(reading.caseNumber));
+      if (!record) return null;
+      const caseNumber = cleanCaseNumber(record.shared.caseNumber);
+      const dates = clientContactDates(summary.get(caseNumber) ?? null);
+      const stored = summary.get(caseNumber);
+      return {
+        caseId: record.shared.id,
+        caseNumber: record.shared.caseNumber,
+        attorneyId: record.attorney.id,
+        clientName: reading.clientName,
+        attorneyName: record.attorney.name,
+        paralegalName: record.paralegal.name,
+        legalAssistantName: record.legalAssistant?.name ?? "",
+        lastInteraction: dates.lastInteraction,
+        lastAttempt: dates.lastAttempt,
+        lastHumanCall: stored?.lastHumanCallAt ?? null,
+        lastConversation: stored?.lastConversationAt ?? null,
+        lastInboundText: stored?.lastInboundTextAt ?? null,
+        lastOutboundCall: stored?.lastOutboundCallAt ?? null,
+        lastOutboundText: stored?.lastOutboundTextAt ?? null,
+        lastOtherAt: stored?.lastOtherAt ?? null,
+        lastOtherType: stored?.lastOtherType ?? null,
+        lastOtherDetails: stored?.lastOtherDetails ?? null,
+        sentiment: reading.sentiment,
+        sentimentScore: reading.score,
+        sentimentReason: reading.reasonSummary,
+        sentimentEvidenceUrls: reading.evidenceUrls,
+        sentimentWeekLabel: reading.weekLabel,
+        sentimentScoredAt: reading.scoredAt,
+        quoUrl: quoUrlForCase(record),
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row != null);
+
+  // Include open cases with no contact reading so Unknown / No reading still appears.
+  const casesWithReading = new Set(sentimentRows.map((row) => cleanCaseNumber(row.caseNumber)));
+  for (const row of rows) {
+    if (casesWithReading.has(cleanCaseNumber(row.caseNumber))) continue;
+    sentimentRows.push({ ...row, sentiment: null, sentimentScore: null, sentimentReason: null, sentimentEvidenceUrls: [], sentimentWeekLabel: null, sentimentScoredAt: null });
+  }
+
+  return (
+    <ClientContactView
+      rows={rows}
+      sentimentRows={sentimentRows}
+      scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds}
+    />
+  );
 }

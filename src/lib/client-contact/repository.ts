@@ -150,6 +150,8 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
 
 export type ClientSentimentReading = {
   caseNumber: string;
+  /** Quo contact display name (same grain as the weekly reporter / sheet). */
+  clientName: string;
   sentiment: string;
   score: number | null;
   reasonSummary: string | null;
@@ -160,6 +162,7 @@ export type ClientSentimentReading = {
 
 type SentimentRow = {
   case_number: string;
+  client_name: string | null;
   sentiment: string;
   score: number | null;
   reason_summary: string | null;
@@ -174,30 +177,38 @@ function parseEvidenceUrls(value: string | null | undefined) {
   return [...new Set(found.map((url) => url.replace(/[),.;]+$/g, "")).filter(Boolean))];
 }
 
-/** Latest stored reading per case. The page turns stale readings into Unknown. */
+const SENTIMENT_SEVERITY: Record<string, number> = { Negative: 0, Neutral: 1, Positive: 2 };
+
+function contactKeyForReading(row: Pick<SentimentRow, "client_name" | "case_number">) {
+  const name = row.client_name?.trim();
+  return name || row.case_number;
+}
+
+/** Latest stored reading per Quo contact (client_name), for the given case numbers. */
 export async function listLatestClientSentiments(caseNumbers: string[]) {
-  const readings = new Map<string, ClientSentimentReading>();
+  const byContact = new Map<string, ClientSentimentReading>();
   const keys = [...new Set(caseNumbers.map((value) => cleanCaseNumber(value)).filter(Boolean))];
-  if (keys.length === 0) return readings;
+  if (keys.length === 0) return byContact;
 
   const admin = requireAdmin();
   for (let index = 0; index < keys.length; index += 200) {
     const chunk = keys.slice(index, index + 200);
-    const pending = new Set(chunk);
     let from = 0;
-    while (pending.size > 0) {
+    for (;;) {
       const { data, error } = await admin
         .from("case_client_sentiment")
-        .select("case_number, sentiment, score, reason_summary, evidence_urls, week_label, scored_at")
+        .select("case_number, client_name, sentiment, score, reason_summary, evidence_urls, week_label, scored_at")
         .in("case_number", chunk)
         .order("scored_at", { ascending: false })
         .range(from, from + 999);
       if (error) throw new Error(error.message);
       const page = (data ?? []) as SentimentRow[];
       for (const row of page) {
-        if (readings.has(row.case_number)) continue;
-        readings.set(row.case_number, {
+        const contactKey = contactKeyForReading(row);
+        if (byContact.has(contactKey)) continue;
+        byContact.set(contactKey, {
           caseNumber: row.case_number,
+          clientName: contactKey,
           sentiment: row.sentiment,
           score: row.score,
           reasonSummary: row.reason_summary,
@@ -205,13 +216,28 @@ export async function listLatestClientSentiments(caseNumbers: string[]) {
           weekLabel: row.week_label,
           scoredAt: row.scored_at,
         });
-        pending.delete(row.case_number);
       }
       if (page.length < 1000) break;
       from += page.length;
     }
   }
-  return readings;
+  return byContact;
+}
+
+/** Worst (most severe) latest reading among Quo contacts that share a case number. */
+export function worstSentimentByCaseNumber(readings: Iterable<ClientSentimentReading>) {
+  const byCase = new Map<string, ClientSentimentReading>();
+  for (const reading of readings) {
+    const existing = byCase.get(reading.caseNumber);
+    if (!existing) {
+      byCase.set(reading.caseNumber, reading);
+      continue;
+    }
+    const nextRank = SENTIMENT_SEVERITY[reading.sentiment] ?? 9;
+    const existingRank = SENTIMENT_SEVERITY[existing.sentiment] ?? 9;
+    if (nextRank < existingRank) byCase.set(reading.caseNumber, reading);
+  }
+  return byCase;
 }
 
 /** Stores one manual contact. Repeating the same Slack message does not create a second row. */
