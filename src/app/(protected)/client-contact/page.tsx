@@ -72,7 +72,8 @@ export default async function ClientContactPage() {
     const topicStage = slackChannels.get(cleanCaseNumber(record.shared.caseNumber))?.topicStage;
     if (isReferredCase(record, topicStage)) return false;
     if (!caseRequiresOngoingUpdates(record)) return false;
-    if (viewer.isAdmin) return true;
+    // Same firmwide access as Cases: admins + managing attorney (manager role).
+    if (viewer.canViewAllCases) return true;
     return viewer.contactId ? isAssignedToViewer(record, viewer.contactId) : false;
   });
   const caseNumbers = open.map((record) => record.shared.caseNumber);
