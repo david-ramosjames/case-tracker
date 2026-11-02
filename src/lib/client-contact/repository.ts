@@ -240,6 +240,56 @@ export function worstSentimentByCaseNumber(readings: Iterable<ClientSentimentRea
   return byCase;
 }
 
+export function sentimentFlagKey(caseNumber: string, clientName: string) {
+  return `${cleanCaseNumber(caseNumber)}\t${clientName.trim()}`;
+}
+
+/** Action-required flags keyed by case_number + Quo contact name. */
+export async function listSentimentActionFlags(caseNumbers: string[]) {
+  const flags = new Map<string, boolean>();
+  const keys = [...new Set(caseNumbers.map((value) => cleanCaseNumber(value)).filter(Boolean))];
+  if (keys.length === 0) return flags;
+
+  const admin = requireAdmin();
+  for (let index = 0; index < keys.length; index += 200) {
+    const chunk = keys.slice(index, index + 200);
+    const { data, error } = await admin
+      .from("case_client_sentiment_flags")
+      .select("case_number, client_name, action_required")
+      .in("case_number", chunk)
+      .eq("action_required", true);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) {
+      flags.set(sentimentFlagKey(row.case_number, row.client_name ?? ""), true);
+    }
+  }
+  return flags;
+}
+
+export async function setSentimentActionRequired(input: {
+  caseNumber: string;
+  clientName: string;
+  actionRequired: boolean;
+  updatedBy?: string | null;
+}) {
+  const caseNumber = cleanCaseNumber(input.caseNumber);
+  const clientName = input.clientName.trim();
+  if (!caseNumber || !clientName) throw new Error("Case number and client name are required.");
+
+  const admin = requireAdmin();
+  const { error } = await admin.from("case_client_sentiment_flags").upsert(
+    {
+      case_number: caseNumber,
+      client_name: clientName,
+      action_required: input.actionRequired,
+      updated_at: new Date().toISOString(),
+      updated_by: input.updatedBy?.trim() || null,
+    },
+    { onConflict: "case_number,client_name" },
+  );
+  if (error) throw new Error(error.message);
+}
+
 /** Stores one manual contact. Repeating the same Slack message does not create a second row. */
 export async function insertClientContactNote(note: ClientContactNoteInput) {
   const caseNumber = cleanCaseNumber(note.caseNumber);

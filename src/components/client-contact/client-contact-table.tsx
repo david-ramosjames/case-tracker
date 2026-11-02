@@ -4,7 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { Badge } from "@/components/ui/badge";
-import { HeaderFilter, HeaderMultiFilter } from "@/components/ui/header-filter";
+import { HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -57,6 +57,7 @@ export type ClientContactRow = {
   sentimentEvidenceUrls: string[];
   sentimentWeekLabel: string | null;
   sentimentScoredAt: string | null;
+  actionRequired: boolean;
   quoUrl: string | null;
 };
 
@@ -86,18 +87,64 @@ export function ClientContactView({
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [sentimentSortKey, setSentimentSortKey] = useState<SentimentSortKey>("week");
   const [sentimentSortDirection, setSentimentSortDirection] = useState<SortDirection>("desc");
-  /** Empty means "use the newest week once options load." */
-  const [selectedWeek, setSelectedWeek] = useState("");
+  /** null = default to newest week once options load; [] = all weeks. */
+  const [selectedWeeks, setSelectedWeeks] = useState<string[] | null>(null);
+  const [actionRequiredOnly, setActionRequiredOnly] = useState(false);
+  const [actionOverrides, setActionOverrides] = useState<Record<string, boolean>>({});
+  const [actionSaving, setActionSaving] = useState<Record<string, boolean>>({});
   const [focusedCaseNumber, setFocusedCaseNumber] = useState<string | null>(null);
   const sentimentTabDefaultsApplied = useRef(false);
 
   function openSentimentTab() {
     setTab("sentiment");
-    // First visit: Negative + newest week (week falls back via empty selectedWeek).
+    // First visit: Negative + newest week (weeks fall back via null selectedWeeks).
     if (!sentimentTabDefaultsApplied.current) {
       sentimentTabDefaultsApplied.current = true;
       setSentimentFilters(["Negative"]);
-      setSelectedWeek("");
+      setSelectedWeeks(null);
+    }
+  }
+
+  function actionFlagKey(row: Pick<ClientContactRow, "caseNumber" | "clientName">) {
+    return `${row.caseNumber.trim()}\t${row.clientName.trim()}`;
+  }
+
+  function isActionRequired(row: ClientContactRow) {
+    const key = actionFlagKey(row);
+    return key in actionOverrides ? actionOverrides[key] : row.actionRequired;
+  }
+
+  async function toggleActionRequired(row: ClientContactRow, next: boolean) {
+    const key = actionFlagKey(row);
+    setActionOverrides((current) => ({ ...current, [key]: next }));
+    setActionSaving((current) => ({ ...current, [key]: true }));
+    try {
+      const response = await fetch("/api/client-contact/sentiment-action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caseNumber: row.caseNumber,
+          clientName: row.clientName,
+          actionRequired: next,
+        }),
+      });
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(detail?.error || "Unable to save action required.");
+      }
+    } catch (error) {
+      setActionOverrides((current) => {
+        const copy = { ...current };
+        delete copy[key];
+        return copy;
+      });
+      console.error(error);
+    } finally {
+      setActionSaving((current) => {
+        const copy = { ...current };
+        delete copy[key];
+        return copy;
+      });
     }
   }
 
@@ -127,16 +174,13 @@ export function ClientContactView({
     setFocusedCaseNumber(row.caseNumber);
     setQuery(row.caseNumber);
     setSentimentFilters(label === "No reading" ? ["No reading"] : [label]);
-    if (week) setSelectedWeek(week);
+    if (week) setSelectedWeeks([week]);
   }
 
-  const weekOptions = useMemo(() => {
-    const weeks = buildWeekOptions(sentimentSourceRows);
-    return [{ value: "all", label: "All weeks" }, ...weeks];
-  }, [sentimentSourceRows]);
-  const latestWeek = weekOptions.find((option) => option.value !== "all")?.value ?? "all";
-  const weekFilter =
-    selectedWeek && weekOptions.some((option) => option.value === selectedWeek) ? selectedWeek : latestWeek;
+  const weekOptions = useMemo(() => buildWeekOptions(sentimentSourceRows), [sentimentSourceRows]);
+  const latestWeek = weekOptions[0]?.value ?? "";
+  const activeWeeks =
+    selectedWeeks === null ? (latestWeek ? [latestWeek] : []) : selectedWeeks.filter((week) => weekOptions.some((option) => option.value === week));
 
   const callScoreboard = useMemo(() => callAttorneyScoreboard(rows, scoreboardAttorneyIds), [rows, scoreboardAttorneyIds]);
   const attorneyOptions = useMemo(() => nameOptions(rows.map((row) => row.attorneyName)), [rows]);
@@ -162,15 +206,16 @@ export function ClientContactView({
   }, [sentimentSourceRows, attorneys, paralegals, legalAssistants]);
 
   // Week filter is for the table; scoreboard always uses every contact so Unknown
-  // (no interaction in 30 days) still counts even when a specific week is selected.
+  // (no interaction in 30 days) still counts even when specific weeks are selected.
   const sentimentStaffFiltered = useMemo(() => {
-    if (!weekFilter || weekFilter === "all") return sentimentStaffBase;
+    if (activeWeeks.length === 0) return sentimentStaffBase;
+    const selected = new Set(activeWeeks);
     return sentimentStaffBase.filter((row) => {
-      if (weekFilterKey(row) === weekFilter) return true;
+      if (selected.has(weekFilterKey(row))) return true;
       const label = sentimentFilterValue(row);
       return label === "Unknown" || label === "No reading";
     });
-  }, [sentimentStaffBase, weekFilter]);
+  }, [sentimentStaffBase, activeWeeks]);
 
   const sentimentScoreboard = useMemo(
     () => sentimentAttorneyScoreboard(sentimentStaffBase, scoreboardAttorneyIds),
@@ -217,8 +262,17 @@ export function ClientContactView({
   }, [callFiltered, overdueOnly, dayRanges, query, sortKey, sortDirection]);
 
   const sentimentFiltered = useMemo(() => {
-    return sentimentStaffFiltered.filter((row) => matchesSelection(sentimentFilterValue(row), sentimentFilters));
-  }, [sentimentStaffFiltered, sentimentFilters]);
+    return sentimentStaffFiltered.filter((row) => {
+      if (!matchesSelection(sentimentFilterValue(row), sentimentFilters)) return false;
+      if (actionRequiredOnly && !isActionRequired(row)) return false;
+      return true;
+    });
+  }, [sentimentStaffFiltered, sentimentFilters, actionRequiredOnly, actionOverrides]);
+
+  const actionRequiredCount = useMemo(
+    () => sentimentStaffFiltered.filter((row) => isActionRequired(row)).length,
+    [sentimentStaffFiltered, actionOverrides],
+  );
 
   const sentimentVisible = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -230,9 +284,12 @@ export function ClientContactView({
           const rightFocus = right.caseNumber === focusedCaseNumber ? 0 : 1;
           if (leftFocus !== rightFocus) return leftFocus - rightFocus;
         }
+        const leftAction = isActionRequired(left) ? 0 : 1;
+        const rightAction = isActionRequired(right) ? 0 : 1;
+        if (leftAction !== rightAction) return leftAction - rightAction;
         return compareSentimentRows(left, right, sentimentSortKey, sentimentSortDirection);
       });
-  }, [sentimentFiltered, query, focusedCaseNumber, sentimentSortKey, sentimentSortDirection]);
+  }, [sentimentFiltered, query, focusedCaseNumber, sentimentSortKey, sentimentSortDirection, actionOverrides]);
 
   return (
     <div className="space-y-3">
@@ -346,6 +403,16 @@ export function ClientContactView({
             }).length}{" "}
             unknown / none
           </Badge>
+          <button
+            type="button"
+            onClick={() => setActionRequiredOnly((current) => !current)}
+            className={cn(
+              "inline-flex items-center rounded-md border px-2 py-0 text-[11px] font-medium",
+              actionRequiredOnly ? "border-pink-300 bg-pink-50 text-pink-700" : "border-border text-muted-foreground hover:text-navy-950",
+            )}
+          >
+            {actionRequiredCount} action required
+          </button>
           <Input
             value={query}
             onChange={(event) => {
@@ -387,13 +454,27 @@ export function ClientContactView({
             className="w-44"
           />
         ) : (
-          <HeaderFilter
-            label="Week"
-            value={weekFilter}
-            onChange={setSelectedWeek}
-            options={weekOptions}
-            className="w-52"
-          />
+          <>
+            <HeaderMultiFilter
+              label="Week"
+              selected={activeWeeks}
+              onChange={(values) => {
+                sentimentTabDefaultsApplied.current = true;
+                setSelectedWeeks(values);
+              }}
+              options={weekOptions}
+              className="w-56"
+            />
+            <label className="flex h-8 cursor-pointer items-center gap-2 rounded-md border bg-white px-2 text-xs">
+              <input
+                type="checkbox"
+                className="h-3.5 w-3.5"
+                checked={actionRequiredOnly}
+                onChange={(event) => setActionRequiredOnly(event.target.checked)}
+              />
+              <span className={actionRequiredOnly ? "font-medium text-pink-700" : "text-muted-foreground"}>Action required</span>
+            </label>
+          </>
         )}
       </div>
 
@@ -413,6 +494,9 @@ export function ClientContactView({
           sortKey={sentimentSortKey}
           sortDirection={sentimentSortDirection}
           onSort={requestSentimentSort}
+          isActionRequired={isActionRequired}
+          actionSaving={actionSaving}
+          onToggleActionRequired={toggleActionRequired}
         />
       )}
     </div>
@@ -528,18 +612,27 @@ function SentimentTable({
   sortKey,
   sortDirection,
   onSort,
+  isActionRequired,
+  actionSaving,
+  onToggleActionRequired,
 }: {
   rows: ClientContactRow[];
   focusedCaseNumber: string | null;
   sortKey: SentimentSortKey;
   sortDirection: SortDirection;
   onSort: (key: SentimentSortKey) => void;
+  isActionRequired: (row: ClientContactRow) => boolean;
+  actionSaving: Record<string, boolean>;
+  onToggleActionRequired: (row: ClientContactRow, next: boolean) => void;
 }) {
   return (
     <div className="rounded-lg border">
       <Table className="text-xs">
         <TableHeader>
           <TableRow>
+            <TableHead className={cn(compactHead, "w-10 text-center")} title="Action required">
+              Act
+            </TableHead>
             <SortableHead label="Case" sortKey="case" active={sortKey} direction={sortDirection} onSort={onSort} />
             <TableHead className={compactHead}>Client</TableHead>
             <TableHead className={compactHead}>Attorney</TableHead>
@@ -553,7 +646,7 @@ function SentimentTable({
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={8} className={cn(compactCell, "text-muted-foreground")}>
+              <TableCell colSpan={9} className={cn(compactCell, "text-muted-foreground")}>
                 No matching sentiment readings.
               </TableCell>
             </TableRow>
@@ -562,6 +655,8 @@ function SentimentTable({
               const label = contactSentimentLabel(row.lastInteraction, row.sentiment);
               const showScore = label !== "Unknown" && label !== "—" && row.sentimentScore != null;
               const weekLabel = formatWeekLabel(row.sentimentWeekLabel, row.sentimentScoredAt);
+              const required = isActionRequired(row);
+              const saving = Boolean(actionSaving[`${row.caseNumber.trim()}\t${row.clientName.trim()}`]);
               const reason =
                 label === "Unknown"
                   ? "Last interaction is older than 30 days, so this reading is not current enough."
@@ -569,7 +664,24 @@ function SentimentTable({
                     ? "No weekly sentiment reading is stored for this case yet."
                     : row.sentimentReason?.trim() || "No explanation was stored with this reading.";
               return (
-                <TableRow key={`${row.caseId}:${row.clientName}`} className={cn(focusedCaseNumber === row.caseNumber && "bg-pink-50/70")}>
+                <TableRow
+                  key={`${row.caseId}:${row.clientName}`}
+                  className={cn(
+                    focusedCaseNumber === row.caseNumber && "bg-pink-50/70",
+                    required && "bg-amber-50/60",
+                  )}
+                >
+                  <TableCell className={cn(compactCell, "text-center")}>
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5"
+                      checked={required}
+                      disabled={saving}
+                      title="Action required"
+                      aria-label={`Action required for ${row.clientName}`}
+                      onChange={(event) => onToggleActionRequired(row, event.target.checked)}
+                    />
+                  </TableCell>
                   <TableCell className={compactCell}>
                     <CaseNumberLink caseId={row.caseId} caseNumber={row.caseNumber} openInNewTab />
                   </TableCell>

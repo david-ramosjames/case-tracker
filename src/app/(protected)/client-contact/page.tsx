@@ -3,6 +3,8 @@ import { buildViewerContext } from "@/lib/auth/access";
 import {
   listClientContactSummaries,
   listLatestClientSentiments,
+  listSentimentActionFlags,
+  sentimentFlagKey,
   worstSentimentByCaseNumber,
 } from "@/lib/client-contact/repository";
 import { clientContactDates } from "@/lib/client-contact/types";
@@ -74,12 +76,17 @@ export default async function ClientContactPage() {
     return viewer.contactId ? isAssignedToViewer(record, viewer.contactId) : false;
   });
   const caseNumbers = open.map((record) => record.shared.caseNumber);
-  const [summary, sentimentsByContact] = await Promise.all([
+  const [summary, sentimentsByContact, actionFlags] = await Promise.all([
     listClientContactSummaries(caseNumbers),
     listLatestClientSentiments(caseNumbers),
+    listSentimentActionFlags(caseNumbers),
   ]);
   const sentimentsByCase = worstSentimentByCaseNumber(sentimentsByContact.values());
   const openByCaseNumber = new Map(open.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
+
+  function isActionRequired(caseNumber: string, clientName: string) {
+    return actionFlags.has(sentimentFlagKey(caseNumber, clientName));
+  }
 
   const rows = open.map((record) => {
     const caseNumber = cleanCaseNumber(record.shared.caseNumber);
@@ -110,6 +117,7 @@ export default async function ClientContactPage() {
       sentimentEvidenceUrls: sentiment?.evidenceUrls ?? [],
       sentimentWeekLabel: sentiment?.weekLabel ?? null,
       sentimentScoredAt: sentiment?.scoredAt ?? null,
+      actionRequired: isActionRequired(record.shared.caseNumber, record.shared.clientName),
       quoUrl: quoUrlForCase(record),
     };
   });
@@ -146,6 +154,7 @@ export default async function ClientContactPage() {
       sentimentEvidenceUrls: reading.evidenceUrls,
       sentimentWeekLabel: reading.weekLabel,
       sentimentScoredAt: reading.scoredAt,
+      actionRequired: isActionRequired(record.shared.caseNumber, reading.clientName),
       quoUrl: quoUrlForCase(record),
     });
   }
