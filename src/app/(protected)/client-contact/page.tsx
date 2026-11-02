@@ -1,4 +1,4 @@
-import { ClientContactView } from "@/components/client-contact/client-contact-table";
+import { ClientContactView, type ClientContactRow } from "@/components/client-contact/client-contact-table";
 import { buildViewerContext } from "@/lib/auth/access";
 import {
   listClientContactSummaries,
@@ -115,47 +115,54 @@ export default async function ClientContactPage() {
   });
 
   // Sentiment tab: one row per Quo contact reading (same grain as the weekly reporter).
-  const sentimentRows = [...sentimentsByContact.values()]
-    .map((reading) => {
-      const record = openByCaseNumber.get(cleanCaseNumber(reading.caseNumber));
-      if (!record) return null;
-      const caseNumber = cleanCaseNumber(record.shared.caseNumber);
-      const dates = clientContactDates(summary.get(caseNumber) ?? null);
-      const stored = summary.get(caseNumber);
-      return {
-        caseId: record.shared.id,
-        caseNumber: record.shared.caseNumber,
-        attorneyId: record.attorney.id,
-        clientName: reading.clientName,
-        attorneyName: record.attorney.name,
-        paralegalName: record.paralegal.name,
-        legalAssistantName: record.legalAssistant?.name ?? "",
-        lastInteraction: dates.lastInteraction,
-        lastAttempt: dates.lastAttempt,
-        lastHumanCall: stored?.lastHumanCallAt ?? null,
-        lastConversation: stored?.lastConversationAt ?? null,
-        lastInboundText: stored?.lastInboundTextAt ?? null,
-        lastOutboundCall: stored?.lastOutboundCallAt ?? null,
-        lastOutboundText: stored?.lastOutboundTextAt ?? null,
-        lastOtherAt: stored?.lastOtherAt ?? null,
-        lastOtherType: stored?.lastOtherType ?? null,
-        lastOtherDetails: stored?.lastOtherDetails ?? null,
-        sentiment: reading.sentiment,
-        sentimentScore: reading.score,
-        sentimentReason: reading.reasonSummary,
-        sentimentEvidenceUrls: reading.evidenceUrls,
-        sentimentWeekLabel: reading.weekLabel,
-        sentimentScoredAt: reading.scoredAt,
-        quoUrl: quoUrlForCase(record),
-      };
-    })
-    .filter((row): row is NonNullable<typeof row> => row != null);
+  const sentimentRows: ClientContactRow[] = [];
+  for (const reading of sentimentsByContact.values()) {
+    const record = openByCaseNumber.get(cleanCaseNumber(reading.caseNumber));
+    if (!record) continue;
+    const caseNumber = cleanCaseNumber(record.shared.caseNumber);
+    const dates = clientContactDates(summary.get(caseNumber) ?? null);
+    const stored = summary.get(caseNumber);
+    sentimentRows.push({
+      caseId: record.shared.id,
+      caseNumber: record.shared.caseNumber,
+      attorneyId: record.attorney.id,
+      clientName: reading.clientName,
+      attorneyName: record.attorney.name,
+      paralegalName: record.paralegal.name,
+      legalAssistantName: record.legalAssistant?.name ?? "",
+      lastInteraction: dates.lastInteraction,
+      lastAttempt: dates.lastAttempt,
+      lastHumanCall: stored?.lastHumanCallAt ?? null,
+      lastConversation: stored?.lastConversationAt ?? null,
+      lastInboundText: stored?.lastInboundTextAt ?? null,
+      lastOutboundCall: stored?.lastOutboundCallAt ?? null,
+      lastOutboundText: stored?.lastOutboundTextAt ?? null,
+      lastOtherAt: stored?.lastOtherAt ?? null,
+      lastOtherType: stored?.lastOtherType ?? null,
+      lastOtherDetails: stored?.lastOtherDetails ?? null,
+      sentiment: reading.sentiment,
+      sentimentScore: reading.score,
+      sentimentReason: reading.reasonSummary,
+      sentimentEvidenceUrls: reading.evidenceUrls,
+      sentimentWeekLabel: reading.weekLabel,
+      sentimentScoredAt: reading.scoredAt,
+      quoUrl: quoUrlForCase(record),
+    });
+  }
 
   // Include open cases with no contact reading so Unknown / No reading still appears.
   const casesWithReading = new Set(sentimentRows.map((row) => cleanCaseNumber(row.caseNumber)));
   for (const row of rows) {
     if (casesWithReading.has(cleanCaseNumber(row.caseNumber))) continue;
-    sentimentRows.push({ ...row, sentiment: null, sentimentScore: null, sentimentReason: null, sentimentEvidenceUrls: [], sentimentWeekLabel: null, sentimentScoredAt: null });
+    sentimentRows.push({
+      ...row,
+      sentiment: null,
+      sentimentScore: null,
+      sentimentReason: null,
+      sentimentEvidenceUrls: [],
+      sentimentWeekLabel: null,
+      sentimentScoredAt: null,
+    });
   }
 
   return (
