@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { ClientContactView, type ClientContactRow } from "@/components/client-contact/client-contact-table";
 import { buildViewerContext } from "@/lib/auth/access";
 import {
@@ -176,10 +177,12 @@ export default async function ClientContactPage() {
   }
 
   return (
-    <ClientContactView
-      rows={rows}
-      sentimentRows={sentimentRows}
-      scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds}
-    />
+    <Suspense fallback={<div className="text-sm text-muted-foreground">Loading contact…</div>}>
+      <ClientContactView
+        rows={rows}
+        sentimentRows={sentimentRows}
+        scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds}
+      />
+    </Suspense>
   );
 }

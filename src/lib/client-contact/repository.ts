@@ -224,13 +224,22 @@ export async function listLatestClientSentiments(caseNumbers: string[]) {
   return byContact;
 }
 
-/** Worst (most severe) latest reading among Quo contacts that share a case number. */
+/**
+ * One current reading per case: newest scored_at wins; if tied, prefer the more severe sentiment.
+ * Used for Calls badges and the Sentiment attorney scoreboard (case counts, not Quo contact counts).
+ */
 export function worstSentimentByCaseNumber(readings: Iterable<ClientSentimentReading>) {
   const byCase = new Map<string, ClientSentimentReading>();
   for (const reading of readings) {
     const existing = byCase.get(reading.caseNumber);
     if (!existing) {
       byCase.set(reading.caseNumber, reading);
+      continue;
+    }
+    const nextMs = Date.parse(reading.scoredAt);
+    const existingMs = Date.parse(existing.scoredAt);
+    if (Number.isFinite(nextMs) && Number.isFinite(existingMs) && nextMs !== existingMs) {
+      if (nextMs > existingMs) byCase.set(reading.caseNumber, reading);
       continue;
     }
     const nextRank = SENTIMENT_SEVERITY[reading.sentiment] ?? 9;

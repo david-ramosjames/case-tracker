@@ -2,6 +2,7 @@ import { Lock } from "lucide-react";
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
+import { getDashboardNavMetrics } from "@/lib/dashboard/nav-metrics";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 import { getCurrentQuarter, percent, getQuarterElapsedPercentage } from "@/lib/utils";
 
@@ -9,13 +10,14 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const { records, goals, settings, users, viewer } = await loadViewerCaseBundle();
+  const navMetrics = await getDashboardNavMetrics(records);
 
   return (
     <>
       <PageHeader
         eyebrow={`${getCurrentQuarter()} - ${percent(getQuarterElapsedPercentage())} elapsed`}
         title="Attorney pipeline command center"
-        description="Track active cases, inferred workflow signals, quarterly check-ins, policy capture, fee forecasts, and goal progress without turning attorneys into spreadsheet maintainers."
+        description="Jump to Cases, Contact, Suggestions, Litigation, Results, Output, and Goals from the tiles below."
         actions={
           <>
             <Button variant="outline" disabled title="General exports are disabled in V1. Admin-only exports can be added later.">
@@ -25,7 +27,14 @@ export default async function DashboardPage() {
           </>
         }
       />
-      <DashboardView records={records} goals={goals} settings={settings} users={users} viewer={viewer} />
+      <DashboardView
+        records={records}
+        goals={goals}
+        settings={settings}
+        users={users}
+        viewer={viewer}
+        navMetrics={navMetrics}
+      />
     </>
   );
 }

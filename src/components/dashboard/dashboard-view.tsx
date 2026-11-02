@@ -4,6 +4,9 @@ import {
   BriefcaseBusiness,
   CircleDollarSign,
   ClipboardCheck,
+  Frown,
+  Phone,
+  Scale,
   Sparkles,
   TimerReset,
 } from "lucide-react";
@@ -11,9 +14,10 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { AttorneyScoreRollupCard } from "@/components/attorney-score/attorney-score-rollup";
-import { MetricCard } from "@/components/dashboard/metric-card";
+import { MetricCard, MetricSection } from "@/components/dashboard/metric-card";
 import { type ViewerContext } from "@/lib/auth/access";
 import { getAttorneyGoalProgress, getDashboardMetrics } from "@/lib/calculations";
+import { type DashboardNavMetrics } from "@/lib/dashboard/nav-metrics";
 import { type AppUser, type AttorneyGoal, type CaseRecord, type CaseTrackerSettings } from "@/lib/types";
 import { formatCurrency, percent } from "@/lib/utils";
 
@@ -23,12 +27,14 @@ export function DashboardView({
   settings,
   users,
   viewer,
+  navMetrics,
 }: {
   records: CaseRecord[];
   goals: AttorneyGoal[];
   settings: CaseTrackerSettings;
   users: AppUser[];
   viewer: ViewerContext;
+  navMetrics: DashboardNavMetrics;
 }) {
   const metrics = getDashboardMetrics(records, settings, goals);
   const goalProgress = getAttorneyGoalProgress(records, goals).filter((item) => {
@@ -39,15 +45,87 @@ export function DashboardView({
   });
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="space-y-5">
+      <MetricSection title="Cases">
         <MetricCard
           href="/cases"
           icon={BriefcaseBusiness}
           label="Active cases"
           value={String(metrics.totalActiveCases)}
-          detail="Active pipeline cases (excludes closed and historical)"
+          detail="Open pipeline (excludes closed and historical)"
         />
+        <MetricCard
+          href="/cases?filter=missing-fields&status=Active"
+          icon={AlertTriangle}
+          label="Missing required fields"
+          value={String(metrics.casesMissingRequiredFields)}
+          detail="Value, fee, quarter, source, confidence"
+        />
+        <MetricCard
+          href="/cases?filter=stale-review&status=Active"
+          icon={TimerReset}
+          label="Not reviewed recently"
+          value={String(metrics.casesNotReviewedRecently)}
+          detail={`Case review older than ${settings.staleReviewThresholdDays} days`}
+        />
+        <MetricCard
+          href="/cases?filter=quarterly-check-in&status=Active"
+          icon={ClipboardCheck}
+          label="Quarterly check-ins due"
+          value={String(metrics.casesNeedingQuarterlyCheckIn)}
+          detail="Expected disbursement quarter / minimum value"
+        />
+        <MetricCard
+          href="/cases?filter=validation-overdue&status=Active"
+          icon={TimerReset}
+          label="Validation overdue"
+          value={String(metrics.casesWithOutdatedValidation)}
+          detail="Liability, quarter, minimum, or policy limits >90d"
+        />
+      </MetricSection>
+
+      <MetricSection title="Contact">
+        <MetricCard
+          href="/client-contact?tab=calls"
+          icon={Phone}
+          label="Clients 30+ days"
+          value={String(navMetrics.clientsNeedingContact)}
+          detail="No last interaction in 30 days — open Contact"
+        />
+        <MetricCard
+          href="/client-contact?tab=sentiment&sentiment=Negative"
+          icon={Frown}
+          label="Negative sentiment"
+          value={String(navMetrics.negativeSentiment)}
+          detail="Current negative Quo contact readings"
+        />
+      </MetricSection>
+
+      <MetricSection title="Suggestions · Litigation · Results">
+        <MetricCard
+          href="/stage-suggestions"
+          icon={Sparkles}
+          label="Suggestions"
+          value={String(metrics.stageSuggestionsOpen)}
+          detail="Stage signals awaiting attorney confirmation"
+        />
+        <MetricCard
+          href="/litigation"
+          icon={Scale}
+          label="Litigation"
+          value={String(navMetrics.litigationCases)}
+          detail="Cases on the Litigation events tracker"
+        />
+        <MetricCard
+          href="/results?disbursed=No"
+          icon={ClipboardCheck}
+          label="Settled not disbursed"
+          value={formatCurrency(metrics.settledNotDisbursedAmount)}
+          detail="Results needing collection follow-through"
+        />
+      </MetricSection>
+
+      <MetricSection title="Output · Goals">
         <MetricCard
           href="/output"
           icon={CircleDollarSign}
@@ -62,53 +140,11 @@ export function DashboardView({
           value={formatCurrency(metrics.totalForecastFeeValue)}
           detail="Projected attorney fee value"
         />
-        <MetricCard
-          href="/results?disbursed=No"
-          icon={ClipboardCheck}
-          label="Settled not disbursed"
-          value={formatCurrency(metrics.settledNotDisbursedAmount)}
-          detail="Needs collection follow-through"
-        />
-        <MetricCard
-          href="/cases?filter=missing-fields&status=Active"
-          icon={AlertTriangle}
-          label="Missing required fields"
-          value={String(metrics.casesMissingRequiredFields)}
-          detail="Value, fee, quarter, source, confidence"
-        />
-        <MetricCard
-          href="/cases?filter=stale-review&status=Active"
-          icon={TimerReset}
-          label="Not reviewed recently"
-          value={String(metrics.casesNotReviewedRecently)}
-          detail={`More than ${settings.staleReviewThresholdDays} days old`}
-        />
-        <MetricCard
-          href="/cases?filter=quarterly-check-in&status=Active"
-          icon={ClipboardCheck}
-          label="Quarterly check-ins due"
-          value={String(metrics.casesNeedingQuarterlyCheckIn)}
-          detail="Expected disbursement quarter, minimum value"
-        />
-        <MetricCard
-          href="/cases?filter=validation-overdue&status=Active"
-          icon={TimerReset}
-          label="Validation overdue"
-          value={String(metrics.casesWithOutdatedValidation)}
-          detail="Liability, quarter, minimum, or policy limits >90d"
-        />
-        <MetricCard
-          href="/stage-suggestions"
-          icon={Sparkles}
-          label="Stage suggestions"
-          value={String(metrics.stageSuggestionsOpen)}
-          detail="Signals awaiting attorney confirmation"
-        />
-      </div>
+      </MetricSection>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-3">
             <CardTitle>Case Tracker Score</CardTitle>
             <CardDescription>
               Average case score across active matters — 40% completeness, 60% fields validated within 90 days.
@@ -125,17 +161,17 @@ export function DashboardView({
         </Card>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-3">
             <CardTitle>Attorney Goal Progress</CardTitle>
             <CardDescription>Annual pacing for gross disbursements vs top-down goal.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-5">
+          <CardContent className="space-y-4">
             {goalProgress.map((item) => {
               const attorney = users.find((user) => user.id === item.goal.attorneyId);
 
               return (
-                <div key={item.goal.id} className="rounded-lg border bg-white p-4">
-                  <div className="mb-3 flex items-start justify-between gap-3">
+                <div key={item.goal.id} className="rounded-lg border bg-white p-3.5">
+                  <div className="mb-2 flex items-start justify-between gap-3">
                     <div>
                       <p className="font-semibold text-navy-950">{attorney?.name}</p>
                       <p className="text-sm text-muted-foreground">

@@ -1,7 +1,8 @@
 "use client";
 
 import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { Badge } from "@/components/ui/badge";
 import { HeaderMultiFilter } from "@/components/ui/header-filter";
@@ -94,16 +95,42 @@ export function ClientContactView({
   const [actionSaving, setActionSaving] = useState<Record<string, boolean>>({});
   const [focusedCaseNumber, setFocusedCaseNumber] = useState<string | null>(null);
   const sentimentTabDefaultsApplied = useRef(false);
+  const searchParams = useSearchParams();
+  const deepLinkApplied = useRef(false);
 
-  function openSentimentTab() {
+  function openSentimentTab(options?: { sentiment?: string | null; skipDefaultSentiment?: boolean }) {
     setTab("sentiment");
     // First visit: Negative + newest week (weeks fall back via null selectedWeeks).
     if (!sentimentTabDefaultsApplied.current) {
       sentimentTabDefaultsApplied.current = true;
-      setSentimentFilters(["Negative"]);
+      if (!options?.skipDefaultSentiment) {
+        setSentimentFilters(options?.sentiment ? [options.sentiment] : ["Negative"]);
+      } else if (options?.sentiment) {
+        setSentimentFilters([options.sentiment]);
+      }
       setSelectedWeeks(null);
+    } else if (options?.sentiment) {
+      setSentimentFilters([options.sentiment]);
     }
   }
+
+  useEffect(() => {
+    if (deepLinkApplied.current) return;
+    const tabParam = searchParams.get("tab");
+    const sentimentParam = searchParams.get("sentiment");
+    if (tabParam !== "sentiment" && tabParam !== "calls" && !sentimentParam) return;
+    deepLinkApplied.current = true;
+    if (tabParam === "sentiment" || sentimentParam) {
+      openSentimentTab({
+        sentiment: sentimentParam && SENTIMENT_FILTERS.includes(sentimentParam as (typeof SENTIMENT_FILTERS)[number])
+          ? sentimentParam
+          : "Negative",
+        skipDefaultSentiment: false,
+      });
+      return;
+    }
+    if (tabParam === "calls") setTab("calls");
+  }, [searchParams]);
 
   function actionFlagKey(row: Pick<ClientContactRow, "caseNumber" | "clientName">) {
     return `${row.caseNumber.trim()}\t${row.clientName.trim()}`;
@@ -217,9 +244,10 @@ export function ClientContactView({
     });
   }, [sentimentStaffBase, activeWeeks]);
 
+  // Case-level (same open set as Calls): one current status per client, not per Quo contact.
   const sentimentScoreboard = useMemo(
-    () => sentimentAttorneyScoreboard(sentimentStaffBase, scoreboardAttorneyIds),
-    [sentimentStaffBase, scoreboardAttorneyIds],
+    () => sentimentAttorneyScoreboard(staffFiltered, scoreboardAttorneyIds),
+    [staffFiltered, scoreboardAttorneyIds],
   );
 
   const callFiltered = useMemo(() => {
