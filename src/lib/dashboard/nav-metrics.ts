@@ -11,12 +11,14 @@ import {
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { isLitigationTabCase } from "@/lib/litigation-events";
+import { listOpenNeedsResponse } from "@/lib/needs-response/repository";
 import { type CaseRecord } from "@/lib/types";
 
 export type DashboardNavMetrics = {
   litigationCases: number;
   clientsNeedingContact: number;
   negativeSentiment: number;
+  needsResponse: number;
 };
 
 /**
@@ -28,9 +30,10 @@ export async function getDashboardNavMetrics(records: CaseRecord[]): Promise<Das
   const caseNumbers = open.map((record) => record.shared.caseNumber);
   const openByCase = new Map(open.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
 
-  const [summaries, sentiments] = await Promise.all([
+  const [summaries, sentiments, needsRows] = await Promise.all([
     listClientContactSummaries(caseNumbers),
     listLatestClientSentiments(caseNumbers),
+    listOpenNeedsResponse(caseNumbers).catch(() => []),
   ]);
 
   let clientsNeedingContact = 0;
@@ -53,5 +56,6 @@ export async function getDashboardNavMetrics(records: CaseRecord[]): Promise<Das
     litigationCases: records.filter(isLitigationTabCase).length,
     clientsNeedingContact,
     negativeSentiment,
+    needsResponse: needsRows.length,
   };
 }

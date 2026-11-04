@@ -5,6 +5,7 @@ import {
   CircleDollarSign,
   ClipboardCheck,
   Frown,
+  MessageCircleWarning,
   Phone,
   Scale,
   Sparkles,
@@ -98,6 +99,13 @@ export function DashboardView({
           label="Negative sentiment"
           value={String(navMetrics.negativeSentiment)}
           detail="Current negative Quo contact readings"
+        />
+        <MetricCard
+          href="/needs-response"
+          icon={MessageCircleWarning}
+          label="Needs response"
+          value={String(navMetrics.needsResponse)}
+          detail="Missed/Sona, callbacks, and texts still owed"
         />
       </MetricSection>
 
