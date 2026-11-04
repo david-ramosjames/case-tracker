@@ -53,6 +53,7 @@ export default async function NeedsResponsePage() {
     return viewer.contactId ? isAssignedToViewer(record, viewer.contactId) : false;
   });
   const openByCase = new Map(open.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
+  const staffByCase = new Map(records.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
   const caseNumbers = open.map((record) => record.shared.caseNumber);
   const items = await listOpenNeedsResponse(viewer.canViewAllCases ? undefined : caseNumbers);
 
@@ -68,6 +69,8 @@ export default async function NeedsResponsePage() {
         attorneyId: record?.attorney.id ?? null,
         attorneyName: item.attorneyName || record?.attorney.name || null,
         paralegalName: item.paralegalName || record?.paralegal.name || null,
+        legalAssistantName:
+          staffByCase.get(caseNumber)?.legalAssistant?.name || item.legalAssistantName || null,
         quoUrl: item.evidenceUrl || (record ? quoUrlForCase(record) : null),
         slackUrl: slack ? getSlackChannelArchiveUrl(slack) : null,
         slackLabel: slack ? formatSlackChannelLabel(slack.slackChannelName) || null : null,

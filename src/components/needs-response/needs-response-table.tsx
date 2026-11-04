@@ -66,6 +66,7 @@ export function NeedsResponseView({
   const [query, setQuery] = useState("");
   const [attorneys, setAttorneys] = useState<string[]>([]);
   const [paralegals, setParalegals] = useState<string[]>([]);
+  const [legalAssistants, setLegalAssistants] = useState<string[]>([]);
   const [reasonCodes, setReasonCodes] = useState<string[]>([]);
   const [localRows, setLocalRows] = useState(rows);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -87,6 +88,13 @@ export function NeedsResponseView({
   const paralegalOptions = useMemo(
     () =>
       [...new Set(localRows.map((row) => row.paralegalName).filter(Boolean) as string[])]
+        .sort((a, b) => a.localeCompare(b))
+        .map((value) => ({ value, label: value })),
+    [localRows],
+  );
+  const legalAssistantOptions = useMemo(
+    () =>
+      [...new Set(localRows.map((row) => row.legalAssistantName).filter(Boolean) as string[])]
         .sort((a, b) => a.localeCompare(b))
         .map((value) => ({ value, label: value })),
     [localRows],
@@ -133,9 +141,10 @@ export function NeedsResponseView({
     const rows = localRows.filter((row) => {
       if (attorneys.length && (!row.attorneyName || !attorneys.includes(row.attorneyName))) return false;
       if (paralegals.length && (!row.paralegalName || !paralegals.includes(row.paralegalName))) return false;
+      if (legalAssistants.length && (!row.legalAssistantName || !legalAssistants.includes(row.legalAssistantName))) return false;
       if (reasonCodes.length && !reasonCodes.includes(row.reasonCode)) return false;
       if (!q) return true;
-      const hay = [row.caseNumber, row.clientName, row.phone, row.reason, row.details, row.quoLine]
+      const hay = [row.caseNumber, row.clientName, row.phone, row.reason, row.details, row.quoLine, row.legalAssistantName]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
@@ -149,7 +158,7 @@ export function NeedsResponseView({
       }
       return direction * (waitingMs(left.detectedAt, now) - waitingMs(right.detectedAt, now));
     });
-  }, [localRows, query, attorneys, paralegals, reasonCodes, sortKey, sortDirection]);
+  }, [localRows, query, attorneys, paralegals, legalAssistants, reasonCodes, sortKey, sortDirection]);
 
   async function markResolved(id: string) {
     setSaving((prev) => ({ ...prev, [id]: true }));
@@ -255,6 +264,14 @@ export function NeedsResponseView({
               <TableHead className={compactHead}>
                 <HeaderMultiFilter label="Paralegal" selected={paralegals} onChange={setParalegals} options={paralegalOptions} />
               </TableHead>
+              <TableHead className={compactHead}>
+                <HeaderMultiFilter
+                  label="Legal assistant"
+                  selected={legalAssistants}
+                  onChange={setLegalAssistants}
+                  options={legalAssistantOptions}
+                />
+              </TableHead>
               <TableHead className={compactHead}>Details</TableHead>
               <TableHead className={compactHead}>Respond</TableHead>
               <TableHead className={compactHead} />
@@ -263,7 +280,7 @@ export function NeedsResponseView({
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
+                <TableCell colSpan={12} className="py-8 text-center text-muted-foreground">
                   No clients currently need a response.
                 </TableCell>
               </TableRow>
@@ -303,6 +320,7 @@ export function NeedsResponseView({
                     </TableCell>
                     <TableCell className={compactCell}>{row.attorneyName || "—"}</TableCell>
                     <TableCell className={compactCell}>{row.paralegalName || "—"}</TableCell>
+                    <TableCell className={compactCell}>{row.legalAssistantName || "—"}</TableCell>
                     <TableCell className={compactCell}>
                       <div className="max-w-[280px] text-xs text-muted-foreground">{row.details || "—"}</div>
                     </TableCell>

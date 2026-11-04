@@ -22,6 +22,7 @@ type DbRow = {
   report_window_label: string | null;
   attorney_name: string | null;
   paralegal_name: string | null;
+  legal_assistant_name: string | null;
   quo_line: string | null;
   evidence_url: string | null;
   details: string | null;
@@ -51,6 +52,7 @@ function mapRow(row: DbRow): NeedsResponseRow {
     reportWindowLabel: row.report_window_label,
     attorneyName: row.attorney_name,
     paralegalName: row.paralegal_name,
+    legalAssistantName: row.legal_assistant_name,
     quoLine: row.quo_line,
     evidenceUrl: row.evidence_url,
     details: row.details,
@@ -74,7 +76,7 @@ export async function listOpenNeedsResponse(caseNumbers?: string[]) {
     let query = admin
       .from("case_needs_response")
       .select(
-        "id, case_number, case_id, client_name, phone, channel, reason, reason_code, status, detected_at, report_window_label, attorney_name, paralegal_name, quo_line, evidence_url, details, event_key, resolved_at, resolved_by",
+        "id, case_number, case_id, client_name, phone, channel, reason, reason_code, status, detected_at, report_window_label, attorney_name, paralegal_name, legal_assistant_name, quo_line, evidence_url, details, event_key, resolved_at, resolved_by",
       )
       .eq("status", "open")
       .order("detected_at", { ascending: true })

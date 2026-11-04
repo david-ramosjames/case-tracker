@@ -17,6 +17,7 @@ export type NeedsResponseRow = {
   attorneyId?: string | null;
   attorneyName: string | null;
   paralegalName: string | null;
+  legalAssistantName: string | null;
   quoLine: string | null;
   evidenceUrl: string | null;
   details: string | null;
