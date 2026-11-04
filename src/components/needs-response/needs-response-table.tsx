@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, ExternalLink } from "lucide-react";
 import { useMemo, useState } from "react";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { Badge } from "@/components/ui/badge";
@@ -9,9 +9,13 @@ import { HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { reasonCodeLabel, type NeedsResponseRow } from "@/lib/needs-response/types";
+import { cn } from "@/lib/utils";
 
 const compactHead = "h-8 px-2";
 const compactCell = "px-2 py-1.5";
+
+type SortKey = "detected" | "waiting";
+type SortDirection = "asc" | "desc";
 
 function formatDetectedAt(value: string) {
   const date = new Date(value);
@@ -22,6 +26,28 @@ function formatDetectedAt(value: string) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+/** Milliseconds waiting since detection (higher = longer wait). */
+function waitingMs(detectedAt: string, now = Date.now()) {
+  const ms = now - new Date(detectedAt).getTime();
+  return Number.isFinite(ms) ? Math.max(0, ms) : 0;
+}
+
+function formatWaitingSince(detectedAt: string, now = Date.now()) {
+  const ms = waitingMs(detectedAt, now);
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    const remMin = minutes % 60;
+    return remMin ? `${hours}h ${remMin}m` : `${hours}h`;
+  }
+  const days = Math.floor(hours / 24);
+  const remHours = hours % 24;
+  if (days < 7) return remHours ? `${days}d ${remHours}h` : `${days}d`;
+  return `${days}d`;
 }
 
 function channelBadge(channel: NeedsResponseRow["channel"]) {
@@ -37,6 +63,8 @@ export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
   const [reasonCodes, setReasonCodes] = useState<string[]>([]);
   const [localRows, setLocalRows] = useState(rows);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
+  const [sortKey, setSortKey] = useState<SortKey>("waiting");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const attorneyOptions = useMemo(
     () =>
@@ -61,9 +89,19 @@ export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
     [localRows],
   );
 
+  function onSort(nextKey: SortKey) {
+    if (sortKey === nextKey) {
+      setSortDirection((prev) => (prev === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDirection(nextKey === "waiting" ? "desc" : "desc");
+  }
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return localRows.filter((row) => {
+    const now = Date.now();
+    const rows = localRows.filter((row) => {
       if (attorneys.length && (!row.attorneyName || !attorneys.includes(row.attorneyName))) return false;
       if (paralegals.length && (!row.paralegalName || !paralegals.includes(row.paralegalName))) return false;
       if (reasonCodes.length && !reasonCodes.includes(row.reasonCode)) return false;
@@ -74,7 +112,15 @@ export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [localRows, query, attorneys, paralegals, reasonCodes]);
+
+    const direction = sortDirection === "asc" ? 1 : -1;
+    return [...rows].sort((left, right) => {
+      if (sortKey === "detected") {
+        return direction * String(left.detectedAt).localeCompare(String(right.detectedAt));
+      }
+      return direction * (waitingMs(left.detectedAt, now) - waitingMs(right.detectedAt, now));
+    });
+  }, [localRows, query, attorneys, paralegals, reasonCodes, sortKey, sortDirection]);
 
   async function markResolved(id: string) {
     setSaving((prev) => ({ ...prev, [id]: true }));
@@ -122,7 +168,8 @@ export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
                 <HeaderMultiFilter label="Why" selected={reasonCodes} onChange={setReasonCodes} options={reasonOptions} />
               </TableHead>
               <TableHead className={compactHead}>Channel</TableHead>
-              <TableHead className={compactHead}>Detected</TableHead>
+              <SortableHead label="Detected" sortKey="detected" active={sortKey} direction={sortDirection} onSort={onSort} />
+              <SortableHead label="Waiting" sortKey="waiting" active={sortKey} direction={sortDirection} onSort={onSort} />
               <TableHead className={compactHead}>
                 <HeaderMultiFilter label="Attorney" selected={attorneys} onChange={setAttorneys} options={attorneyOptions} />
               </TableHead>
@@ -137,13 +184,15 @@ export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="py-8 text-center text-muted-foreground">
+                <TableCell colSpan={11} className="py-8 text-center text-muted-foreground">
                   No clients currently need a response.
                 </TableCell>
               </TableRow>
             ) : (
               filtered.map((row) => {
                 const quoUrl = row.quoUrl || row.evidenceUrl;
+                const waitLabel = formatWaitingSince(row.detectedAt);
+                const waitHours = waitingMs(row.detectedAt) / 3_600_000;
                 return (
                   <TableRow key={row.id}>
                     <TableCell className={compactCell}>
@@ -162,11 +211,16 @@ export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
                       <div className="mt-1 max-w-[220px] text-xs text-muted-foreground">{row.reason}</div>
                     </TableCell>
                     <TableCell className={compactCell}>{channelBadge(row.channel)}</TableCell>
+                    <TableCell className={compactCell}>{formatDetectedAt(row.detectedAt)}</TableCell>
                     <TableCell className={compactCell}>
-                      <div>{formatDetectedAt(row.detectedAt)}</div>
-                      {row.reportWindowLabel ? (
-                        <div className="text-xs text-muted-foreground">{row.reportWindowLabel}</div>
-                      ) : null}
+                      <span
+                        className={cn(
+                          "font-medium tabular-nums",
+                          waitHours >= 24 ? "text-red-600" : waitHours >= 8 ? "text-amber-700" : "text-navy-950",
+                        )}
+                      >
+                        {waitLabel}
+                      </span>
                     </TableCell>
                     <TableCell className={compactCell}>{row.attorneyName || "—"}</TableCell>
                     <TableCell className={compactCell}>{row.paralegalName || "—"}</TableCell>
@@ -221,5 +275,34 @@ export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
         </Table>
       </div>
     </div>
+  );
+}
+
+function SortableHead({
+  label,
+  sortKey,
+  active,
+  direction,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  active: SortKey;
+  direction: SortDirection;
+  onSort: (key: SortKey) => void;
+}) {
+  const isActive = active === sortKey;
+  const Icon = !isActive ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <TableHead className={cn("align-middle", compactHead)}>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase text-muted-foreground"
+        onClick={() => onSort(sortKey)}
+      >
+        {label}
+        <Icon className={cn("h-3 w-3", isActive && "text-pink-500")} />
+      </button>
+    </TableHead>
   );
 }

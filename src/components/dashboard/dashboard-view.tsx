@@ -92,6 +92,7 @@ export function DashboardView({
           label="Clients 30+ days"
           value={String(navMetrics.clientsNeedingContact)}
           detail="No last interaction in 30 days — open Contact"
+          alert={navMetrics.clientsNeedingContact > 0}
         />
         <MetricCard
           href="/client-contact?tab=sentiment&sentiment=Negative"
@@ -99,6 +100,7 @@ export function DashboardView({
           label="Negative sentiment"
           value={String(navMetrics.negativeSentiment)}
           detail="Current negative Quo contact readings"
+          alert={navMetrics.negativeSentiment > 0}
         />
         <MetricCard
           href="/needs-response"
@@ -106,6 +108,7 @@ export function DashboardView({
           label="Needs response"
           value={String(navMetrics.needsResponse)}
           detail="Missed/Sona, callbacks, and texts still owed"
+          alert={navMetrics.needsResponse > 0}
         />
       </MetricSection>
 
@@ -116,6 +119,7 @@ export function DashboardView({
           label="Suggestions"
           value={String(metrics.stageSuggestionsOpen)}
           detail="Stage signals awaiting attorney confirmation"
+          alert={metrics.stageSuggestionsOpen > 0}
         />
         <MetricCard
           href="/litigation"
