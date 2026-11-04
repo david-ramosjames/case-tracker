@@ -42,7 +42,7 @@ function quoUrlForCase(record: CaseRecord) {
 }
 
 export default async function NeedsResponsePage() {
-  const [{ records, sessionUser, users }, slackChannels] = await Promise.all([
+  const [{ records, sessionUser, users, settings }, slackChannels] = await Promise.all([
     loadViewerCaseBundle(),
     loadSlackChannelMapByCaseNumber(),
   ]);
@@ -65,6 +65,7 @@ export default async function NeedsResponsePage() {
       return {
         ...item,
         caseId: record?.shared.id ?? item.caseId,
+        attorneyId: record?.attorney.id ?? null,
         attorneyName: item.attorneyName || record?.attorney.name || null,
         paralegalName: item.paralegalName || record?.paralegal.name || null,
         quoUrl: item.evidenceUrl || (record ? quoUrlForCase(record) : null),
@@ -83,7 +84,7 @@ export default async function NeedsResponsePage() {
           call (2-minute rule), or someone marks Resolved. The morning email only lists newly detected items.
         </p>
       </div>
-      <NeedsResponseView rows={rows} />
+      <NeedsResponseView rows={rows} scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds} />
     </div>
   );
 }

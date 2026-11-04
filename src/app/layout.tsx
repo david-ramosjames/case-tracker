@@ -7,6 +7,10 @@ const inter = Inter({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Ramos James Law Case Tracker",
   description: "Ramos James Law case pipeline, forecasting, goals, and data quality tracker.",
+  // Client names are often Spanish; ask Chrome/Google not to auto-translate the app UI.
+  other: {
+    google: "notranslate",
+  },
 };
 
 export default function RootLayout({
@@ -15,8 +19,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body className={inter.className}>{children}</body>
+    <html lang="en" translate="no" className="notranslate">
+      <body className={`${inter.className} notranslate`}>{children}</body>
     </html>
   );
 }

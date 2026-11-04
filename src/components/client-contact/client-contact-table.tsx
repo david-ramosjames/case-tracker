@@ -114,6 +114,14 @@ export function ClientContactView({
     }
   }
 
+  function openCallsTab() {
+    setTab("calls");
+    // Sentiment's Negative default (and any other sentiment picks) should not stick on Calls.
+    setSentimentFilters([]);
+    setActionRequiredOnly(false);
+    setFocusedCaseNumber(null);
+  }
+
   useEffect(() => {
     if (deepLinkApplied.current) return;
     const tabParam = searchParams.get("tab");
@@ -129,7 +137,7 @@ export function ClientContactView({
       });
       return;
     }
-    if (tabParam === "calls") setTab("calls");
+    if (tabParam === "calls") openCallsTab();
   }, [searchParams]);
 
   function actionFlagKey(row: Pick<ClientContactRow, "caseNumber" | "clientName">) {
@@ -251,12 +259,8 @@ export function ClientContactView({
   );
 
   const callFiltered = useMemo(() => {
-    return staffFiltered.filter((row) => {
-      if (!matchesSelection(sentimentFilterValue(row), sentimentFilters)) return false;
-      if (!matchesDayRanges(row.lastInteraction, dayRanges)) return false;
-      return true;
-    });
-  }, [staffFiltered, sentimentFilters, dayRanges]);
+    return staffFiltered.filter((row) => matchesDayRanges(row.lastInteraction, dayRanges));
+  }, [staffFiltered, dayRanges]);
 
   const counted = useMemo(() => {
     let never = 0;
@@ -322,10 +326,10 @@ export function ClientContactView({
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap gap-1 border-b border-border pb-0">
-        <TabButton active={tab === "calls"} onClick={() => setTab("calls")}>
+        <TabButton active={tab === "calls"} onClick={openCallsTab}>
           Calls
         </TabButton>
-        <TabButton active={tab === "sentiment"} onClick={openSentimentTab}>
+        <TabButton active={tab === "sentiment"} onClick={() => openSentimentTab()}>
           Sentiment
         </TabButton>
       </div>
@@ -463,13 +467,6 @@ export function ClientContactView({
           options={legalAssistantOptions}
           className="w-44"
         />
-        <HeaderMultiFilter
-          label="Sentiment"
-          selected={sentimentFilters}
-          onChange={setSentimentFilters}
-          options={SENTIMENT_FILTERS.map((label) => ({ value: label, label }))}
-          className="w-44"
-        />
         {tab === "calls" ? (
           <HeaderMultiFilter
             label="Days since contact"
@@ -483,6 +480,13 @@ export function ClientContactView({
           />
         ) : (
           <>
+            <HeaderMultiFilter
+              label="Sentiment"
+              selected={sentimentFilters}
+              onChange={setSentimentFilters}
+              options={SENTIMENT_FILTERS.map((label) => ({ value: label, label }))}
+              className="w-44"
+            />
             <HeaderMultiFilter
               label="Week"
               selected={activeWeeks}

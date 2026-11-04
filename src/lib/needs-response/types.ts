@@ -14,6 +14,7 @@ export type NeedsResponseRow = {
   status: NeedsResponseStatus;
   detectedAt: string;
   reportWindowLabel: string | null;
+  attorneyId?: string | null;
   attorneyName: string | null;
   paralegalName: string | null;
   quoLine: string | null;

@@ -56,7 +56,13 @@ function channelBadge(channel: NeedsResponseRow["channel"]) {
   return "Call";
 }
 
-export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
+export function NeedsResponseView({
+  rows,
+  scoreboardAttorneyIds,
+}: {
+  rows: NeedsResponseRow[];
+  scoreboardAttorneyIds: string[] | null;
+}) {
   const [query, setQuery] = useState("");
   const [attorneys, setAttorneys] = useState<string[]>([]);
   const [paralegals, setParalegals] = useState<string[]>([]);
@@ -65,6 +71,11 @@ export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [sortKey, setSortKey] = useState<SortKey>("waiting");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+
+  const scoreboard = useMemo(
+    () => needsResponseAttorneyScoreboard(localRows, scoreboardAttorneyIds),
+    [localRows, scoreboardAttorneyIds],
+  );
 
   const attorneyOptions = useMemo(
     () =>
@@ -88,6 +99,24 @@ export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
       })),
     [localRows],
   );
+
+  const counted = useMemo(() => {
+    const now = Date.now();
+    let over24h = 0;
+    let over8h = 0;
+    let missed = 0;
+    let callback = 0;
+    let sms = 0;
+    for (const row of localRows) {
+      const hours = waitingMs(row.detectedAt, now) / 3_600_000;
+      if (hours >= 24) over24h += 1;
+      else if (hours >= 8) over8h += 1;
+      if (row.reasonCode === "sms") sms += 1;
+      else if (row.reasonCode === "callback") callback += 1;
+      else missed += 1;
+    }
+    return { total: localRows.length, over24h, over8h, missed, callback, sms };
+  }, [localRows]);
 
   function onSort(nextKey: SortKey) {
     if (sortKey === nextKey) {
@@ -144,6 +173,56 @@ export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
 
   return (
     <div className="space-y-3">
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {scoreboard.map((item) => {
+          const selected = attorneys.length === 1 && attorneys[0] === item.name;
+          return (
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => setAttorneys(selected ? [] : [item.name])}
+              className={cn(
+                "min-w-36 shrink-0 rounded-md border bg-white px-2.5 py-1.5 text-left",
+                selected && "border-pink-300 bg-pink-50",
+              )}
+            >
+              <div className="truncate text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                {item.name}
+              </div>
+              <div className="text-sm font-semibold text-navy-950">
+                {item.open}
+                <span className="ml-1 text-[10px] font-normal text-muted-foreground">need response</span>
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                {item.over24h} waiting 24h+
+                {item.sms ? ` · ${item.sms} text` : ""}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="danger" className="px-2 py-0 text-[11px]">
+          {counted.total} open
+        </Badge>
+        <Badge variant="danger" className="px-2 py-0 text-[11px]">
+          {counted.over24h} waiting 24h+
+        </Badge>
+        <Badge variant="outline" className="px-2 py-0 text-[11px]">
+          {counted.over8h} 8–24h
+        </Badge>
+        <Badge variant="outline" className="px-2 py-0 text-[11px]">
+          {counted.missed} missed/Sona
+        </Badge>
+        <Badge variant="outline" className="px-2 py-0 text-[11px]">
+          {counted.callback} callback
+        </Badge>
+        <Badge variant="outline" className="px-2 py-0 text-[11px]">
+          {counted.sms} text
+        </Badge>
+      </div>
+
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-[220px] flex-1">
           <Input
@@ -154,7 +233,7 @@ export function NeedsResponseView({ rows }: { rows: NeedsResponseRow[] }) {
           />
         </div>
         <p className="text-sm text-muted-foreground">
-          {filtered.length} open · stays until text/call back or Resolved
+          {filtered.length} shown · stays until text/call back or Resolved
         </p>
       </div>
 
@@ -305,4 +384,29 @@ function SortableHead({
       </button>
     </TableHead>
   );
+}
+
+function needsResponseAttorneyScoreboard(rows: NeedsResponseRow[], allowlist: string[] | null) {
+  const allowed = allowlist ? new Set(allowlist) : null;
+  const now = Date.now();
+  const byAttorney = new Map<
+    string,
+    { name: string; open: number; over24h: number; sms: number }
+  >();
+
+  for (const row of rows) {
+    const attorneyId = row.attorneyId?.trim() || `name:${row.attorneyName?.trim() || "Unassigned"}`;
+    if (allowed && row.attorneyId && !allowed.has(row.attorneyId)) continue;
+    if (allowed && !row.attorneyId) continue;
+    const name = row.attorneyName?.trim() || "Unassigned";
+    const current = byAttorney.get(attorneyId) ?? { name, open: 0, over24h: 0, sms: 0 };
+    current.open += 1;
+    if (waitingMs(row.detectedAt, now) >= 24 * 3_600_000) current.over24h += 1;
+    if (row.reasonCode === "sms") current.sms += 1;
+    byAttorney.set(attorneyId, current);
+  }
+
+  return [...byAttorney.entries()]
+    .map(([id, counts]) => ({ id, ...counts }))
+    .sort((left, right) => right.open - left.open || right.over24h - left.over24h || left.name.localeCompare(right.name));
 }
