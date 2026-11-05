@@ -25,6 +25,7 @@ type DbRow = {
   legal_assistant_name: string | null;
   quo_line: string | null;
   evidence_url: string | null;
+  slack_message_url: string | null;
   details: string | null;
   event_key: string;
   resolved_at: string | null;
@@ -55,6 +56,7 @@ function mapRow(row: DbRow): NeedsResponseRow {
     legalAssistantName: row.legal_assistant_name,
     quoLine: row.quo_line,
     evidenceUrl: row.evidence_url,
+    slackMessageUrl: row.slack_message_url,
     details: row.details,
     eventKey: row.event_key,
     resolvedAt: row.resolved_at,
@@ -76,7 +78,7 @@ export async function listOpenNeedsResponse(caseNumbers?: string[]) {
     let query = admin
       .from("case_needs_response")
       .select(
-        "id, case_number, case_id, client_name, phone, channel, reason, reason_code, status, detected_at, report_window_label, attorney_name, paralegal_name, legal_assistant_name, quo_line, evidence_url, details, event_key, resolved_at, resolved_by",
+        "id, case_number, case_id, client_name, phone, channel, reason, reason_code, status, detected_at, report_window_label, attorney_name, paralegal_name, legal_assistant_name, quo_line, evidence_url, slack_message_url, details, event_key, resolved_at, resolved_by",
       )
       .eq("status", "open")
       .order("detected_at", { ascending: true })
@@ -100,6 +102,31 @@ export async function countOpenNeedsResponse() {
     .eq("status", "open");
   if (error) throw new Error(error.message);
   return count ?? 0;
+}
+
+export async function getNeedsResponseById(id: string) {
+  const admin = requireAdmin();
+  const { data, error } = await admin
+    .from("case_needs_response")
+    .select(
+      "id, case_number, case_id, client_name, phone, channel, reason, reason_code, status, detected_at, report_window_label, attorney_name, paralegal_name, legal_assistant_name, quo_line, evidence_url, slack_message_url, details, event_key, resolved_at, resolved_by",
+    )
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  return data ? mapRow(data as DbRow) : null;
+}
+
+export async function saveNeedsResponseSlackMessageUrl(id: string, slackMessageUrl: string) {
+  const admin = requireAdmin();
+  const { error } = await admin
+    .from("case_needs_response")
+    .update({
+      slack_message_url: slackMessageUrl,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", id);
+  if (error) throw new Error(error.message);
 }
 
 export async function resolveNeedsResponse(id: string, resolvedBy?: string | null) {

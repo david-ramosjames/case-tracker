@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
-import { resolveNeedsResponse } from "@/lib/needs-response/repository";
+import { buildViewerContext, canViewAllNeedsResponse, canViewerAccessCase } from "@/lib/auth/access";
+import { cleanCaseNumber } from "@/lib/csv/parse";
+import { getNeedsResponseById, resolveNeedsResponse } from "@/lib/needs-response/repository";
+import { getAttorneyGoals, getCases, getUsers } from "@/lib/supabase/services";
 
 export async function POST(request: Request) {
   try {
@@ -11,6 +14,21 @@ export async function POST(request: Request) {
     const id = String(body.id ?? "").trim();
     if (!id) {
       return NextResponse.json({ error: "id is required." }, { status: 400 });
+    }
+
+    const item = await getNeedsResponseById(id);
+    if (!item || item.status !== "open") {
+      return NextResponse.json({ error: "That item is no longer open." }, { status: 404 });
+    }
+
+    const [records, users, goals] = await Promise.all([getCases(), getUsers(), getAttorneyGoals()]);
+    const viewer = buildViewerContext(sessionUser, users);
+    if (!canViewAllNeedsResponse(viewer)) {
+      const caseNumber = cleanCaseNumber(item.caseNumber);
+      const record = records.find((candidate) => cleanCaseNumber(candidate.shared.caseNumber) === caseNumber);
+      if (!record || !canViewerAccessCase(record, sessionUser, users, goals)) {
+        return NextResponse.json({ error: "You can only resolve items on your own cases." }, { status: 403 });
+      }
     }
 
     await resolveNeedsResponse(id, sessionUser.name ?? sessionUser.email ?? null);

@@ -45,10 +45,18 @@ export function buildViewerContext(session: SessionUser, users: AppUser[]): View
     isParalegalManager,
     isLegalAssistant,
     contactId: contact?.id ?? null,
-    // Firmwide case lists: admins + managers only.
+    // Firmwide case lists: admins + managing attorney (manager role).
     canViewAllCases: isAdmin || session.role === "manager",
     canViewHistorical: isAdmin,
   };
+}
+
+/**
+ * Needs-response queue: admins, the managing attorney, and the managing paralegal
+ * see every open item. Attorneys, paralegals, and legal assistants stay on their own cases.
+ */
+export function canViewAllNeedsResponse(viewer: ViewerContext) {
+  return viewer.canViewAllCases || viewer.isParalegalManager;
 }
 
 export function getAttorneyCommissionStartMonth(goals: AttorneyGoal[], attorneyId: string) {

@@ -2,6 +2,7 @@ import { Lock } from "lucide-react";
 import { DashboardView } from "@/components/dashboard/dashboard-view";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
+import { canViewAllNeedsResponse } from "@/lib/auth/access";
 import { getDashboardNavMetrics } from "@/lib/dashboard/nav-metrics";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 import { getCurrentQuarter, percent, getQuarterElapsedPercentage } from "@/lib/utils";
@@ -10,7 +11,9 @@ export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const { records, goals, settings, users, viewer } = await loadViewerCaseBundle();
-  const navMetrics = await getDashboardNavMetrics(records);
+  const navMetrics = await getDashboardNavMetrics(records, {
+    needsResponseFirmwide: canViewAllNeedsResponse(viewer),
+  });
 
   return (
     <>

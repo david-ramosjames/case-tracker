@@ -20,6 +20,7 @@ export type NeedsResponseRow = {
   legalAssistantName: string | null;
   quoLine: string | null;
   evidenceUrl: string | null;
+  slackMessageUrl: string | null;
   details: string | null;
   eventKey: string;
   resolvedAt: string | null;

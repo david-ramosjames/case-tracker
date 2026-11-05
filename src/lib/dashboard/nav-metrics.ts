@@ -25,7 +25,10 @@ export type DashboardNavMetrics = {
  * Counts for top-nav destinations that aren't already covered by pipeline metrics.
  * Uses the same open-matter definition as Contact (ongoing updates).
  */
-export async function getDashboardNavMetrics(records: CaseRecord[]): Promise<DashboardNavMetrics> {
+export async function getDashboardNavMetrics(
+  records: CaseRecord[],
+  options?: { needsResponseFirmwide?: boolean },
+): Promise<DashboardNavMetrics> {
   const open = records.filter((record) => caseRequiresOngoingUpdates(record));
   const caseNumbers = open.map((record) => record.shared.caseNumber);
   const openByCase = new Map(open.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
@@ -33,7 +36,7 @@ export async function getDashboardNavMetrics(records: CaseRecord[]): Promise<Das
   const [summaries, sentiments, needsRows] = await Promise.all([
     listClientContactSummaries(caseNumbers),
     listLatestClientSentiments(caseNumbers),
-    listOpenNeedsResponse(caseNumbers).catch(() => []),
+    listOpenNeedsResponse(options?.needsResponseFirmwide ? undefined : caseNumbers).catch(() => []),
   ]);
 
   let clientsNeedingContact = 0;
