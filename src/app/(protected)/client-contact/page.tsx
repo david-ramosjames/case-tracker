@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { ClientContactView, type ClientContactRow } from "@/components/client-contact/client-contact-table";
-import { buildViewerContext } from "@/lib/auth/access";
+import { buildViewerContext, canViewAllNeedsResponse } from "@/lib/auth/access";
 import {
   listClientContactSummaries,
   listLatestClientSentiments,
@@ -64,17 +64,19 @@ function quoUrlForCase(record: CaseRecord) {
 }
 
 export default async function ClientContactPage() {
-  const [{ records, sessionUser, users, settings }, slackChannels] = await Promise.all([
+  const [{ records, allRecords, sessionUser, users, settings }, slackChannels] = await Promise.all([
     loadViewerCaseBundle(),
     loadSlackChannelMapByCaseNumber(),
   ]);
   const viewer = buildViewerContext(sessionUser, users);
-  const open = records.filter((record) => {
+  // Admins, the managing attorney, and the paralegal manager see the full open queue.
+  const seesEveryone = canViewAllNeedsResponse(viewer);
+  const visibleCases = seesEveryone ? allRecords : records;
+  const open = visibleCases.filter((record) => {
     const topicStage = slackChannels.get(cleanCaseNumber(record.shared.caseNumber))?.topicStage;
     if (isReferredCase(record, topicStage)) return false;
     if (!caseRequiresOngoingUpdates(record)) return false;
-    // Same firmwide access as Cases: admins + managing attorney (manager role).
-    if (viewer.canViewAllCases) return true;
+    if (seesEveryone) return true;
     return viewer.contactId ? isAssignedToViewer(record, viewer.contactId) : false;
   });
   const caseNumbers = open.map((record) => record.shared.caseNumber);
