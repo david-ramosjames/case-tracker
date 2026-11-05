@@ -123,6 +123,21 @@ export function hoursSince(value: string | null | undefined, now = new Date()) {
   return Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
 }
 
+/** Whole hours since an exact timestamp. Null when the timestamp is missing. */
+export function elapsedWholeHours(value: string | null | undefined, now = new Date()) {
+  if (!value?.trim()) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
+}
+
+/** Whole 24-hour days since an exact timestamp. Null when the timestamp is missing. */
+export function elapsedWholeDays(value: string | null | undefined, now = new Date()) {
+  const hours = elapsedWholeHours(value, now);
+  if (hours == null) return null;
+  return Math.floor(hours / 24);
+}
+
 export function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
 }

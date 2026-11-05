@@ -25,6 +25,8 @@ export type AutomationFormState = {
   excludedToStages: CaseStage[];
   delayDaysAfterSigning: string;
   delayHoursAfterSigning: string;
+  delayDaysInStage: string;
+  delayHoursInStage: string;
   excludedAttorneyContactIds: string[];
   caseTypes: string[];
   messageEn: string;
@@ -44,6 +46,8 @@ export const EMPTY_AUTOMATION_FORM: AutomationFormState = {
   excludedToStages: [...SMS_DEFAULT_EXCLUDED_TO_STAGES],
   delayDaysAfterSigning: "",
   delayHoursAfterSigning: "",
+  delayDaysInStage: "",
+  delayHoursInStage: "",
   excludedAttorneyContactIds: [],
   caseTypes: [],
   messageEn: "",
@@ -77,6 +81,8 @@ export function automationFormFromRecord(automation: SmsAutomation): AutomationF
       automation.excludedToStages.length > 0 ? automation.excludedToStages : [...SMS_DEFAULT_EXCLUDED_TO_STAGES],
     delayDaysAfterSigning: automation.delayDaysAfterSigning != null ? String(automation.delayDaysAfterSigning) : "",
     delayHoursAfterSigning: automation.delayHoursAfterSigning != null ? String(automation.delayHoursAfterSigning) : "",
+    delayDaysInStage: automation.delayDaysInStage != null ? String(automation.delayDaysInStage) : "",
+    delayHoursInStage: automation.delayHoursInStage != null ? String(automation.delayHoursInStage) : "",
     excludedAttorneyContactIds: automation.excludedAttorneyContactIds,
     caseTypes: automation.caseTypes,
     messageEn: automation.messageEn,
@@ -172,7 +178,7 @@ export function SmsAutomationEditor({
             onChange={(e) => onChange({ ...form, triggerType: e.target.value as SmsAutomationTriggerType })}
           >
             <option value="stage_change">Stage change — fires when the case moves between stages (supports “any except” destination)</option>
-            <option value="time_in_stage">Time in stage — fires daily while in stage after signing delay (no stage change)</option>
+            <option value="time_in_stage">Time in stage — fires daily while the case stays in stage (signing delay and/or time in that stage)</option>
             <option value="manual">Manual — attorney departure (pick attorney and queue on demand)</option>
           </Select>
         </div>
@@ -189,7 +195,7 @@ export function SmsAutomationEditor({
         <div className="space-y-2">
           <label className="text-sm font-medium text-navy-950">While in stage(s)</label>
           <p className="text-xs text-muted-foreground">
-            Case must currently be in one of these stages. Checked each morning; sends once per case when the delay is met.
+                Case must currently be in one of these stages. Checked each morning; sends once per case when the delay is met. Time in stage starts when the case enters the stage.
           </p>
           <div className="flex flex-wrap gap-2">
             {CASE_STAGE_OPTIONS.map((stage) => {
@@ -305,7 +311,7 @@ export function SmsAutomationEditor({
             />
             <p className="text-xs text-muted-foreground">
               {form.triggerType === "time_in_stage"
-                ? "Use hours for precise timing (e.g. LOP at 24h). Hours take precedence over days when both are set."
+                ? "Optional. Leave blank to ignore the signing date. Hours take precedence over days when both are set."
                 : "Optional. Hours take precedence over days when both are set."}
             </p>
           </div>
@@ -320,8 +326,39 @@ export function SmsAutomationEditor({
             />
             <p className="text-xs text-muted-foreground">
               {form.triggerType === "time_in_stage"
-                ? "Set days and/or hours. At least one is required. Requires a signing date on the case."
+                ? "Optional. Requires a signing date when set."
                 : "Leave blank for no delay. Requires a signing date on the case."}
+            </p>
+          </div>
+        </div>
+      ) : null}
+
+      {form.triggerType === "time_in_stage" ? (
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-navy-950">Time in this stage (hours)</label>
+            <Input
+              type="number"
+              min={0}
+              value={form.delayHoursInStage}
+              onChange={(e) => onChange({ ...form, delayHoursInStage: e.target.value })}
+              placeholder="e.g. 48 hours after entering the stage"
+            />
+            <p className="text-xs text-muted-foreground">
+              Clock starts when the case enters the stage above. Hours take precedence over days when both are set.
+            </p>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-navy-950">Time in this stage (days)</label>
+            <Input
+              type="number"
+              min={0}
+              value={form.delayDaysInStage}
+              onChange={(e) => onChange({ ...form, delayDaysInStage: e.target.value })}
+              placeholder="e.g. 7 days after entering the stage"
+            />
+            <p className="text-xs text-muted-foreground">
+              Set a signing delay, a time in stage, or both. When both are set, both must be met.
             </p>
           </div>
         </div>

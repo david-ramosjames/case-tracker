@@ -73,6 +73,12 @@ function formatAutomationTrigger(automation: SmsAutomation, attorneys: AppUser[]
     if (automation.delayDaysAfterSigning != null) {
       parts.push(`Signing + ${automation.delayDaysAfterSigning}d`);
     }
+    if (automation.delayHoursInStage != null) {
+      parts.push(`In stage + ${automation.delayHoursInStage}h`);
+    }
+    if (automation.delayDaysInStage != null) {
+      parts.push(`In stage + ${automation.delayDaysInStage}d`);
+    }
   } else {
     const fromLabel =
       automation.fromStages.length > 0
@@ -279,6 +285,9 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     try {
       const delayDaysTrimmed = form.delayDaysAfterSigning.trim();
       const delayHoursTrimmed = form.delayHoursAfterSigning.trim();
+      const delayDaysInStageTrimmed = form.delayDaysInStage.trim();
+      const delayHoursInStageTrimmed = form.delayHoursInStage.trim();
+      const isTimeInStage = form.triggerType === "time_in_stage";
       const payload = {
         name: form.name,
         enabled: form.enabled,
@@ -300,6 +309,8 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
           form.triggerType === "manual" ? null : delayDaysTrimmed === "" ? null : Number(delayDaysTrimmed),
         delayHoursAfterSigning:
           form.triggerType === "manual" ? null : delayHoursTrimmed === "" ? null : Number(delayHoursTrimmed),
+        delayDaysInStage: isTimeInStage && delayDaysInStageTrimmed !== "" ? Number(delayDaysInStageTrimmed) : null,
+        delayHoursInStage: isTimeInStage && delayHoursInStageTrimmed !== "" ? Number(delayHoursInStageTrimmed) : null,
         excludedAttorneyContactIds: form.triggerType === "manual" ? [] : form.excludedAttorneyContactIds,
         messageEn: form.messageEn,
         messageEs: form.messageEs,
@@ -669,7 +680,8 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
           <CardTitle>New SMS automation</CardTitle>
           <CardDescription>
             Stage-change automations fire when the tracker stage updates. Time-in-stage automations are checked daily
-            (morning cron) while the case stays in the selected stage after the signing delay. Manual automations
+            (morning cron) while the case stays in the selected stage, after a signing delay and/or time in that stage.
+            Manual automations
             (e.g. attorney departure) are queued on demand for one attorney&apos;s active clients. Each send is posted to
             Slack for approval first.
           </CardDescription>

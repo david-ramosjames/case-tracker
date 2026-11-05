@@ -2,7 +2,7 @@ import { type SmsAutomation } from "@/lib/supabase/sms-automations";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { deriveCaseStatusFromTracker } from "@/lib/case-status";
 import { type CaseRecord, type CaseStage } from "@/lib/types";
-import { daysSince, hoursSince } from "@/lib/utils";
+import { daysSince, elapsedWholeDays, elapsedWholeHours, hoursSince } from "@/lib/utils";
 
 /** Closed pipeline stages commonly excluded from client SMS on transition. */
 export const SMS_DEFAULT_EXCLUDED_TO_STAGES: CaseStage[] = ["Disengaged", "Terminated", "Referred"];
@@ -54,16 +54,48 @@ export function automationMatchesSigningDelay(automation: SmsAutomation, record:
   return true;
 }
 
-/** Required delay for time-in-stage automations (hours take precedence when set). */
+function meetsHourOrDayDelay(
+  elapsedHours: number | null,
+  elapsedDays: number | null,
+  requiredHours: number | null,
+  requiredDays: number | null,
+) {
+  if (requiredHours != null) return elapsedHours != null && elapsedHours >= requiredHours;
+  if (requiredDays != null) return elapsedDays != null && elapsedDays >= requiredDays;
+  return true;
+}
+
+/**
+ * Time-in-stage delay. Signing delay and time-in-stage delay are independent.
+ * When both are set, both must be met. Within each clock, hours win over days.
+ */
 export function automationMatchesTimeInStageDelay(automation: SmsAutomation, record: CaseRecord) {
-  if (!record.shared.dateSigned?.trim()) return false;
-  if (automation.delayHoursAfterSigning != null) {
-    return hoursSince(record.shared.dateSigned) >= automation.delayHoursAfterSigning;
+  const hasSigningDelay = automation.delayHoursAfterSigning != null || automation.delayDaysAfterSigning != null;
+  const hasStageDelay = automation.delayHoursInStage != null || automation.delayDaysInStage != null;
+  if (!hasSigningDelay && !hasStageDelay) return false;
+
+  if (hasSigningDelay) {
+    if (!record.shared.dateSigned?.trim()) return false;
+    const met = meetsHourOrDayDelay(
+      hoursSince(record.shared.dateSigned),
+      daysSince(record.shared.dateSigned),
+      automation.delayHoursAfterSigning,
+      automation.delayDaysAfterSigning,
+    );
+    if (!met) return false;
   }
-  if (automation.delayDaysAfterSigning != null) {
-    return daysSince(record.shared.dateSigned) >= automation.delayDaysAfterSigning;
+
+  if (hasStageDelay) {
+    const met = meetsHourOrDayDelay(
+      elapsedWholeHours(record.tracker.stageEnteredAt),
+      elapsedWholeDays(record.tracker.stageEnteredAt),
+      automation.delayHoursInStage,
+      automation.delayDaysInStage,
+    );
+    if (!met) return false;
   }
-  return false;
+
+  return true;
 }
 
 export function automationMatchesStageChange(

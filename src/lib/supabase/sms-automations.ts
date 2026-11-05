@@ -18,6 +18,8 @@ export type SmsAutomation = {
   caseTypes: string[];
   delayDaysAfterSigning: number | null;
   delayHoursAfterSigning: number | null;
+  delayDaysInStage: number | null;
+  delayHoursInStage: number | null;
   /** @deprecated Legacy include-list. Matching uses excludedAttorneyContactIds. */
   attorneyContactIds: string[];
   excludedAttorneyContactIds: string[];
@@ -66,6 +68,8 @@ type AutomationRow = {
   in_stages?: string[] | null;
   delay_days_after_signing?: number | null;
   delay_hours_after_signing?: number | null;
+  delay_days_in_stage?: number | null;
+  delay_hours_in_stage?: number | null;
   attorney_contact_ids?: string[] | null;
   excluded_attorney_contact_ids?: string[] | null;
   sort_order?: number | null;
@@ -104,6 +108,8 @@ function rowToAutomation(row: AutomationRow): SmsAutomation {
     caseTypes: row.case_types ?? [],
     delayDaysAfterSigning: row.delay_days_after_signing ?? null,
     delayHoursAfterSigning: row.delay_hours_after_signing ?? null,
+    delayDaysInStage: row.delay_days_in_stage ?? null,
+    delayHoursInStage: row.delay_hours_in_stage ?? null,
     attorneyContactIds: row.attorney_contact_ids ?? [],
     excludedAttorneyContactIds: row.excluded_attorney_contact_ids ?? [],
     sortOrder: row.sort_order ?? 0,
@@ -202,6 +208,8 @@ export type SmsAutomationInput = {
   caseTypes?: string[];
   delayDaysAfterSigning?: number | null;
   delayHoursAfterSigning?: number | null;
+  delayDaysInStage?: number | null;
+  delayHoursInStage?: number | null;
   attorneyContactIds?: string[];
   excludedAttorneyContactIds?: string[];
   messageEn: string;
@@ -226,6 +234,8 @@ function normalizeAutomationInput(input: SmsAutomationInput) {
     in_stages: inStages,
     delay_days_after_signing: input.delayDaysAfterSigning ?? null,
     delay_hours_after_signing: input.delayHoursAfterSigning ?? null,
+    delay_days_in_stage: input.delayDaysInStage ?? null,
+    delay_hours_in_stage: input.delayHoursInStage ?? null,
     attorney_contact_ids: [],
     excluded_attorney_contact_ids: input.excludedAttorneyContactIds ?? [],
   };
@@ -286,6 +296,8 @@ export async function updateSmsAutomation(id: string, input: Partial<SmsAutomati
   if (input.inStages !== undefined) patch.in_stages = input.inStages;
   if (input.delayDaysAfterSigning !== undefined) patch.delay_days_after_signing = input.delayDaysAfterSigning;
   if (input.delayHoursAfterSigning !== undefined) patch.delay_hours_after_signing = input.delayHoursAfterSigning;
+  if (input.delayDaysInStage !== undefined) patch.delay_days_in_stage = input.delayDaysInStage;
+  if (input.delayHoursInStage !== undefined) patch.delay_hours_in_stage = input.delayHoursInStage;
   if (input.attorneyContactIds !== undefined) patch.attorney_contact_ids = input.attorneyContactIds;
   if (input.excludedAttorneyContactIds !== undefined) {
     patch.excluded_attorney_contact_ids = input.excludedAttorneyContactIds;

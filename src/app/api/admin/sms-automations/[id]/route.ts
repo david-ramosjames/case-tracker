@@ -41,6 +41,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       patch.delayHoursAfterSigning =
         delayRaw === null || delayRaw === "" ? null : Number(delayRaw);
     }
+    if (body.delayDaysInStage !== undefined) {
+      const delayRaw = body.delayDaysInStage;
+      patch.delayDaysInStage = delayRaw === null || delayRaw === "" ? null : Number(delayRaw);
+    }
+    if (body.delayHoursInStage !== undefined) {
+      const delayRaw = body.delayHoursInStage;
+      patch.delayHoursInStage = delayRaw === null || delayRaw === "" ? null : Number(delayRaw);
+    }
     if (body.attorneyContactIds !== undefined) patch.attorneyContactIds = body.attorneyContactIds;
     if (body.excludedAttorneyContactIds !== undefined) {
       patch.excludedAttorneyContactIds = body.excludedAttorneyContactIds;

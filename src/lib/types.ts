@@ -220,6 +220,8 @@ export type TrackerEntry = {
   quoContacts: CaseQuoContact[];
   /** When status became Closed; null while Active / if never tracked. */
   closedAt: string | null;
+  /** When the case entered its current stage. */
+  stageEnteredAt: string | null;
   updatedAt: string;
 };
 

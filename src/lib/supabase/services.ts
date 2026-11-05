@@ -537,6 +537,7 @@ export async function updateTrackerEntry(
     ...trackerUpdateToRow(inputWithExpectedLit, markReviewed),
     ...validationPatch,
     ...litigationPatch,
+    ...(stageInChangeInput && previousStage !== nextStage ? { stage_entered_at: now } : {}),
   };
   const requestedResult = input.result;
   const resultToPersist =
@@ -994,7 +995,10 @@ export async function importSettlementFinancialBackfillRows(
           if (savedTracker.caseStage && savedTracker.caseStage !== "Settled") {
             const { error: stageError } = await admin
               .from("case_tracker_entries")
-              .update({ case_stage: toDatabaseStage(savedTracker.caseStage) })
+              .update({
+                case_stage: toDatabaseStage(savedTracker.caseStage),
+                stage_entered_at: new Date().toISOString(),
+              })
               .eq("id", trackerEntryId);
             if (stageError) throw new Error(stageError.message);
           }
@@ -1168,7 +1172,10 @@ export async function resetSettlementFinancialBackfill(): Promise<SettlementFina
       if (restoredStage) {
         const { error: stageError } = await admin
           .from("case_tracker_entries")
-          .update({ case_stage: toDatabaseStage(restoredStage) })
+          .update({
+            case_stage: toDatabaseStage(restoredStage),
+            stage_entered_at: new Date().toISOString(),
+          })
           .eq("id", trackerEntryId);
         if (stageError) throw new Error(stageError.message);
         stageRestored = true;
@@ -2355,7 +2362,10 @@ export async function clearSheetSettlementSyncForCase(input: {
     if (stageRestored) {
       const { error: stageError } = await admin
         .from("case_tracker_entries")
-        .update({ case_stage: toDatabaseStage(stageRestored) })
+        .update({
+          case_stage: toDatabaseStage(stageRestored),
+          stage_entered_at: new Date().toISOString(),
+        })
         .eq("id", trackerEntryId);
       if (stageError) throw new Error(stageError.message);
     }
@@ -2674,7 +2684,10 @@ export async function syncSettlementsFromSheet(
       if (currentStage === "Settled" && stageRestored) {
         const { error: stageError } = await admin
           .from("case_tracker_entries")
-          .update({ case_stage: toDatabaseStage(stageRestored) })
+          .update({
+          case_stage: toDatabaseStage(stageRestored),
+          stage_entered_at: new Date().toISOString(),
+        })
           .eq("id", trackerEntryId);
         if (stageError) throw new Error(stageError.message);
         stagesRestored += 1;
@@ -3652,6 +3665,7 @@ function rowToTrackerEntry(
     quoPhoneNumberId: toStringOrNull(row.quo_phone_number_id),
     quoContacts,
     closedAt: toStringOrNull(row.closed_at),
+    stageEnteredAt: toStringOrNull(row.stage_entered_at),
     updatedAt: toString(row.updated_at, new Date().toISOString()),
   };
   const result = applyDerivedSettlementResult(entry.result, entry);

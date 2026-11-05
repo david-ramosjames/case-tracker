@@ -45,12 +45,28 @@ function parseAutomationBody(body: Record<string, unknown>): SmsAutomationInput 
   const delayHoursRaw = body.delayHoursAfterSigning;
   const delayHoursAfterSigning =
     delayHoursRaw === null || delayHoursRaw === "" || delayHoursRaw === undefined ? null : Number(delayHoursRaw);
+  const delayDaysInStageRaw = body.delayDaysInStage;
+  const delayDaysInStage =
+    delayDaysInStageRaw === null || delayDaysInStageRaw === "" || delayDaysInStageRaw === undefined
+      ? null
+      : Number(delayDaysInStageRaw);
+  const delayHoursInStageRaw = body.delayHoursInStage;
+  const delayHoursInStage =
+    delayHoursInStageRaw === null || delayHoursInStageRaw === "" || delayHoursInStageRaw === undefined
+      ? null
+      : Number(delayHoursInStageRaw);
 
   if (delayDaysAfterSigning != null && (!Number.isFinite(delayDaysAfterSigning) || delayDaysAfterSigning < 0)) {
     return { error: "Delay after signing (days) must be a non-negative number." };
   }
   if (delayHoursAfterSigning != null && (!Number.isFinite(delayHoursAfterSigning) || delayHoursAfterSigning < 0)) {
     return { error: "Delay after signing (hours) must be a non-negative number." };
+  }
+  if (delayDaysInStage != null && (!Number.isFinite(delayDaysInStage) || delayDaysInStage < 0)) {
+    return { error: "Time in stage (days) must be a non-negative number." };
+  }
+  if (delayHoursInStage != null && (!Number.isFinite(delayHoursInStage) || delayHoursInStage < 0)) {
+    return { error: "Time in stage (hours) must be a non-negative number." };
   }
 
   if (triggerType === "manual") {
@@ -66,6 +82,8 @@ function parseAutomationBody(body: Record<string, unknown>): SmsAutomationInput 
       caseTypes: Array.isArray(body.caseTypes) ? (body.caseTypes as string[]) : [],
       delayDaysAfterSigning: null,
       delayHoursAfterSigning: null,
+      delayDaysInStage: null,
+      delayHoursInStage: null,
       excludedAttorneyContactIds: [],
       messageEn,
       messageEs,
@@ -78,8 +96,13 @@ function parseAutomationBody(body: Record<string, unknown>): SmsAutomationInput 
     if (inStages.length === 0) {
       return { error: "Select at least one stage for a time-in-stage automation." };
     }
-    if (delayDaysAfterSigning == null && delayHoursAfterSigning == null) {
-      return { error: "Set a delay in days and/or hours after signing for time-in-stage automations." };
+    if (
+      delayDaysAfterSigning == null &&
+      delayHoursAfterSigning == null &&
+      delayDaysInStage == null &&
+      delayHoursInStage == null
+    ) {
+      return { error: "Set a delay after signing, a time in stage, or both." };
     }
 
     return {
@@ -94,6 +117,8 @@ function parseAutomationBody(body: Record<string, unknown>): SmsAutomationInput 
       caseTypes: Array.isArray(body.caseTypes) ? (body.caseTypes as string[]) : [],
       delayDaysAfterSigning,
       delayHoursAfterSigning,
+      delayDaysInStage,
+      delayHoursInStage,
       excludedAttorneyContactIds,
       messageEn,
       messageEs,
@@ -119,6 +144,8 @@ function parseAutomationBody(body: Record<string, unknown>): SmsAutomationInput 
     caseTypes: Array.isArray(body.caseTypes) ? (body.caseTypes as string[]) : [],
     delayDaysAfterSigning,
     delayHoursAfterSigning,
+    delayDaysInStage: null,
+    delayHoursInStage: null,
     excludedAttorneyContactIds,
     messageEn,
     messageEs,
