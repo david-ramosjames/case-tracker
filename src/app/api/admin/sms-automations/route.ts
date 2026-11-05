@@ -35,7 +35,9 @@ function parseAutomationBody(body: Record<string, unknown>): SmsAutomationInput 
   const inStages = Array.isArray(body.inStages) ? (body.inStages as CaseStage[]) : [];
   const fromStage = (body.fromStage as CaseStage | "any" | undefined) ?? (fromStages.length > 0 ? fromStages[0] : "any");
   const excludedToStages = Array.isArray(body.excludedToStages) ? (body.excludedToStages as CaseStage[]) : [];
-  const attorneyContactIds = Array.isArray(body.attorneyContactIds) ? (body.attorneyContactIds as string[]) : [];
+  const excludedAttorneyContactIds = Array.isArray(body.excludedAttorneyContactIds)
+    ? (body.excludedAttorneyContactIds as string[])
+    : [];
 
   const delayDaysRaw = body.delayDaysAfterSigning;
   const delayDaysAfterSigning =
@@ -64,7 +66,7 @@ function parseAutomationBody(body: Record<string, unknown>): SmsAutomationInput 
       caseTypes: Array.isArray(body.caseTypes) ? (body.caseTypes as string[]) : [],
       delayDaysAfterSigning: null,
       delayHoursAfterSigning: null,
-      attorneyContactIds: [],
+      excludedAttorneyContactIds: [],
       messageEn,
       messageEs,
       youtubeUrlEn: typeof body.youtubeUrlEn === "string" ? body.youtubeUrlEn.trim() || null : null,
@@ -92,7 +94,7 @@ function parseAutomationBody(body: Record<string, unknown>): SmsAutomationInput 
       caseTypes: Array.isArray(body.caseTypes) ? (body.caseTypes as string[]) : [],
       delayDaysAfterSigning,
       delayHoursAfterSigning,
-      attorneyContactIds,
+      excludedAttorneyContactIds,
       messageEn,
       messageEs,
       youtubeUrlEn: typeof body.youtubeUrlEn === "string" ? body.youtubeUrlEn.trim() || null : null,
@@ -117,7 +119,7 @@ function parseAutomationBody(body: Record<string, unknown>): SmsAutomationInput 
     caseTypes: Array.isArray(body.caseTypes) ? (body.caseTypes as string[]) : [],
     delayDaysAfterSigning,
     delayHoursAfterSigning,
-    attorneyContactIds,
+    excludedAttorneyContactIds,
     messageEn,
     messageEs,
     youtubeUrlEn: typeof body.youtubeUrlEn === "string" ? body.youtubeUrlEn.trim() || null : null,

@@ -1,18 +1,21 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Plus, Trash2 } from "lucide-react";
-import { CASE_STAGE_OPTIONS, CASE_TYPE_OPTIONS } from "@/lib/case-options";
-import { SMS_DEFAULT_EXCLUDED_TO_STAGES } from "@/lib/sms/automation-match";
+import { ChevronDown, ChevronUp, Loader2, Trash2 } from "lucide-react";
 import { MANUAL_SMS_BATCH_SIZE } from "@/lib/sms/manual-send";
 import { type SmsAutomation, type SmsAutomationTriggerType } from "@/lib/supabase/sms-automations";
+import {
+  automationFormFromRecord,
+  EMPTY_AUTOMATION_FORM,
+  SmsAutomationEditor,
+  type AutomationFormState,
+} from "@/components/settings/sms-automation-editor";
 import { STAGE_SLACK_LABELS } from "@/lib/slack/enum-replies";
 import { type AppUser, type CaseStage } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 
 type ManualSmsProgressItem = {
@@ -57,27 +60,6 @@ function formatProgressRow(item: ManualSmsProgressItem) {
   return `#${item.caseNumber} · ${name} · ${phone} · ${item.language.toUpperCase()}`;
 }
 
-type ToMode = "specific" | "any";
-
-const EMPTY_FORM = {
-  name: "",
-  enabled: true,
-  triggerType: "stage_change" as SmsAutomationTriggerType,
-  fromStages: [] as CaseStage[],
-  inStages: [] as CaseStage[],
-  toMode: "specific" as ToMode,
-  toStage: "Dmd" as CaseStage,
-  excludedToStages: [...SMS_DEFAULT_EXCLUDED_TO_STAGES] as CaseStage[],
-  delayDaysAfterSigning: "",
-  delayHoursAfterSigning: "",
-  attorneyContactIds: [] as string[],
-  caseTypes: [] as string[],
-  messageEn: "",
-  messageEs: "",
-  youtubeUrlEn: "",
-  youtubeUrlEs: "",
-};
-
 function formatAutomationTrigger(automation: SmsAutomation, attorneys: AppUser[]) {
   const parts: string[] = [];
 
@@ -116,11 +98,15 @@ function formatAutomationTrigger(automation: SmsAutomation, attorneys: AppUser[]
 
   parts.push(automation.caseTypes.length > 0 ? automation.caseTypes.join(", ") : "All case types");
 
-  if (automation.triggerType !== "manual" && automation.attorneyContactIds.length > 0) {
-    const names = automation.attorneyContactIds
-      .map((id) => attorneys.find((user) => user.id === id)?.name ?? id)
-      .join(", ");
-    parts.push(`Attorneys: ${names}`);
+  if (automation.triggerType !== "manual") {
+    if (automation.excludedAttorneyContactIds.length === 0) {
+      parts.push("All attorneys");
+    } else {
+      const names = automation.excludedAttorneyContactIds
+        .map((id) => attorneys.find((user) => user.id === id)?.name ?? id)
+        .join(", ");
+      parts.push(`Skip: ${names}`);
+    }
   }
 
   return parts.join(" · ");
@@ -146,14 +132,15 @@ type ClientSmsSettingsViewProps = {
 };
 
 export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
-  const attorneys = useMemo(() => users.filter((user) => user.role === "attorney" && user.active), [users]);
   const allAttorneys = useMemo(
     () => users.filter((user) => user.role === "attorney").sort((a, b) => a.name.localeCompare(b.name)),
     [users],
   );
   const [automations, setAutomations] = useState<SmsAutomation[]>([]);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [createForm, setCreateForm] = useState<AutomationFormState>(EMPTY_AUTOMATION_FORM);
+  const [editForm, setEditForm] = useState<AutomationFormState>(EMPTY_AUTOMATION_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [reordering, setReordering] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -276,87 +263,16 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when attorney or debounced filters change
   }, [automations, runAttorneyByAutomation, debouncedExcludeByAutomation, debouncedOnlyByAutomation]);
 
-  function resetForm() {
-    setForm(EMPTY_FORM);
+  function startEdit(automation: SmsAutomation) {
+    setEditingId(automation.id);
+    setEditForm(automationFormFromRecord(automation));
+  }
+
+  function cancelEdit() {
     setEditingId(null);
   }
 
-  function startEdit(automation: SmsAutomation) {
-    const fromStages =
-      automation.fromStages.length > 0
-        ? automation.fromStages
-        : automation.fromStage !== "any"
-          ? [automation.fromStage]
-          : [];
-
-    setEditingId(automation.id);
-    setForm({
-      name: automation.name,
-      enabled: automation.enabled,
-      triggerType: automation.triggerType,
-      fromStages,
-      inStages: automation.inStages,
-      toMode: automation.toStage === "any" ? "any" : "specific",
-      toStage: automation.toStage === "any" ? "Dmd" : automation.toStage,
-      excludedToStages:
-        automation.excludedToStages.length > 0 ? automation.excludedToStages : [...SMS_DEFAULT_EXCLUDED_TO_STAGES],
-      delayDaysAfterSigning: automation.delayDaysAfterSigning != null ? String(automation.delayDaysAfterSigning) : "",
-      delayHoursAfterSigning: automation.delayHoursAfterSigning != null ? String(automation.delayHoursAfterSigning) : "",
-      attorneyContactIds: automation.attorneyContactIds,
-      caseTypes: automation.caseTypes,
-      messageEn: automation.messageEn,
-      messageEs: automation.messageEs,
-      youtubeUrlEn: automation.youtubeUrlEn ?? "",
-      youtubeUrlEs: automation.youtubeUrlEs ?? "",
-    });
-  }
-
-  function toggleInStage(stage: CaseStage) {
-    setForm((current) => ({
-      ...current,
-      inStages: current.inStages.includes(stage)
-        ? current.inStages.filter((item) => item !== stage)
-        : [...current.inStages, stage],
-    }));
-  }
-
-  function toggleFromStage(stage: CaseStage) {
-    setForm((current) => ({
-      ...current,
-      fromStages: current.fromStages.includes(stage)
-        ? current.fromStages.filter((item) => item !== stage)
-        : [...current.fromStages, stage],
-    }));
-  }
-
-  function toggleExcludedToStage(stage: CaseStage) {
-    setForm((current) => ({
-      ...current,
-      excludedToStages: current.excludedToStages.includes(stage)
-        ? current.excludedToStages.filter((item) => item !== stage)
-        : [...current.excludedToStages, stage],
-    }));
-  }
-
-  function toggleCaseType(caseType: string) {
-    setForm((current) => ({
-      ...current,
-      caseTypes: current.caseTypes.includes(caseType)
-        ? current.caseTypes.filter((item) => item !== caseType)
-        : [...current.caseTypes, caseType],
-    }));
-  }
-
-  function toggleAttorney(attorneyId: string) {
-    setForm((current) => ({
-      ...current,
-      attorneyContactIds: current.attorneyContactIds.includes(attorneyId)
-        ? current.attorneyContactIds.filter((id) => id !== attorneyId)
-        : [...current.attorneyContactIds, attorneyId],
-    }));
-  }
-
-  async function saveAutomation() {
+  async function saveAutomation(form: AutomationFormState, id: string | null) {
     setSaving(true);
     setError(null);
     setMessage(null);
@@ -384,26 +300,54 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
           form.triggerType === "manual" ? null : delayDaysTrimmed === "" ? null : Number(delayDaysTrimmed),
         delayHoursAfterSigning:
           form.triggerType === "manual" ? null : delayHoursTrimmed === "" ? null : Number(delayHoursTrimmed),
-        attorneyContactIds: form.triggerType === "manual" ? [] : form.attorneyContactIds,
+        excludedAttorneyContactIds: form.triggerType === "manual" ? [] : form.excludedAttorneyContactIds,
         messageEn: form.messageEn,
         messageEs: form.messageEs,
         youtubeUrlEn: form.youtubeUrlEn.trim() || null,
         youtubeUrlEs: form.youtubeUrlEs.trim() || null,
       };
-      const response = await fetch(editingId ? `/api/admin/sms-automations/${editingId}` : "/api/admin/sms-automations", {
-        method: editingId ? "PATCH" : "POST",
+      const response = await fetch(id ? `/api/admin/sms-automations/${id}` : "/api/admin/sms-automations", {
+        method: id ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
       const body = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Save failed.");
-      setMessage(editingId ? "Automation updated." : "Automation created.");
-      resetForm();
+      setMessage(id ? "Automation updated." : "Automation created.");
+      if (id) setEditingId(null);
+      else setCreateForm(EMPTY_AUTOMATION_FORM);
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function moveAutomation(id: string, direction: -1 | 1) {
+    const index = automations.findIndex((automation) => automation.id === id);
+    const nextIndex = index + direction;
+    if (index < 0 || nextIndex < 0 || nextIndex >= automations.length) return;
+    const next = [...automations];
+    const [moved] = next.splice(index, 1);
+    if (!moved) return;
+    next.splice(nextIndex, 0, moved);
+    setAutomations(next);
+    setReordering(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/admin/sms-automations/reorder", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: next.map((automation) => automation.id) }),
+      });
+      const body = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(body.error ?? "Unable to save order.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to save order.");
+      await loadData();
+    } finally {
+      setReordering(false);
     }
   }
 
@@ -414,7 +358,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
       const response = await fetch(`/api/admin/sms-automations/${id}`, { method: "DELETE" });
       const body = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Delete failed.");
-      if (editingId === id) resetForm();
+      if (editingId === id) setEditingId(null);
       await loadData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Delete failed.");
@@ -722,7 +666,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>{editingId ? "Edit automation" : "New SMS automation"}</CardTitle>
+          <CardTitle>New SMS automation</CardTitle>
           <CardDescription>
             Stage-change automations fire when the tracker stage updates. Time-in-stage automations are checked daily
             (morning cron) while the case stays in the selected stage after the signing delay. Manual automations
@@ -730,274 +674,15 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
             Slack for approval first.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-navy-950">Name</label>
-              <Input value={form.name} onChange={(e) => setForm((c) => ({ ...c, name: e.target.value }))} placeholder="LOP Care" />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-navy-950">Enabled</label>
-              <Select value={form.enabled ? "yes" : "no"} onChange={(e) => setForm((c) => ({ ...c, enabled: e.target.value === "yes" }))}>
-                <option value="yes">Yes</option>
-                <option value="no">No</option>
-              </Select>
-            </div>
-            <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium text-navy-950">Trigger type</label>
-              <Select
-                value={form.triggerType}
-                onChange={(e) => setForm((c) => ({ ...c, triggerType: e.target.value as SmsAutomationTriggerType }))}
-              >
-                <option value="stage_change">Stage change — fires when the case moves between stages (supports “any except” destination)</option>
-                <option value="time_in_stage">Time in stage — fires daily while in stage after signing delay (no stage change)</option>
-                <option value="manual">Manual — attorney departure (pick attorney and queue on demand)</option>
-              </Select>
-            </div>
-          </div>
-
-          {form.triggerType === "manual" ? (
-            <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-4 text-sm text-amber-950">
-              Save English and Spanish messages (and YouTube URLs). Then use <strong>Send SMS</strong> on the automation
-              card and choose the departing attorney. Each click sends the next batch of {MANUAL_SMS_BATCH_SIZE}{" "}
-              messages directly via Quo (no Slack approval). Click again when you are ready for the next batch. Each
-              active client gets the message for their primary language.
-            </div>
-          ) : form.triggerType === "time_in_stage" ? (
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-navy-950">While in stage(s)</label>
-              <p className="text-xs text-muted-foreground">
-                Case must currently be in one of these stages. Checked each morning; sends once per case when the delay is met.
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {CASE_STAGE_OPTIONS.map((stage) => {
-                  const selected = form.inStages.includes(stage);
-                  return (
-                    <button
-                      key={stage}
-                      type="button"
-                      className={`rounded-full border px-3 py-1 text-xs ${selected ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
-                    onClick={() => toggleInStage(stage)}
-                  >
-                    {stageChipLabel(stage)}
-                  </button>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-navy-950">From stage(s)</label>
-            <p className="text-xs text-muted-foreground">
-              Select one or more origin stages (e.g. Treatment). Leave empty to match any prior stage.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {CASE_STAGE_OPTIONS.map((stage) => {
-                const selected = form.fromStages.includes(stage);
-                return (
-                  <button
-                    key={stage}
-                    type="button"
-                    className={`rounded-full border px-3 py-1 text-xs ${selected ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
-                    onClick={() => toggleFromStage(stage)}
-                  >
-                    {stageChipLabel(stage)}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="space-y-3 rounded-lg border border-border/80 p-4">
-            <div className="space-y-1">
-              <label className="text-sm font-medium text-navy-950">To stage</label>
-              <p className="text-xs text-muted-foreground">
-                Choose a single destination, or any stage except the ones you exclude below (e.g. Treatment → Demand, Litigation, etc., but not Terminated).
-              </p>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                className={`rounded-full border px-3 py-1.5 text-xs font-medium ${form.toMode === "specific" ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
-                onClick={() => setForm((c) => ({ ...c, toMode: "specific" }))}
-              >
-                One specific stage
-              </button>
-              <button
-                type="button"
-                className={`rounded-full border px-3 py-1.5 text-xs font-medium ${form.toMode === "any" ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
-                onClick={() => setForm((c) => ({ ...c, toMode: "any" }))}
-              >
-                Any stage except…
-              </button>
-            </div>
-            {form.toMode === "specific" ? (
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-navy-950">Destination stage</label>
-                <Select value={form.toStage} onChange={(e) => setForm((c) => ({ ...c, toStage: e.target.value as CaseStage }))}>
-                  {CASE_STAGE_OPTIONS.map((stage) => (
-                    <option key={stage} value={stage}>
-                      {stageChipLabel(stage)}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-navy-950">Excluded destination stages</label>
-                <p className="text-xs text-muted-foreground">
-                  The automation fires when the case moves to any stage not selected below.
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {CASE_STAGE_OPTIONS.map((stage) => {
-                    const selected = form.excludedToStages.includes(stage);
-                    return (
-                      <button
-                        key={stage}
-                        type="button"
-                        className={`rounded-full border px-3 py-1 text-xs ${selected ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
-                        onClick={() => toggleExcludedToStage(stage)}
-                      >
-                        {stageChipLabel(stage)}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
-            </>
-          )}
-
-          {form.triggerType !== "manual" ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-navy-950">Delay after signing (hours)</label>
-              <Input
-                type="number"
-                min={0}
-                value={form.delayHoursAfterSigning}
-                onChange={(e) => setForm((c) => ({ ...c, delayHoursAfterSigning: e.target.value }))}
-                placeholder="e.g. 24 for signing + 24 hours"
-              />
-              <p className="text-xs text-muted-foreground">
-                {form.triggerType === "time_in_stage"
-                  ? "Use hours for precise timing (e.g. LOP at 24h). Hours take precedence over days when both are set."
-                  : "Optional. Hours take precedence over days when both are set."}
-              </p>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-navy-950">Delay after signing (days)</label>
-              <Input
-                type="number"
-                min={0}
-                value={form.delayDaysAfterSigning}
-                onChange={(e) => setForm((c) => ({ ...c, delayDaysAfterSigning: e.target.value }))}
-                placeholder="e.g. 1 for signing date + 1 calendar day"
-              />
-              <p className="text-xs text-muted-foreground">
-                {form.triggerType === "time_in_stage"
-                  ? "Set days and/or hours. At least one is required. Requires a signing date on the case."
-                  : "Leave blank for no delay. Requires a signing date on the case."}
-              </p>
-            </div>
-          </div>
-          ) : null}
-
-          {form.triggerType !== "manual" ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2 md:col-span-2">
-              <label className="text-sm font-medium text-navy-950">Attorneys (leave empty for all)</label>
-              <div className="flex max-h-32 flex-wrap gap-2 overflow-y-auto rounded-md border p-2">
-                {attorneys.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No active attorneys found.</p>
-                ) : (
-                  attorneys.map((attorney) => {
-                    const selected = form.attorneyContactIds.includes(attorney.id);
-                    return (
-                      <button
-                        key={attorney.id}
-                        type="button"
-                        className={`rounded-full border px-3 py-1 text-xs ${selected ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
-                        onClick={() => toggleAttorney(attorney.id)}
-                      >
-                        {attorney.name}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </div>
-          ) : null}
-
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-navy-950">Case types (leave empty for all)</label>
-            <div className="flex flex-wrap gap-2">
-              {CASE_TYPE_OPTIONS.map((caseType) => {
-                const selected = form.caseTypes.includes(caseType);
-                return (
-                  <button
-                    key={caseType}
-                    type="button"
-                    className={`rounded-full border px-3 py-1 text-xs ${selected ? "border-pink-500 bg-pink-50 text-pink-700" : "border-border text-muted-foreground"}`}
-                    onClick={() => toggleCaseType(caseType)}
-                  >
-                    {caseType}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-navy-950">English message</label>
-              <Textarea
-                rows={5}
-                value={form.messageEn}
-                onChange={(e) => setForm((c) => ({ ...c, messageEn: e.target.value }))}
-                placeholder="Hi {{clientName}}, your case is moving to {{toStage}}..."
-              />
-              <Input
-                value={form.youtubeUrlEn}
-                onChange={(e) => setForm((c) => ({ ...c, youtubeUrlEn: e.target.value }))}
-                placeholder="YouTube URL (English, optional)"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-navy-950">Spanish message</label>
-              <Textarea
-                rows={5}
-                value={form.messageEs}
-                onChange={(e) => setForm((c) => ({ ...c, messageEs: e.target.value }))}
-                placeholder="Hola {{clientName}}, su caso avanza a {{toStage}}..."
-              />
-              <Input
-                value={form.youtubeUrlEs}
-                onChange={(e) => setForm((c) => ({ ...c, youtubeUrlEs: e.target.value }))}
-                placeholder="YouTube URL (Spanish, optional)"
-              />
-            </div>
-          </div>
-
-          <p className="text-xs text-muted-foreground">
-            Template variables: <code>{"{{clientName}}"}</code>, <code>{"{{caseNumber}}"}</code>, <code>{"{{fromStage}}"}</code>,{" "}
-            <code>{"{{toStage}}"}</code>. YouTube links are appended to the message when set.
-          </p>
-
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => void saveAutomation()} disabled={saving}>
-              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
-              {editingId ? "Save changes" : "Create automation"}
-            </Button>
-            {editingId ? (
-              <Button variant="outline" onClick={resetForm}>
-                Cancel edit
-              </Button>
-            ) : null}
-          </div>
+        <CardContent>
+          <SmsAutomationEditor
+            form={createForm}
+            attorneys={allAttorneys}
+            saving={saving}
+            submitLabel="Create automation"
+            onChange={setCreateForm}
+            onSubmit={() => void saveAutomation(createForm, null)}
+          />
         </CardContent>
       </Card>
 
@@ -1005,8 +690,9 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
         <CardHeader>
           <CardTitle>Automations</CardTitle>
           <CardDescription>
-            Stage and time-in-stage triggers queue Slack approval before Quo. Manual attorney-departure SMS send
-            directly in batches of {MANUAL_SMS_BATCH_SIZE} — click Send for each batch.
+            Order is visual only — it does not change when an automation fires. Edit opens on the card. Stage and
+            time-in-stage triggers queue Slack approval before Quo. Manual attorney-departure SMS send directly in
+            batches of {MANUAL_SMS_BATCH_SIZE} — click Send for each batch.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -1014,27 +700,70 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
           {!loading && automations.length === 0 ? (
             <p className="text-sm text-muted-foreground">No automations yet.</p>
           ) : null}
-          {automations.map((automation) => (
+          {automations.map((automation, index) => (
             <div key={automation.id} className="rounded-lg border p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-semibold text-navy-950">{automation.name}</p>
-                    <Badge variant={automation.enabled ? "success" : "secondary"}>{automation.enabled ? "Enabled" : "Disabled"}</Badge>
-                    <Badge variant="outline">{triggerBadgeLabel(automation.triggerType)}</Badge>
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">{formatAutomationTrigger(automation, allAttorneys)}</p>
+              <div className="flex items-start gap-3">
+                <div className="flex flex-col gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Move ${automation.name} up`}
+                    disabled={reordering || index === 0}
+                    onClick={() => void moveAutomation(automation.id, -1)}
+                  >
+                    <ChevronUp className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-label={`Move ${automation.name} down`}
+                    disabled={reordering || index === automations.length - 1}
+                    onClick={() => void moveAutomation(automation.id, 1)}
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
                 </div>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => startEdit(automation)}>
-                    Edit
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={() => void deleteAutomation(automation.id)}>
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold text-navy-950">{automation.name}</p>
+                        <Badge variant={automation.enabled ? "success" : "secondary"}>{automation.enabled ? "Enabled" : "Disabled"}</Badge>
+                        <Badge variant="outline">{triggerBadgeLabel(automation.triggerType)}</Badge>
+                      </div>
+                      <p className="mt-1 text-sm text-muted-foreground">{formatAutomationTrigger(automation, allAttorneys)}</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => (editingId === automation.id ? cancelEdit() : startEdit(automation))}
+                      >
+                        {editingId === automation.id ? "Close" : "Edit"}
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => void deleteAutomation(automation.id)}>
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                  {editingId === automation.id ? (
+                    <div className="mt-4 rounded-md border bg-slate-50 p-4">
+                      <SmsAutomationEditor
+                        form={editForm}
+                        attorneys={allAttorneys}
+                        saving={saving}
+                        submitLabel="Save changes"
+                        onChange={setEditForm}
+                        onSubmit={() => void saveAutomation(editForm, automation.id)}
+                        onCancel={cancelEdit}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               </div>
-              {automation.triggerType === "manual" ? (
+              {automation.triggerType === "manual" && editingId !== automation.id ? (
                 <div className="mt-4 space-y-3">
                   <div className="flex flex-col gap-3 rounded-md border bg-slate-50 p-3 sm:flex-row sm:items-end">
                     <label className="block min-w-0 flex-1">

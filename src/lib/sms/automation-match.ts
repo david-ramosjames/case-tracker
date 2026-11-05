@@ -35,9 +35,10 @@ export function automationMatchesToStage(automation: SmsAutomation, toStage: Cas
   return automation.toStage === toStage;
 }
 
+/** On for every attorney unless that attorney is on the skip list. */
 export function automationMatchesAttorney(automation: SmsAutomation, record: CaseRecord) {
-  if (automation.attorneyContactIds.length === 0) return true;
-  return automation.attorneyContactIds.includes(record.shared.attorneyId);
+  if (automation.excludedAttorneyContactIds.includes(record.shared.attorneyId)) return false;
+  return true;
 }
 
 /** Optional gate on stage-change automations at transition time. */

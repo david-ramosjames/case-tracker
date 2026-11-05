@@ -42,6 +42,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         delayRaw === null || delayRaw === "" ? null : Number(delayRaw);
     }
     if (body.attorneyContactIds !== undefined) patch.attorneyContactIds = body.attorneyContactIds;
+    if (body.excludedAttorneyContactIds !== undefined) {
+      patch.excludedAttorneyContactIds = body.excludedAttorneyContactIds;
+    }
     if (body.messageEn !== undefined) patch.messageEn = body.messageEn;
     if (body.messageEs !== undefined) patch.messageEs = body.messageEs;
     if (body.youtubeUrlEn !== undefined) patch.youtubeUrlEn = body.youtubeUrlEn;

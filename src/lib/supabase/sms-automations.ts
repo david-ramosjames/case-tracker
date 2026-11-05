@@ -18,7 +18,10 @@ export type SmsAutomation = {
   caseTypes: string[];
   delayDaysAfterSigning: number | null;
   delayHoursAfterSigning: number | null;
+  /** @deprecated Legacy include-list. Matching uses excludedAttorneyContactIds. */
   attorneyContactIds: string[];
+  excludedAttorneyContactIds: string[];
+  sortOrder: number;
   messageEn: string;
   messageEs: string;
   youtubeUrlEn: string | null;
@@ -64,6 +67,8 @@ type AutomationRow = {
   delay_days_after_signing?: number | null;
   delay_hours_after_signing?: number | null;
   attorney_contact_ids?: string[] | null;
+  excluded_attorney_contact_ids?: string[] | null;
+  sort_order?: number | null;
   case_types: string[] | null;
   message_en: string;
   message_es: string;
@@ -100,6 +105,8 @@ function rowToAutomation(row: AutomationRow): SmsAutomation {
     delayDaysAfterSigning: row.delay_days_after_signing ?? null,
     delayHoursAfterSigning: row.delay_hours_after_signing ?? null,
     attorneyContactIds: row.attorney_contact_ids ?? [],
+    excludedAttorneyContactIds: row.excluded_attorney_contact_ids ?? [],
+    sortOrder: row.sort_order ?? 0,
     messageEn: row.message_en,
     messageEs: row.message_es,
     youtubeUrlEn: row.youtube_url_en,
@@ -167,7 +174,11 @@ function requireAdmin() {
 
 export async function listSmsAutomations(): Promise<SmsAutomation[]> {
   const admin = requireAdmin();
-  const { data, error } = await admin.from("sms_automations").select("*").order("created_at", { ascending: false });
+  const { data, error } = await admin
+    .from("sms_automations")
+    .select("*")
+    .order("sort_order", { ascending: true })
+    .order("created_at", { ascending: true });
   if (error) throw new Error(error.message);
   return ((data ?? []) as AutomationRow[]).map(rowToAutomation);
 }
@@ -192,6 +203,7 @@ export type SmsAutomationInput = {
   delayDaysAfterSigning?: number | null;
   delayHoursAfterSigning?: number | null;
   attorneyContactIds?: string[];
+  excludedAttorneyContactIds?: string[];
   messageEn: string;
   messageEs: string;
   youtubeUrlEn?: string | null;
@@ -214,18 +226,33 @@ function normalizeAutomationInput(input: SmsAutomationInput) {
     in_stages: inStages,
     delay_days_after_signing: input.delayDaysAfterSigning ?? null,
     delay_hours_after_signing: input.delayHoursAfterSigning ?? null,
-    attorney_contact_ids: input.attorneyContactIds ?? [],
+    attorney_contact_ids: [],
+    excluded_attorney_contact_ids: input.excludedAttorneyContactIds ?? [],
   };
+}
+
+async function nextSmsAutomationSortOrder() {
+  const admin = requireAdmin();
+  const { data, error } = await admin
+    .from("sms_automations")
+    .select("sort_order")
+    .order("sort_order", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const current = (data?.[0] as { sort_order?: number } | undefined)?.sort_order;
+  return (current ?? -1) + 1;
 }
 
 export async function createSmsAutomation(input: SmsAutomationInput): Promise<SmsAutomation> {
   const admin = requireAdmin();
   const now = new Date().toISOString();
   const stageFields = normalizeAutomationInput(input);
+  const sortOrder = await nextSmsAutomationSortOrder();
   const { data, error } = await admin
     .from("sms_automations")
     .insert({
       name: input.name.trim(),
+      sort_order: sortOrder,
       enabled: input.enabled ?? true,
       ...stageFields,
       case_types: input.caseTypes ?? [],
@@ -260,6 +287,10 @@ export async function updateSmsAutomation(id: string, input: Partial<SmsAutomati
   if (input.delayDaysAfterSigning !== undefined) patch.delay_days_after_signing = input.delayDaysAfterSigning;
   if (input.delayHoursAfterSigning !== undefined) patch.delay_hours_after_signing = input.delayHoursAfterSigning;
   if (input.attorneyContactIds !== undefined) patch.attorney_contact_ids = input.attorneyContactIds;
+  if (input.excludedAttorneyContactIds !== undefined) {
+    patch.excluded_attorney_contact_ids = input.excludedAttorneyContactIds;
+    patch.attorney_contact_ids = [];
+  }
   if (input.caseTypes !== undefined) patch.case_types = input.caseTypes;
   if (input.messageEn !== undefined) patch.message_en = input.messageEn.trim();
   if (input.messageEs !== undefined) patch.message_es = input.messageEs.trim();
@@ -269,6 +300,17 @@ export async function updateSmsAutomation(id: string, input: Partial<SmsAutomati
   const { data, error } = await admin.from("sms_automations").update(patch).eq("id", id).select("*").single();
   if (error) throw new Error(error.message);
   return rowToAutomation(data as AutomationRow);
+}
+
+/** Persist the Client SMS page order. Does not change when automations fire. */
+export async function reorderSmsAutomations(ids: string[]) {
+  const admin = requireAdmin();
+  for (let index = 0; index < ids.length; index += 1) {
+    const id = ids[index];
+    if (!id) continue;
+    const { error } = await admin.from("sms_automations").update({ sort_order: index }).eq("id", id);
+    if (error) throw new Error(error.message);
+  }
 }
 
 export async function deleteSmsAutomation(id: string) {
