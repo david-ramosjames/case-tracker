@@ -6,6 +6,7 @@ import {
   type ContactStamp,
 } from "@/lib/client-contact/repository";
 import { syncClientContactsFromLedger } from "@/lib/client-contact/sync-ledger";
+import { isQualifyingClientCall, latestTextExchangeAt, type TextDirection } from "@/lib/client-contact/qualify";
 import { latestDate } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
@@ -55,6 +56,7 @@ export async function syncQuoClientContacts() {
   const newerThan = new Date(Date.now() - LOOKBACK_MS).toISOString();
   const conversations = await listRecentQuoClientActivity({ maxPages: 40, newerThan });
   const byCase = new Map<string, ContactStamp>();
+  const textsByCase = new Map<string, Array<{ at: string; direction: TextDirection }>>();
 
   function stampsForPhone(phone: string) {
     const stamps: ContactStamp[] = [];
@@ -96,6 +98,9 @@ export async function syncQuoClientContacts() {
               stamp.outboundCallAt = latestDate([stamp.outboundCallAt, call.createdAt]);
             }
             if (call.answered) stamp.humanCallAt = latestDate([stamp.humanCallAt, call.createdAt]);
+            if (isQualifyingClientCall(call)) {
+              stamp.qualifyingCallAt = latestDate([stamp.qualifyingCallAt, call.createdAt]);
+            }
           }
           for (const message of messages) {
             stamp.conversationAt = latestDate([stamp.conversationAt, message.createdAt]);
@@ -105,6 +110,9 @@ export async function syncQuoClientContacts() {
             if (message.direction === "outgoing") {
               stamp.outboundTextAt = latestDate([stamp.outboundTextAt, message.createdAt]);
             }
+            const texts = textsByCase.get(stamp.caseNumber) ?? [];
+            texts.push({ at: message.createdAt, direction: message.direction });
+            textsByCase.set(stamp.caseNumber, texts);
           }
         }
       } catch (error) {
@@ -113,6 +121,11 @@ export async function syncQuoClientContacts() {
     }
   }
   await Promise.all(Array.from({ length: Math.min(4, queue.length) }, () => worker()));
+
+  for (const [caseNumber, stamp] of byCase) {
+    const exchangeAt = latestTextExchangeAt(textsByCase.get(caseNumber) ?? []);
+    if (exchangeAt) stamp.textExchangeAt = latestDate([stamp.textExchangeAt, exchangeAt]);
+  }
 
   const saved = await applyContactStamps([...byCase.values()]);
   return {
@@ -250,6 +263,9 @@ export async function syncClientContactLineBackfill(options?: {
           stamp.conversationAt = latestDate([stamp.conversationAt, call.createdAt]);
           if (call.direction === "outgoing") stamp.outboundCallAt = latestDate([stamp.outboundCallAt, call.createdAt]);
           if (call.answered) stamp.humanCallAt = latestDate([stamp.humanCallAt, call.createdAt]);
+          if (isQualifyingClientCall(call)) {
+            stamp.qualifyingCallAt = latestDate([stamp.qualifyingCallAt, call.createdAt]);
+          }
         }
       }
     }

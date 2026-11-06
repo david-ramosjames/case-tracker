@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { ClientContactView, type ClientContactRow } from "@/components/client-contact/client-contact-table";
 import { buildViewerContext, canViewAllNeedsResponse } from "@/lib/auth/access";
 import {
+  isQualifyingContactRuleReady,
   listClientContactSummaries,
   listLatestClientSentiments,
   listSentimentActionFlags,
@@ -80,10 +81,11 @@ export default async function ClientContactPage() {
     return viewer.contactId ? isAssignedToViewer(record, viewer.contactId) : false;
   });
   const caseNumbers = open.map((record) => record.shared.caseNumber);
-  const [summary, sentimentsByContact, actionFlags] = await Promise.all([
+  const [summary, sentimentsByContact, actionFlags, qualifyingRule] = await Promise.all([
     listClientContactSummaries(caseNumbers),
     listLatestClientSentiments(caseNumbers),
     listSentimentActionFlags(caseNumbers),
+    isQualifyingContactRuleReady(),
   ]);
   const sentimentsByCase = worstSentimentByCaseNumber(sentimentsByContact.values());
   const openByCaseNumber = new Map(open.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
@@ -94,7 +96,7 @@ export default async function ClientContactPage() {
 
   const rows = open.map((record) => {
     const caseNumber = cleanCaseNumber(record.shared.caseNumber);
-    const dates = clientContactDates(summary.get(caseNumber) ?? null);
+    const dates = clientContactDates(summary.get(caseNumber) ?? null, { qualifying: qualifyingRule });
     const stored = summary.get(caseNumber);
     const sentiment = sentimentsByCase.get(caseNumber);
     return {
@@ -132,7 +134,7 @@ export default async function ClientContactPage() {
     const record = openByCaseNumber.get(cleanCaseNumber(reading.caseNumber));
     if (!record) continue;
     const caseNumber = cleanCaseNumber(record.shared.caseNumber);
-    const dates = clientContactDates(summary.get(caseNumber) ?? null);
+    const dates = clientContactDates(summary.get(caseNumber) ?? null, { qualifying: qualifyingRule });
     const stored = summary.get(caseNumber);
     sentimentRows.push({
       caseId: record.shared.id,

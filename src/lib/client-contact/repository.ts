@@ -10,6 +10,8 @@ type SummaryRow = {
   last_inbound_text_at: string | null;
   last_outbound_text_at: string | null;
   last_conversation_at: string | null;
+  last_qualifying_call_at: string | null;
+  last_text_exchange_at: string | null;
   last_other_at: string | null;
   last_other_type: string | null;
   last_other_details: string | null;
@@ -23,6 +25,11 @@ export type ContactStamp = {
   inboundTextAt?: string | null;
   outboundTextAt?: string | null;
   conversationAt?: string | null;
+  qualifyingCallAt?: string | null;
+  textExchangeAt?: string | null;
+  /** Ledger recompute: write these dates even when they move backward, and clear one inside the lookback. */
+  replaceQualifying?: boolean;
+  lookbackStart?: string | null;
   otherAt?: string | null;
   otherType?: string | null;
   otherDetails?: string | null;
@@ -40,6 +47,8 @@ export type ClientContactNoteInput = {
   source: "slack" | "sheet";
 };
 
+const QUALIFYING_RULE_KEY = "client_contact_qualifying_rule";
+
 function requireAdmin() {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required for client contacts.");
@@ -55,10 +64,27 @@ function rowToSummary(row: SummaryRow): ClientContactSummary {
     lastInboundTextAt: row.last_inbound_text_at,
     lastOutboundTextAt: row.last_outbound_text_at,
     lastConversationAt: row.last_conversation_at,
+    lastQualifyingCallAt: row.last_qualifying_call_at,
+    lastTextExchangeAt: row.last_text_exchange_at,
     lastOtherAt: row.last_other_at,
     lastOtherType: row.last_other_type,
     lastOtherDetails: row.last_other_details,
   };
+}
+
+function keptQualifyingDate(
+  previous: string | null | undefined,
+  computed: string | null | undefined,
+  lookbackStart: string | null | undefined,
+  replace: boolean,
+) {
+  if (!replace) return latestDate([previous, computed]);
+  if (computed) return computed;
+  if (!previous || !lookbackStart) return previous ?? null;
+  const previousMs = Date.parse(previous);
+  const startMs = Date.parse(lookbackStart);
+  if (Number.isFinite(previousMs) && Number.isFinite(startMs) && previousMs < startMs) return previous;
+  return null;
 }
 
 function otherMoment(at: string | null | undefined) {
@@ -97,6 +123,29 @@ export async function listClientContactSummaries(caseNumbers: string[]) {
   return summaries;
 }
 
+/** True after a ledger sync has stored 90-second calls and 7-day text exchanges. */
+export async function isQualifyingContactRuleReady() {
+  const admin = createSupabaseAdminClient();
+  if (!admin) return false;
+  const { data, error } = await admin.from("case_tracker_settings").select("value").eq("key", QUALIFYING_RULE_KEY).maybeSingle();
+  if (error) return false;
+  const value = data?.value;
+  return Boolean(value && typeof value === "object" && "ready" in value && value.ready === true);
+}
+
+export async function markQualifyingContactRuleReady() {
+  const admin = requireAdmin();
+  const { error } = await admin.from("case_tracker_settings").upsert(
+    {
+      key: QUALIFYING_RULE_KEY,
+      value: { ready: true, at: new Date().toISOString() },
+      description: "30-day contact counts a 90-second human call or a 7-day inbound and outbound text exchange. Sona does not count.",
+    },
+    { onConflict: "key" },
+  );
+  if (error) throw new Error(error.message);
+}
+
 /** Moves each date forward. An older event never replaces a newer one. */
 export async function applyContactStamps(stamps: ContactStamp[]) {
   const merged = new Map<string, ContactStamp>();
@@ -112,6 +161,10 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
       inboundTextAt: latestDate([current.inboundTextAt, stamp.inboundTextAt]),
       outboundTextAt: latestDate([current.outboundTextAt, stamp.outboundTextAt]),
       conversationAt: latestDate([current.conversationAt, stamp.conversationAt]),
+      qualifyingCallAt: stamp.replaceQualifying ? (stamp.qualifyingCallAt ?? null) : latestDate([current.qualifyingCallAt, stamp.qualifyingCallAt]),
+      textExchangeAt: stamp.replaceQualifying ? (stamp.textExchangeAt ?? null) : latestDate([current.textExchangeAt, stamp.textExchangeAt]),
+      replaceQualifying: Boolean(current.replaceQualifying || stamp.replaceQualifying),
+      lookbackStart: stamp.lookbackStart ?? current.lookbackStart,
       ...mergedOther(current, stamp),
     });
   }
@@ -132,6 +185,18 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
       last_inbound_text_at: latestDate([previous?.lastInboundTextAt, stamp.inboundTextAt]),
       last_outbound_text_at: latestDate([previous?.lastOutboundTextAt, stamp.outboundTextAt]),
       last_conversation_at: latestDate([previous?.lastConversationAt, stamp.conversationAt]),
+      last_qualifying_call_at: keptQualifyingDate(
+        previous?.lastQualifyingCallAt,
+        stamp.qualifyingCallAt,
+        stamp.lookbackStart,
+        Boolean(stamp.replaceQualifying),
+      ),
+      last_text_exchange_at: keptQualifyingDate(
+        previous?.lastTextExchangeAt,
+        stamp.textExchangeAt,
+        stamp.lookbackStart,
+        Boolean(stamp.replaceQualifying),
+      ),
       last_other_at: nextOtherAt,
       last_other_type: stampIsLatestOther ? (stamp.otherType?.trim() || previous?.lastOtherType || null) : (previous?.lastOtherType ?? null),
       last_other_details: stampIsLatestOther ? (stamp.otherDetails?.trim() || previous?.lastOtherDetails || null) : (previous?.lastOtherDetails ?? null),

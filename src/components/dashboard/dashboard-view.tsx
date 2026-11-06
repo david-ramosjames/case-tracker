@@ -91,7 +91,7 @@ export function DashboardView({
           icon={Phone}
           label="Clients 30+ days"
           value={String(navMetrics.clientsNeedingContact)}
-          detail="No last interaction in 30 days — open Contact"
+          detail="No 90-second call or text exchange in 30 days"
           alert={navMetrics.clientsNeedingContact > 0}
         />
         <MetricCard

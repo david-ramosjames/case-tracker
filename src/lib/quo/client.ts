@@ -493,6 +493,8 @@ export type QuoCallActivity = {
   createdAt: string;
   direction: "incoming" | "outgoing";
   answered: boolean;
+  durationSec: number;
+  aiHandled: boolean;
 };
 
 export type QuoMessageActivity = {
@@ -606,8 +608,9 @@ export async function listQuoCallsForPhoneOnLine(clientPhone: string, phoneNumbe
     const direction = call.direction === "outgoing" ? "outgoing" : call.direction === "incoming" ? "incoming" : null;
     if (!direction) return [];
     const aiHandled = call.aiHandled === true || call.aiHandled === "true";
-    const answered = !aiHandled && (Boolean(call.answeredAt) || (call.duration ?? 0) > 0);
-    return [{ createdAt: call.createdAt, direction, answered }];
+    const durationSec = typeof call.duration === "number" && Number.isFinite(call.duration) ? call.duration : 0;
+    const answered = !aiHandled && (Boolean(call.answeredAt) || durationSec > 0);
+    return [{ createdAt: call.createdAt, direction, answered, durationSec, aiHandled }];
   });
 }
 

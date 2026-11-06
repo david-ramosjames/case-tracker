@@ -1,6 +1,7 @@
 import { loadCaseContactMaps, type ContactCase } from "@/lib/client-contact/case-phones";
 import { mergeQuoDirectoryContacts } from "@/lib/client-contact/directory-contacts";
-import { applyContactStamps, type ContactStamp } from "@/lib/client-contact/repository";
+import { applyContactStamps, markQualifyingContactRuleReady, type ContactStamp } from "@/lib/client-contact/repository";
+import { callDurationSeconds, isQualifyingClientCall, latestTextExchangeAt, textDirection } from "@/lib/client-contact/qualify";
 import { latestDate } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
@@ -20,6 +21,7 @@ type LedgerCall = {
   ai_handled: boolean | null;
   created_at: Date | string | null;
   answered_at: Date | string | null;
+  completed_at: Date | string | null;
   duration_sec: number | null;
   participants: {
     to?: string | null;
@@ -35,6 +37,7 @@ type LedgerCall = {
         participants?: string[];
         contactIds?: string[];
         answeredAt?: string | null;
+        completedAt?: string | null;
         duration?: number | null;
         aiHandled?: boolean | string | null;
       };
@@ -151,6 +154,7 @@ export async function syncClientContactsFromLedger() {
   });
 
   const byCase = new Map<string, ContactStamp>();
+  const textsByCase = new Map<string, Array<{ at: string; direction: "incoming" | "outgoing" }>>();
   function stampFor(match: ContactCase) {
     const current = byCase.get(match.caseNumber) ?? {
       caseNumber: match.caseNumber,
@@ -165,7 +169,7 @@ export async function syncClientContactsFromLedger() {
   try {
     await client.connect();
     const calls = await client.query<LedgerCall>(
-      `select call_id, direction, status, ai_handled, created_at, answered_at, duration_sec, participants, payload_json
+      `select call_id, direction, status, ai_handled, created_at, answered_at, completed_at, duration_sec, participants, payload_json
        from quo_calls
        where coalesce(created_at, updated_at) >= $1
        order by created_at asc nulls last`,
@@ -225,15 +229,20 @@ export async function syncClientContactsFromLedger() {
       const direction = (row.direction ?? "").toLowerCase();
       const aiHandled =
         row.ai_handled === true || object?.aiHandled === true || object?.aiHandled === "true";
-      const answered =
-        !aiHandled &&
-        (Boolean(iso(row.answered_at) || object?.answeredAt) || (row.duration_sec ?? object?.duration ?? 0) > 0);
+      const durationSec = callDurationSeconds({
+        durationSec: row.duration_sec ?? object?.duration,
+        answeredAt: iso(row.answered_at) || object?.answeredAt || null,
+        completedAt: iso(row.completed_at) || object?.completedAt || null,
+      });
+      const answered = !aiHandled && (Boolean(iso(row.answered_at) || object?.answeredAt) || durationSec > 0);
+      const qualifyingCall = isQualifyingClientCall({ aiHandled, durationSec });
 
       for (const match of matches) {
         const stamp = stampFor(match);
         stamp.conversationAt = latestDate([stamp.conversationAt, createdAt]);
         if (direction === "outgoing") stamp.outboundCallAt = latestDate([stamp.outboundCallAt, createdAt]);
         if (answered) stamp.humanCallAt = latestDate([stamp.humanCallAt, createdAt]);
+        if (qualifyingCall) stamp.qualifyingCallAt = latestDate([stamp.qualifyingCallAt, createdAt]);
       }
     }
 
@@ -241,7 +250,7 @@ export async function syncClientContactsFromLedger() {
       const createdAt = iso(row.created_at);
       if (!createdAt) continue;
       const object = row.payload_json?.data?.object;
-      const direction = (row.direction || object?.direction || "").toLowerCase();
+      const direction = textDirection(row.direction || object?.direction);
       const phones = listPhones(object?.from, object?.to);
       const contactIds = (object?.contactIds ?? []).map((id) => String(id).trim()).filter(Boolean);
       const matches = matchesFor(maps, openCases, phones, contactIds);
@@ -252,10 +261,22 @@ export async function syncClientContactsFromLedger() {
         stamp.conversationAt = latestDate([stamp.conversationAt, createdAt]);
         if (direction === "incoming") stamp.inboundTextAt = latestDate([stamp.inboundTextAt, createdAt]);
         if (direction === "outgoing") stamp.outboundTextAt = latestDate([stamp.outboundTextAt, createdAt]);
+        if (direction) {
+          const texts = textsByCase.get(match.caseNumber) ?? [];
+          texts.push({ at: createdAt, direction });
+          textsByCase.set(match.caseNumber, texts);
+        }
       }
     }
 
+    for (const [caseNumber, stamp] of byCase) {
+      stamp.textExchangeAt = latestTextExchangeAt(textsByCase.get(caseNumber) ?? []);
+      stamp.replaceQualifying = true;
+      stamp.lookbackStart = since;
+    }
+
     const saved = await applyContactStamps([...byCase.values()]);
+    await markQualifyingContactRuleReady();
     return {
       configured: true as const,
       source: "reporting_ledger" as const,

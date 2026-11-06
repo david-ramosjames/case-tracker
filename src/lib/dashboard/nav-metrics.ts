@@ -4,6 +4,7 @@ import {
   contactSentimentLabel,
 } from "@/lib/client-contact/types";
 import {
+  isQualifyingContactRuleReady,
   listClientContactSummaries,
   listLatestClientSentiments,
   worstSentimentByCaseNumber,
@@ -33,23 +34,24 @@ export async function getDashboardNavMetrics(
   const caseNumbers = open.map((record) => record.shared.caseNumber);
   const openByCase = new Map(open.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
 
-  const [summaries, sentiments, needsRows] = await Promise.all([
+  const [summaries, sentiments, needsRows, qualifyingRule] = await Promise.all([
     listClientContactSummaries(caseNumbers),
     listLatestClientSentiments(caseNumbers),
     listOpenNeedsResponse(options?.needsResponseFirmwide ? undefined : caseNumbers).catch(() => []),
+    isQualifyingContactRuleReady(),
   ]);
 
   let clientsNeedingContact = 0;
   for (const record of open) {
     const caseNumber = cleanCaseNumber(record.shared.caseNumber);
-    const dates = clientContactDates(summaries.get(caseNumber) ?? null);
+    const dates = clientContactDates(summaries.get(caseNumber) ?? null, { qualifying: qualifyingRule });
     if (contactNeedsFollowUp(dates.lastInteraction)) clientsNeedingContact += 1;
   }
 
   let negativeSentiment = 0;
   for (const reading of worstSentimentByCaseNumber(sentiments.values()).values()) {
     if (!openByCase.has(cleanCaseNumber(reading.caseNumber))) continue;
-    const dates = clientContactDates(summaries.get(cleanCaseNumber(reading.caseNumber)) ?? null);
+    const dates = clientContactDates(summaries.get(cleanCaseNumber(reading.caseNumber)) ?? null, { qualifying: qualifyingRule });
     if (contactSentimentLabel(dates.lastInteraction, reading.sentiment) === "Negative") {
       negativeSentiment += 1;
     }

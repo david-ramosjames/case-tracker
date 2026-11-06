@@ -10,6 +10,10 @@ export type ClientContactSummary = {
   lastInboundTextAt: string | null;
   lastOutboundTextAt: string | null;
   lastConversationAt: string | null;
+  /** Latest call of at least 90 seconds that Sona did not handle. */
+  lastQualifyingCallAt: string | null;
+  /** Later message of the latest inbound+outbound pair within 7 days. */
+  lastTextExchangeAt: string | null;
   lastOtherAt: string | null;
   lastOtherType: string | null;
   lastOtherDetails: string | null;
@@ -17,9 +21,9 @@ export type ClientContactSummary = {
 
 export type ClientContactDates = {
   /**
-   * Contact Summary column F — we actually connected.
-   * MAX(J Last Human Call, L Conversation Activity, N Other, MIN(K Inbound Text, M Outbound Text)).
-   * Sheet MIN ignores blanks, so one text date still counts.
+   * What resets the 30-day clock.
+   * A call of at least 90 seconds (Sona excluded), an inbound and outbound text within 7 days,
+   * or a manual contact log. A short call, Sona, or a one-way text does not count.
    */
   lastInteraction: string | null;
   /**
@@ -29,7 +33,7 @@ export type ClientContactDates = {
   lastAttempt: string | null;
 };
 
-/** Sheet MIN ignores a blank cell, so one text date still counts. Both dates use the earlier one. */
+/** Sheet MIN ignores a blank cell, so one text date still counts. Kept for rows written before the qualifying rule. */
 function earlierDate(left: string | null, right: string | null) {
   const leftMs = left ? Date.parse(left) : NaN;
   const rightMs = right ? Date.parse(right) : NaN;
@@ -52,15 +56,19 @@ export function latestDate(values: Array<string | null | undefined>) {
   return best;
 }
 
-export function clientContactDates(summary: ClientContactSummary | null): ClientContactDates {
+export function clientContactDates(
+  summary: ClientContactSummary | null,
+  options?: { qualifying?: boolean },
+): ClientContactDates {
   if (!summary) return { lastInteraction: null, lastAttempt: null };
-  // Same as Contact Summary F: MAX(J, L, N, MIN(K, M)).
-  const lastInteraction = latestDate([
-    summary.lastHumanCallAt,
-    summary.lastConversationAt,
-    summary.lastOtherAt,
-    earlierDate(summary.lastInboundTextAt, summary.lastOutboundTextAt),
-  ]);
+  const lastInteraction = options?.qualifying
+    ? latestDate([summary.lastQualifyingCallAt, summary.lastTextExchangeAt, summary.lastOtherAt])
+    : latestDate([
+        summary.lastHumanCallAt,
+        summary.lastConversationAt,
+        summary.lastOtherAt,
+        earlierDate(summary.lastInboundTextAt, summary.lastOutboundTextAt),
+      ]);
   // Same as Contact Summary H: MAX(F, I, M).
   return {
     lastInteraction,

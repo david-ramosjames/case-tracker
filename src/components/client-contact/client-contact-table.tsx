@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { QUALIFYING_CALL_SECONDS, TEXT_EXCHANGE_WINDOW_DAYS } from "@/lib/client-contact/qualify";
 import {
   CLIENT_CONTACT_LONG_GAP_DAYS,
   CLIENT_CONTACT_WINDOW_DAYS,
@@ -325,6 +326,14 @@ export function ClientContactView({
 
   return (
     <div className="space-y-3">
+      <div className="rounded-md border bg-white px-3 py-2 text-xs leading-5 text-muted-foreground">
+        <p className="font-semibold text-navy-950">What counts for the {CLIENT_CONTACT_WINDOW_DAYS} days</p>
+        <ul className="mt-1 list-disc pl-4">
+          <li>A call of at least {QUALIFYING_CALL_SECONDS} seconds. Sona does not count.</li>
+          <li>An inbound text and an outbound text within {TEXT_EXCHANGE_WINDOW_DAYS} days of each other.</li>
+          <li>A shorter call or a one-way text does not reset the clock.</li>
+        </ul>
+      </div>
       <div className="flex flex-wrap gap-1 border-b border-border pb-0">
         <TabButton active={tab === "calls"} onClick={openCallsTab}>
           Calls
