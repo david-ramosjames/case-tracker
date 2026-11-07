@@ -45,11 +45,13 @@ export type ClientContactRow = {
   legalAssistantName: string;
   lastInteraction: string | null;
   lastAttempt: string | null;
-  lastHumanCall: string | null;
-  lastConversation: string | null;
+  /** Latest call of at least 90 seconds (Sona excluded). */
+  lastQualifyingCall: string | null;
   lastInboundText: string | null;
-  lastOutboundCall: string | null;
   lastOutboundText: string | null;
+  /** Later message of the latest inbound+outbound pair within 7 days. */
+  lastTextExchange: string | null;
+  lastOutboundCall: string | null;
   lastOtherAt: string | null;
   lastOtherType: string | null;
   lastOtherDetails: string | null;
@@ -329,9 +331,22 @@ export function ClientContactView({
       <div className="rounded-md border bg-white px-3 py-2 text-xs leading-5 text-muted-foreground">
         <p className="font-semibold text-navy-950">What counts for the {CLIENT_CONTACT_WINDOW_DAYS} days</p>
         <ul className="mt-1 list-disc pl-4">
-          <li>A call of at least {QUALIFYING_CALL_SECONDS} seconds. Sona does not count.</li>
-          <li>An inbound text and an outbound text within {TEXT_EXCHANGE_WINDOW_DAYS} days of each other.</li>
-          <li>A shorter call or a one-way text does not reset the clock.</li>
+          <li>
+            <span className="font-medium text-navy-950">Last interaction</span> is the latest of Call{" "}
+            {QUALIFYING_CALL_SECONDS}+sec, Text exchange, or Other.
+          </li>
+          <li>
+            <span className="font-medium text-navy-950">Call {QUALIFYING_CALL_SECONDS}+sec</span> is a connected call of
+            at least {QUALIFYING_CALL_SECONDS} seconds. Sona does not count.
+          </li>
+          <li>
+            <span className="font-medium text-navy-950">Text exchange</span> needs both an inbound and an outbound text
+            within {TEXT_EXCHANGE_WINDOW_DAYS} days. A one-way text does not reset the clock.
+          </li>
+          <li>
+            <span className="font-medium text-navy-950">Last attempt</span> still includes outbound calls and texts that
+            did not qualify.
+          </li>
         </ul>
       </div>
       <div className="flex flex-wrap gap-1 border-b border-border pb-0">
@@ -573,14 +588,25 @@ function CallsTable({
             <TableHead className={compactHead}>Attorney</TableHead>
             <TableHead className={compactHead}>Paralegal</TableHead>
             <TableHead className={compactHead}>Legal assistant</TableHead>
-            <TableHead className={compactHead}>Last interaction</TableHead>
+            <TableHead className={compactHead} title="Latest qualifying contact">
+              Last interaction
+            </TableHead>
             <SortableHead label="Days" sortKey="days" active={sortKey} direction={sortDirection} onSort={onSort} />
-            <TableHead className={compactHead}>Last attempt</TableHead>
+            <TableHead className={compactHead} title="Includes outbound calls and texts that did not qualify">
+              Last attempt
+            </TableHead>
             <TableHead className={compactHead}>Outbound call</TableHead>
-            <TableHead className={compactHead}>Human call</TableHead>
+            <TableHead className={compactHead} title={`Connected call of at least ${QUALIFYING_CALL_SECONDS} seconds. Sona does not count.`}>
+              Call {QUALIFYING_CALL_SECONDS}+sec
+            </TableHead>
             <TableHead className={compactHead}>Inbound text</TableHead>
-            <TableHead className={compactHead}>Conversation</TableHead>
             <TableHead className={compactHead}>Outbound text</TableHead>
+            <TableHead
+              className={compactHead}
+              title={`Later message when inbound and outbound fall within ${TEXT_EXCHANGE_WINDOW_DAYS} days`}
+            >
+              Text exchange
+            </TableHead>
             <TableHead className={compactHead}>Other</TableHead>
             <TableHead className={compactHead}>Sentiment</TableHead>
           </TableRow>
@@ -588,7 +614,7 @@ function CallsTable({
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={16} className={cn(compactCell, "text-muted-foreground")}>
+              <TableCell colSpan={15} className={cn(compactCell, "text-muted-foreground")}>
                 {overdueOnly ? "Every open case has a client interaction in the last 30 days." : "No matching cases."}
               </TableCell>
             </TableRow>
@@ -627,10 +653,10 @@ function CallsTable({
                   </TableCell>
                   <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastAttempt)}</TableCell>
                   <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastOutboundCall)}</TableCell>
-                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastHumanCall)}</TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastQualifyingCall)}</TableCell>
                   <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastInboundText)}</TableCell>
-                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastConversation)}</TableCell>
                   <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastOutboundText)}</TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastTextExchange)}</TableCell>
                   <TableCell className={cn(compactCell, "max-w-44 truncate whitespace-nowrap")} title={row.lastOtherDetails ?? undefined}>
                     {formatOtherContact(row.lastOtherAt, row.lastOtherType)}
                   </TableCell>
