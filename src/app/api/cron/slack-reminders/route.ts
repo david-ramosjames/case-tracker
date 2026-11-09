@@ -45,6 +45,7 @@ export async function GET(request: Request) {
   });
 
   try {
+    // Returns quickly after kicking batch 0 async — Quo sync runs on /api/cron/daily-job-step.
     const outcome = await startDailyCronChain(request, runId, { force, skipSheetSync, caseNumber });
     return NextResponse.json(outcome, { status: outcome.ok === false ? 500 : 200 });
   } catch (error) {

@@ -127,7 +127,11 @@ export async function failDailyCronRun(runId: string, batchIndex: number, messag
   return { merged: partial, slackNotify };
 }
 
-/** First batch only — remaining batches chain via HTTP. */
+/**
+ * Entry point for /api/cron/slack-reminders.
+ * Only clears state, posts "started", and kicks batch 0 asynchronously.
+ * Heavy work must not run in this request — that made 4:20 look stuck for 8+ minutes.
+ */
 export async function startDailyCronChain(
   request: Request,
   runId: string,
@@ -139,12 +143,15 @@ export async function startDailyCronChain(
   const startedNotify = await notifyDailyCronStarted(runId);
   console.info("Daily cron start notify", startedNotify);
 
-  try {
-    const result = await executeDailyCronBatchStep(request, 0, runId, options);
-    return { ...result, runId, startedNotify };
-  } catch (error) {
-    const message = errorMessage(error) || "Daily cron failed.";
-    console.error("Daily cron batch 0 failed", { runId, message }, error);
+  const kick = await kickDailyCronBatch(request, 0, runId);
+  console.info("Daily cron batch 0 kick", { runId, kick });
+
+  if (!kick.ok) {
+    const message =
+      "error" in kick && kick.error
+        ? errorMessage(kick.error) || "Failed to start daily cron batch 0."
+        : `Failed to start daily cron batch 0 (status ${"status" in kick ? kick.status : "?"}).`;
+    console.error("Daily cron batch 0 failed to start", { runId, message, kick });
     const { merged, slackNotify } = await failDailyCronRun(runId, 0, message);
     return {
       ok: false as const,
@@ -153,7 +160,19 @@ export async function startDailyCronChain(
       merged,
       slackNotify,
       startedNotify,
+      kick,
       completed: true as const,
+      accepted: false as const,
     };
   }
+
+  return {
+    ok: true as const,
+    runId,
+    startedNotify,
+    kick,
+    accepted: true as const,
+    completed: false as const,
+    chained: 0,
+  };
 }

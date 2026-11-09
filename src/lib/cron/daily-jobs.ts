@@ -163,20 +163,26 @@ export async function runDailyCronGroup(group: DailyCronGroup, options: DailyJob
   const dryRun = Boolean(options.dryRun);
   const errors: DailyJobStepError[] = [];
 
-  if (group === "quoSync") {
+  if (group === "quoPhoneSync") {
     const quoPhoneSyncResult = await runDailyJobStep("quoPhoneSync", syncQuoPhonesToTrackerIfConfigured);
     if (quoPhoneSyncResult.error) errors.push(quoPhoneSyncResult.error);
-
-    const quoLanguageTagResult = await runDailyJobStep("quoLanguageTag", () =>
-      renameQuoContactsWithLanguageIfConfigured({ dryRun, caseNumber: options.caseNumber }),
-    );
-    if (quoLanguageTagResult.error) errors.push(quoLanguageTagResult.error);
-
     return {
       ok: errors.length === 0,
       group,
       quoPhoneSync:
         quoPhoneSyncResult.data ?? emptyQuoPhoneSyncResult(quoPhoneSyncResult.error?.error),
+      errors: errors.length > 0 ? errors : undefined,
+    };
+  }
+
+  if (group === "quoLanguageTag") {
+    const quoLanguageTagResult = await runDailyJobStep("quoLanguageTag", () =>
+      renameQuoContactsWithLanguageIfConfigured({ dryRun, caseNumber: options.caseNumber }),
+    );
+    if (quoLanguageTagResult.error) errors.push(quoLanguageTagResult.error);
+    return {
+      ok: errors.length === 0,
+      group,
       quoLanguageTag:
         quoLanguageTagResult.data ?? emptyQuoLanguageTagResult(quoLanguageTagResult.error?.error),
       errors: errors.length > 0 ? errors : undefined,

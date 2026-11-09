@@ -2,7 +2,8 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { type DailyJobStepError } from "@/lib/cron/daily-jobs";
 
 export type DailyCronGroup =
-  | "quoSync"
+  | "quoPhoneSync"
+  | "quoLanguageTag"
   | "slackChannels"
   | "settlementSync"
   | "treatmentPromotion"
@@ -12,7 +13,8 @@ export type DailyCronGroup =
   | "sms";
 
 export const DAILY_CRON_GROUP_ORDER: DailyCronGroup[] = [
-  "quoSync",
+  "quoPhoneSync",
+  "quoLanguageTag",
   "slackChannels",
   "settlementSync",
   "treatmentPromotion",
@@ -28,7 +30,8 @@ export const DAILY_CRON_GROUP_ORDER: DailyCronGroup[] = [
  * Order: early syncs → settlement → stage/Slack → SMS last.
  */
 export const DAILY_CRON_BATCHES: DailyCronGroup[][] = [
-  ["quoSync"],
+  ["quoPhoneSync"],
+  ["quoLanguageTag"],
   ["slackChannels"],
   ["settlementSync"],
   ["treatmentPromotion"],
@@ -183,7 +186,8 @@ export function mergeDailyCronRunToAllResult(run: DailyCronRunState | null) {
     }
   }
 
-  const quoSync = run?.groups.quoSync;
+  const quoPhone = run?.groups.quoPhoneSync;
+  const quoLanguage = run?.groups.quoLanguageTag;
   const slackChannels = run?.groups.slackChannels;
   const settlement = run?.groups.settlementSync;
   const treatment = run?.groups.treatmentPromotion;
@@ -196,7 +200,7 @@ export function mergeDailyCronRunToAllResult(run: DailyCronRunState | null) {
     ok,
     step: "all" as const,
     quoPhoneSync:
-      (quoSync?.quoPhoneSync as Record<string, unknown>) ??
+      (quoPhone?.quoPhoneSync as Record<string, unknown>) ??
       ({
         configured: false,
         totalContacts: 0,
@@ -206,7 +210,7 @@ export function mergeDailyCronRunToAllResult(run: DailyCronRunState | null) {
         conversationLinks: 0,
       } as const),
     quoLanguageTag:
-      (quoSync?.quoLanguageTag as Record<string, unknown>) ??
+      (quoLanguage?.quoLanguageTag as Record<string, unknown>) ??
       ({
         configured: false,
         totalContacts: 0,
