@@ -419,6 +419,57 @@ export async function listSentimentActionFlags(caseNumbers: string[]) {
   return flags;
 }
 
+/** Latest Sentiment-tab notes keyed by case_number + Quo contact name. */
+export async function listSentimentNotes(caseNumbers: string[]) {
+  const notes = new Map<string, string>();
+  const keys = [...new Set(caseNumbers.map((value) => cleanCaseNumber(value)).filter(Boolean))];
+  if (keys.length === 0) return notes;
+
+  const admin = requireAdmin();
+  for (let index = 0; index < keys.length; index += 200) {
+    const chunk = keys.slice(index, index + 200);
+    const { data, error } = await admin
+      .from("case_client_sentiment_flags")
+      .select("case_number, client_name, note")
+      .in("case_number", chunk)
+      .not("note", "is", null);
+    if (error) throw new Error(error.message);
+    for (const row of data ?? []) {
+      const note = String(row.note ?? "").trim();
+      if (!note) continue;
+      notes.set(sentimentFlagKey(row.case_number, row.client_name ?? ""), note);
+    }
+  }
+  return notes;
+}
+
+export async function saveSentimentNote(input: {
+  caseNumber: string;
+  clientName: string;
+  note: string;
+  updatedBy?: string | null;
+}) {
+  const caseNumber = cleanCaseNumber(input.caseNumber);
+  const clientName = input.clientName.trim();
+  const note = input.note.trim();
+  if (!caseNumber || !clientName || !note) throw new Error("Case number, client name, and note are required.");
+
+  const admin = requireAdmin();
+  const now = new Date().toISOString();
+  const { error } = await admin.from("case_client_sentiment_flags").upsert(
+    {
+      case_number: caseNumber,
+      client_name: clientName,
+      note,
+      note_updated_at: now,
+      updated_at: now,
+      updated_by: input.updatedBy?.trim() || null,
+    },
+    { onConflict: "case_number,client_name" },
+  );
+  if (error) throw new Error(error.message);
+}
+
 /** Persist Slack permalinks for known qualifying call ids (one upsert per case). */
 export async function saveQualifyingCallSlackUrls(
   updates: Array<{ caseNumber: string; callId: string; slackUrl: string }>,

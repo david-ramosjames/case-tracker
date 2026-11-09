@@ -6,6 +6,7 @@ import {
   listClientContactSummaries,
   listLatestClientSentiments,
   listSentimentActionFlags,
+  listSentimentNotes,
   sentimentFlagKey,
   worstSentimentByCaseNumber,
 } from "@/lib/client-contact/repository";
@@ -98,10 +99,11 @@ export default async function ClientContactPage() {
     return viewer.contactId ? isAssignedToViewer(record, viewer.contactId) : false;
   });
   const caseNumbers = open.map((record) => record.shared.caseNumber);
-  const [summary, sentimentsByContact, actionFlags, qualifyingRule] = await Promise.all([
+  const [summary, sentimentsByContact, actionFlags, sentimentNotes, qualifyingRule] = await Promise.all([
     listClientContactSummaries(caseNumbers),
     listLatestClientSentiments(caseNumbers),
     listSentimentActionFlags(caseNumbers),
+    listSentimentNotes(caseNumbers),
     isQualifyingContactRuleReady(),
   ]);
   const sentimentsByCase = worstSentimentByCaseNumber(sentimentsByContact.values());
@@ -109,6 +111,10 @@ export default async function ClientContactPage() {
 
   function isActionRequired(caseNumber: string, clientName: string) {
     return actionFlags.has(sentimentFlagKey(caseNumber, clientName));
+  }
+
+  function noteFor(caseNumber: string, clientName: string) {
+    return sentimentNotes.get(sentimentFlagKey(caseNumber, clientName)) ?? null;
   }
 
   const rows = open.map((record) => {
@@ -145,6 +151,7 @@ export default async function ClientContactPage() {
       sentimentWindowStart: sentiment?.windowStart ?? null,
       sentimentWindowEnd: sentiment?.windowEnd ?? null,
       sentimentScoredAt: sentiment?.scoredAt ?? null,
+      sentimentNote: noteFor(record.shared.caseNumber, record.shared.clientName),
       clientPhones: phonesForCase(record),
       actionRequired: isActionRequired(record.shared.caseNumber, record.shared.clientName),
       quoUrl: quoUrlForCase(record, stored),
@@ -188,6 +195,7 @@ export default async function ClientContactPage() {
       sentimentWindowStart: reading.windowStart,
       sentimentWindowEnd: reading.windowEnd,
       sentimentScoredAt: reading.scoredAt,
+      sentimentNote: noteFor(record.shared.caseNumber, reading.clientName),
       clientPhones: phonesForCase(record),
       actionRequired: isActionRequired(record.shared.caseNumber, reading.clientName),
       quoUrl: quoUrlForCase(record, stored),
@@ -209,6 +217,7 @@ export default async function ClientContactPage() {
       sentimentWindowStart: null,
       sentimentWindowEnd: null,
       sentimentScoredAt: null,
+      sentimentNote: noteFor(row.caseNumber, row.clientName),
     });
   }
 

@@ -120,6 +120,8 @@ export async function notifySlackCommentPosted(
     body: string;
     authorName: string;
     mentionSlackUserIds?: string[];
+    /** Overrides the default Slack label derived from comment type. */
+    slackLabel?: string | null;
   },
 ) {
   if (!isSlackEnabled()) return;
@@ -136,13 +138,14 @@ export async function notifySlackCommentPosted(
   if (!context) return;
 
   const label =
-    input.type === "manager_note"
+    input.slackLabel?.trim() ||
+    (input.type === "manager_note"
       ? "Manager Note"
       : input.type === "attorney_update"
         ? "Attorney Update"
         : input.type === "risk_flag"
           ? "Risk Flag"
-          : "Comment";
+          : "Comment");
 
   const mentionLine = [
     ...new Set(

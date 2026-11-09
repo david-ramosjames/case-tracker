@@ -67,6 +67,8 @@ export type ClientContactRow = {
   sentimentWindowStart?: string | null;
   sentimentWindowEnd?: string | null;
   sentimentScoredAt: string | null;
+  /** Latest note posted from the Sentiment tab (stays visible after Post). */
+  sentimentNote?: string | null;
   clientPhones?: string[];
   actionRequired: boolean;
   quoUrl: string | null;
@@ -164,7 +166,7 @@ export function ClientContactView({
 
   async function submitSentimentNote(row: ClientContactRow) {
     const key = actionFlagKey(row);
-    const note = (noteDrafts[key] ?? "").trim();
+    const note = (noteDrafts[key] ?? row.sentimentNote ?? "").trim();
     if (!note) return;
     setNoteSaving((current) => ({ ...current, [key]: true }));
     setNoteStatus((current) => ({ ...current, [key]: "" }));
@@ -172,13 +174,14 @@ export function ClientContactView({
       const response = await fetch("/api/client-contact/sentiment-note", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ caseId: row.caseId, note }),
+        body: JSON.stringify({ caseId: row.caseId, clientName: row.clientName, note }),
       });
       if (!response.ok) {
         const detail = (await response.json().catch(() => null)) as { error?: string } | null;
         throw new Error(detail?.error || "Unable to post note.");
       }
-      setNoteDrafts((current) => ({ ...current, [key]: "" }));
+      // Keep the note in the column so it can be read later / edited and re-posted.
+      setNoteDrafts((current) => ({ ...current, [key]: note }));
       setNoteStatus((current) => ({ ...current, [key]: "Posted" }));
     } catch (error) {
       setNoteStatus((current) => ({
@@ -794,7 +797,7 @@ function SentimentTable({
               const rowKey = `${row.caseNumber.trim()}\t${row.clientName.trim()}`;
               const saving = Boolean(actionSaving[rowKey]);
               const noteBusy = Boolean(noteSaving[rowKey]);
-              const noteValue = noteDrafts[rowKey] ?? "";
+              const noteValue = noteDrafts[rowKey] ?? row.sentimentNote ?? "";
               const noteMessage = noteStatus[rowKey] ?? "";
               const reason =
                 label === "Unknown"
@@ -839,7 +842,7 @@ function SentimentTable({
                   <TableCell className={cn(compactCell, "min-w-36 max-w-56 whitespace-normal")}>
                     <EvidenceLinks items={row.sentimentEvidence} />
                   </TableCell>
-                  <TableCell className={cn(compactCell, "min-w-48 max-w-64")}>
+                  <TableCell className={cn(compactCell, "min-w-52 max-w-72")}>
                     <form
                       className="flex flex-col gap-1"
                       onSubmit={(event) => {
@@ -847,11 +850,12 @@ function SentimentTable({
                         onNoteSubmit(row);
                       }}
                     >
-                      <Input
+                      <textarea
                         value={noteValue}
                         disabled={noteBusy}
                         placeholder="Add note…"
-                        className="h-7 text-xs"
+                        rows={noteValue.trim() ? 3 : 2}
+                        className="min-h-[2.5rem] w-full resize-y rounded-md border border-input bg-transparent px-2 py-1 text-xs leading-snug shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                         aria-label={`Note for ${row.clientName}`}
                         onChange={(event) => onNoteChange(row, event.target.value)}
                       />
