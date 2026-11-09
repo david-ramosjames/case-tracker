@@ -314,8 +314,8 @@ export function evidenceItemsFromStoredUrls(value: string | null | undefined): S
 }
 
 /**
- * Point Call 60+sec dates at the Quo router Slack post for that call.
- * Prefers an exact call-id hit; falls back to phone + router call markers near the stamp.
+ * Point Call 60+sec dates at the Quo router Slack post for that specific call id.
+ * Only rows with lastQualifyingCallId are looked up, in a tight window around the stamp.
  */
 export async function attachQualifyingCallSlackLinks<
   T extends {
@@ -323,11 +323,11 @@ export async function attachQualifyingCallSlackLinks<
     lastQualifyingCall: string | null;
     lastQualifyingCallId?: string | null;
     lastQualifyingCallSlackUrl?: string | null;
-    clientPhones?: string[];
   },
 >(rows: T[], channelIdByCase: Map<string, string>, options?: SlackAttachOptions): Promise<T[]> {
   const pending = rows.filter(
     (row) =>
+      row.lastQualifyingCallId?.trim() &&
       row.lastQualifyingCall &&
       !row.lastQualifyingCallSlackUrl &&
       channelIdByCase.get(cleanCaseNumber(row.caseNumber)),
@@ -345,7 +345,7 @@ export async function attachQualifyingCallSlackLinks<
 
   const found = new Map<T, string>();
   const budgetMs = options?.budgetMs ?? 2500;
-  const maxChannels = options?.maxChannels ?? 25;
+  const maxChannels = options?.maxChannels ?? 30;
   const deadline = Date.now() + budgetMs;
   let channelsDone = 0;
 
@@ -353,15 +353,16 @@ export async function attachQualifyingCallSlackLinks<
     if (channelsDone >= maxChannels || Date.now() >= deadline) break;
     channelsDone += 1;
 
+    // One tight window per channel around the known qualifying-call timestamps.
     const times = group
       .map((row) => Date.parse(row.lastQualifyingCall ?? ""))
       .filter((ms) => Number.isFinite(ms));
     if (!times.length) continue;
-    const oldest = String((Math.min(...times) - 12 * 60 * 60 * 1000) / 1000);
-    const latest = String((Math.max(...times) + 12 * 60 * 60 * 1000) / 1000);
+    const oldest = String((Math.min(...times) - 2 * 60 * 60 * 1000) / 1000);
+    const latest = String((Math.max(...times) + 2 * 60 * 60 * 1000) / 1000);
     let messages: SlackHistoryMessage[] = [];
     try {
-      messages = await loadChannelHistoryForContact(channelId, oldest, latest, 80);
+      messages = await loadChannelHistoryForContact(channelId, oldest, latest, 50);
     } catch (error) {
       if (isRateLimitedError(error)) {
         console.warn("[client-contact] Slack qualifying-call lookup rate-limited; skipping remaining channels");
@@ -372,30 +373,22 @@ export async function attachQualifyingCallSlackLinks<
     }
 
     for (const row of group) {
-      const preferredMs = Date.parse(row.lastQualifyingCall ?? "");
       const callId = row.lastQualifyingCallId?.trim() || "";
-      let best: { ts: string; distance: number; rank: number } | null = null;
-      const phones = (row.clientPhones ?? []).map(last10).filter(Boolean);
+      if (!callId) continue;
+      const preferredMs = Date.parse(row.lastQualifyingCall ?? "");
+      let best: { ts: string; distance: number } | null = null;
 
       for (const message of messages) {
         if (!message.ts) continue;
         const text = extractSlackMessageText(message);
-        if (!isQuoRouterPost(text) && !text.includes("View in Quo")) continue;
-        if (/Text Message/i.test(text)) continue;
-
-        const idHit = Boolean(callId && text.includes(callId));
-        const phoneHit = phones.some((phone) => text.replace(/\D/g, "").includes(phone));
-        if (!idHit && !phoneHit) continue;
-
+        // Exact Quo call id only — this is the specific 60+sec call we stored.
+        if (!text.includes(callId)) continue;
         const posted = Number(message.ts) * 1000;
         const distance =
           Number.isFinite(preferredMs) && Number.isFinite(posted)
             ? Math.abs(posted - preferredMs)
-            : Number.POSITIVE_INFINITY;
-        const rank = idHit ? 0 : 1;
-        if (!best || rank < best.rank || (rank === best.rank && distance < best.distance)) {
-          best = { ts: message.ts, distance, rank };
-        }
+            : 0;
+        if (!best || distance < best.distance) best = { ts: message.ts, distance };
       }
 
       const url = best?.ts ? slackMessagePermalink(channelId, best.ts) : null;

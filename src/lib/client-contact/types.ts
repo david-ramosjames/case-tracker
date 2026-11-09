@@ -15,6 +15,8 @@ export type ClientContactSummary = {
   lastQualifyingCallId: string | null;
   lastQualifyingCallPhoneNumberId: string | null;
   lastQualifyingCallConversationId: string | null;
+  /** Cached Slack permalink for lastQualifyingCallId. */
+  lastQualifyingCallSlackUrl: string | null;
   /** Later message of the latest inbound+outbound pair within 7 days. */
   lastTextExchangeAt: string | null;
   lastOtherAt: string | null;

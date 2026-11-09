@@ -18,6 +18,7 @@ type SummaryRow = {
   last_qualifying_call_id: string | null;
   last_qualifying_call_phone_number_id: string | null;
   last_qualifying_call_conversation_id: string | null;
+  last_qualifying_call_slack_url: string | null;
   last_text_exchange_at: string | null;
   last_other_at: string | null;
   last_other_type: string | null;
@@ -78,6 +79,7 @@ function rowToSummary(row: SummaryRow): ClientContactSummary {
     lastQualifyingCallId: row.last_qualifying_call_id,
     lastQualifyingCallPhoneNumberId: row.last_qualifying_call_phone_number_id,
     lastQualifyingCallConversationId: row.last_qualifying_call_conversation_id,
+    lastQualifyingCallSlackUrl: row.last_qualifying_call_slack_url,
     lastTextExchangeAt: row.last_text_exchange_at,
     lastOtherAt: row.last_other_at,
     lastOtherType: row.last_other_type,
@@ -101,29 +103,35 @@ function keptQualifyingCallLink(
   previousId: string | null | undefined,
   previousPhoneNumberId: string | null | undefined,
   previousConversationId: string | null | undefined,
+  previousSlackUrl: string | null | undefined,
   stamp: ContactStamp,
 ) {
   const at = keptQualifyingDate(previousAt, stamp.qualifyingCallAt, stamp.lookbackStart, Boolean(stamp.replaceQualifying));
   if (!at) {
-    return { at: null, id: null, phoneNumberId: null, conversationId: null };
+    return { at: null, id: null, phoneNumberId: null, conversationId: null, slackUrl: null };
   }
   const computedWins =
     Boolean(stamp.qualifyingCallAt) &&
     at === stamp.qualifyingCallAt &&
     (!previousAt || previousAt !== stamp.qualifyingCallAt || !previousId);
   if (computedWins) {
+    const id = stamp.qualifyingCallId?.trim() || previousId || null;
     return {
       at,
-      id: stamp.qualifyingCallId?.trim() || previousId || null,
+      id,
       phoneNumberId: stamp.qualifyingCallPhoneNumberId?.trim() || previousPhoneNumberId || null,
       conversationId: stamp.qualifyingCallConversationId?.trim() || previousConversationId || null,
+      // New call id → drop the old Slack permalink so Contact re-resolves that call only.
+      slackUrl: id && id === previousId ? previousSlackUrl || null : null,
     };
   }
+  const id = previousId || stamp.qualifyingCallId?.trim() || null;
   return {
     at,
-    id: previousId || stamp.qualifyingCallId?.trim() || null,
+    id,
     phoneNumberId: previousPhoneNumberId || stamp.qualifyingCallPhoneNumberId?.trim() || null,
     conversationId: previousConversationId || stamp.qualifyingCallConversationId?.trim() || null,
+    slackUrl: id && id === previousId ? previousSlackUrl || null : null,
   };
 }
 
@@ -245,6 +253,7 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
           previous?.lastQualifyingCallId,
           previous?.lastQualifyingCallPhoneNumberId,
           previous?.lastQualifyingCallConversationId,
+          previous?.lastQualifyingCallSlackUrl,
           stamp,
         );
         return {
@@ -252,6 +261,7 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
           last_qualifying_call_id: link.id,
           last_qualifying_call_phone_number_id: link.phoneNumberId,
           last_qualifying_call_conversation_id: link.conversationId,
+          last_qualifying_call_slack_url: link.slackUrl,
         };
       })(),
       last_text_exchange_at: keptQualifyingDate(
@@ -407,6 +417,35 @@ export async function listSentimentActionFlags(caseNumbers: string[]) {
     }
   }
   return flags;
+}
+
+/** Persist Slack permalinks for known qualifying call ids (one upsert per case). */
+export async function saveQualifyingCallSlackUrls(
+  updates: Array<{ caseNumber: string; callId: string; slackUrl: string }>,
+) {
+  if (!updates.length) return { saved: 0 };
+  const admin = requireAdmin();
+  let saved = 0;
+  for (const update of updates) {
+    const caseNumber = cleanCaseNumber(update.caseNumber);
+    const callId = update.callId.trim();
+    const slackUrl = update.slackUrl.trim();
+    if (!caseNumber || !callId || !slackUrl) continue;
+    const { error } = await admin
+      .from("case_client_contact_summary")
+      .update({
+        last_qualifying_call_slack_url: slackUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("case_number", caseNumber)
+      .eq("last_qualifying_call_id", callId);
+    if (error) {
+      console.error("[client-contact] could not save qualifying-call Slack url", caseNumber, error);
+      continue;
+    }
+    saved += 1;
+  }
+  return { saved };
 }
 
 export async function setSentimentActionRequired(input: {

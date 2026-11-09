@@ -6,6 +6,7 @@ import {
   listClientContactSummaries,
   listLatestClientSentiments,
   listSentimentActionFlags,
+  saveQualifyingCallSlackUrls,
   sentimentFlagKey,
   worstSentimentByCaseNumber,
 } from "@/lib/client-contact/repository";
@@ -13,11 +14,7 @@ import {
   attachQualifyingCallSlackLinks,
   attachSentimentEvidenceSlackLinks,
 } from "@/lib/client-contact/evidence-slack";
-import {
-  clientContactDates,
-  contactNeedsFollowUp,
-  type ClientContactSummary,
-} from "@/lib/client-contact/types";
+import { clientContactDates, type ClientContactSummary } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
@@ -135,7 +132,7 @@ export default async function ClientContactPage() {
       lastAttempt: dates.lastAttempt,
       lastQualifyingCall: stored?.lastQualifyingCallAt ?? null,
       lastQualifyingCallId: stored?.lastQualifyingCallId ?? null,
-      lastQualifyingCallSlackUrl: null as string | null,
+      lastQualifyingCallSlackUrl: stored?.lastQualifyingCallSlackUrl ?? null,
       lastInboundText: stored?.lastInboundTextAt ?? null,
       lastOutboundText: stored?.lastOutboundTextAt ?? null,
       lastTextExchange: stored?.lastTextExchangeAt ?? null,
@@ -178,7 +175,7 @@ export default async function ClientContactPage() {
       lastAttempt: dates.lastAttempt,
       lastQualifyingCall: stored?.lastQualifyingCallAt ?? null,
       lastQualifyingCallId: stored?.lastQualifyingCallId ?? null,
-      lastQualifyingCallSlackUrl: null as string | null,
+      lastQualifyingCallSlackUrl: stored?.lastQualifyingCallSlackUrl ?? null,
       lastInboundText: stored?.lastInboundTextAt ?? null,
       lastOutboundText: stored?.lastOutboundTextAt ?? null,
       lastTextExchange: stored?.lastTextExchangeAt ?? null,
@@ -224,31 +221,42 @@ export default async function ClientContactPage() {
     if (channel.slackChannelId) channelIdByCase.set(cleanCaseNumber(caseNumber), channel.slackChannelId);
   }
 
-  // Slack history is best-effort and must not block Contact. Lookups are serial,
-  // capped, and abandon on rate limit so the page still renders.
+  // Slack enrichment is best-effort. Call 60+sec only looks up the known Quo call id
+  // (not every conversation), then caches the permalink on the contact summary.
   const slackOpts = { budgetMs: 2500, maxChannels: 20 } as const;
   let rowsWithSlack = rows;
   let sentimentRowsWithSlack = sentimentRows;
   try {
-    // Prefer Sentiment enrichment (evidence links). Calls 60+sec links are a smaller follow-up budget.
     sentimentRowsWithSlack = await attachSentimentEvidenceSlackLinks(sentimentRows, channelIdByCase, slackOpts);
-    sentimentRowsWithSlack = await attachQualifyingCallSlackLinks(sentimentRowsWithSlack, channelIdByCase, {
-      budgetMs: 1500,
-      maxChannels: 15,
+    rowsWithSlack = await attachQualifyingCallSlackLinks(rows, channelIdByCase, {
+      budgetMs: 2000,
+      maxChannels: 25,
     });
-    // Only resolve Call 60+sec Slack links for overdue cases (default Calls view), not every open matter.
-    const overdueRows = rows.filter((row) => contactNeedsFollowUp(row.lastInteraction));
-    const overdueWithSlack = await attachQualifyingCallSlackLinks(overdueRows, channelIdByCase, {
-      budgetMs: 1500,
-      maxChannels: 15,
-    });
-    if (overdueWithSlack !== overdueRows) {
-      const byCase = new Map(overdueWithSlack.map((row) => [row.caseId, row.lastQualifyingCallSlackUrl]));
-      rowsWithSlack = rows.map((row) => {
-        const url = byCase.get(row.caseId);
-        return url ? { ...row, lastQualifyingCallSlackUrl: url } : row;
-      });
+    const newlyResolved = rowsWithSlack.filter(
+      (row, index) =>
+        row.lastQualifyingCallSlackUrl &&
+        row.lastQualifyingCallId &&
+        row.lastQualifyingCallSlackUrl !== rows[index]?.lastQualifyingCallSlackUrl,
+    );
+    if (newlyResolved.length) {
+      void saveQualifyingCallSlackUrls(
+        newlyResolved.map((row) => ({
+          caseNumber: row.caseNumber,
+          callId: row.lastQualifyingCallId!,
+          slackUrl: row.lastQualifyingCallSlackUrl!,
+        })),
+      ).catch((error) => console.error("[client-contact] could not cache qualifying-call Slack urls", error));
     }
+    // Keep Sentiment rows in sync with any newly resolved Call 60+sec links.
+    const slackByCase = new Map(
+      rowsWithSlack
+        .filter((row) => row.lastQualifyingCallSlackUrl)
+        .map((row) => [cleanCaseNumber(row.caseNumber), row.lastQualifyingCallSlackUrl]),
+    );
+    sentimentRowsWithSlack = sentimentRowsWithSlack.map((row) => {
+      const url = slackByCase.get(cleanCaseNumber(row.caseNumber));
+      return url && !row.lastQualifyingCallSlackUrl ? { ...row, lastQualifyingCallSlackUrl: url } : row;
+    });
   } catch (error) {
     console.error("[client-contact] Slack link enrichment skipped", error);
   }
