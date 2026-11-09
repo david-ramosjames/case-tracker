@@ -287,6 +287,7 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
 }
 
 export type ClientSentimentReading = {
+  id: string;
   caseNumber: string;
   /** Quo contact display name (same grain as the weekly reporter / sheet). */
   clientName: string;
@@ -303,17 +304,42 @@ export type ClientSentimentReading = {
 };
 
 type SentimentRow = {
+  id: string;
   case_number: string;
   client_name: string | null;
   sentiment: string;
   score: number | null;
   reason_summary: string | null;
   evidence_urls: string | null;
+  evidence_resolved: SentimentEvidenceItem[] | null;
   week_label: string | null;
   window_start: string | null;
   window_end: string | null;
   scored_at: string;
 };
+
+function parseResolvedEvidence(value: unknown): SentimentEvidenceItem[] {
+  if (!Array.isArray(value)) return [];
+  const items: SentimentEvidenceItem[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const row = raw as Record<string, unknown>;
+    const quoUrl = String(row.quoUrl ?? row.url ?? "").trim();
+    const url = String(row.url ?? row.quoUrl ?? "").trim();
+    if (!url && !quoUrl) continue;
+    const kind =
+      row.kind === "sms" || row.kind === "call" || row.kind === "other"
+        ? row.kind
+        : "call";
+    items.push({
+      url: url || quoUrl,
+      quoUrl: quoUrl || url,
+      kind,
+      dateLabel: typeof row.dateLabel === "string" && row.dateLabel.trim() ? row.dateLabel.trim() : null,
+    });
+  }
+  return items;
+}
 
 const SENTIMENT_SEVERITY: Record<string, number> = { Negative: 0, Neutral: 1, Positive: 2 };
 
@@ -336,7 +362,7 @@ export async function listLatestClientSentiments(caseNumbers: string[]) {
       const { data, error } = await admin
         .from("case_client_sentiment")
         .select(
-          "case_number, client_name, sentiment, score, reason_summary, evidence_urls, week_label, window_start, window_end, scored_at",
+          "id, case_number, client_name, sentiment, score, reason_summary, evidence_urls, evidence_resolved, week_label, window_start, window_end, scored_at",
         )
         .in("case_number", chunk)
         .order("scored_at", { ascending: false })
@@ -346,14 +372,17 @@ export async function listLatestClientSentiments(caseNumbers: string[]) {
       for (const row of page) {
         const contactKey = contactKeyForReading(row);
         if (byContact.has(contactKey)) continue;
-        const evidenceItems = evidenceItemsFromStoredUrls(row.evidence_urls);
+        const cached = parseResolvedEvidence(row.evidence_resolved);
+        const fromUrls = evidenceItemsFromStoredUrls(row.evidence_urls);
+        const evidenceItems = cached.length ? cached : fromUrls;
         byContact.set(contactKey, {
+          id: row.id,
           caseNumber: row.case_number,
           clientName: contactKey,
           sentiment: row.sentiment,
           score: row.score,
           reasonSummary: row.reason_summary,
-          evidenceUrls: evidenceItems.map((item) => item.url),
+          evidenceUrls: fromUrls.map((item) => item.quoUrl || item.url),
           evidenceItems,
           weekLabel: row.week_label,
           windowStart: row.window_start,
@@ -366,6 +395,31 @@ export async function listLatestClientSentiments(caseNumbers: string[]) {
     }
   }
   return byContact;
+}
+
+export async function saveSentimentEvidenceResolved(
+  updates: Array<{ id: string; evidence: SentimentEvidenceItem[] }>,
+) {
+  if (!updates.length) return { saved: 0 };
+  const admin = requireAdmin();
+  let saved = 0;
+  for (const update of updates) {
+    const id = update.id.trim();
+    if (!id || !update.evidence.length) continue;
+    const { error } = await admin
+      .from("case_client_sentiment")
+      .update({
+        evidence_resolved: update.evidence,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+    if (error) {
+      console.error("[client-contact] could not save sentiment evidence_resolved", id, error);
+      continue;
+    }
+    saved += 1;
+  }
+  return { saved };
 }
 
 /**

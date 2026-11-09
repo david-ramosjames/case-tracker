@@ -81,7 +81,7 @@ export function dateLabelFromEvidenceLabel(label: string | null | undefined) {
   return match[1].replace(/\./g, "").replace(/\s+/g, " ").trim();
 }
 
-function dateLabelFromIso(value: string | null | undefined) {
+export function dateLabelFromIso(value: string | null | undefined) {
   if (!value) return null;
   const ms = Date.parse(value);
   if (!Number.isFinite(ms)) return null;
@@ -90,6 +90,38 @@ function dateLabelFromIso(value: string | null | undefined) {
     month: "short",
     day: "numeric",
   }).format(new Date(ms));
+}
+
+/** Quo/OpenPhone call id from an evidence deep link (`?at=AC…`). */
+export function callIdFromEvidenceUrl(url: string) {
+  try {
+    return new URL(url).searchParams.get("at")?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+export function evidenceNeedsSlackResolve(items: SentimentEvidenceItem[]) {
+  if (!items.length) return false;
+  return items.some((item) => {
+    if (!item.dateLabel) return true;
+    const href = item.url || item.quoUrl || "";
+    return /openphone\.com|quo\.com/i.test(href);
+  });
+}
+
+/** Fill missing date labels from known Quo call created_at values. */
+export function applyEvidenceCallDateLabels(
+  items: SentimentEvidenceItem[],
+  dateByCallId: Map<string, string>,
+): SentimentEvidenceItem[] {
+  if (!items.length || !dateByCallId.size) return items;
+  return items.map((item) => {
+    if (item.dateLabel) return item;
+    const callId = callIdFromEvidenceUrl(item.quoUrl || item.url);
+    const label = callId ? dateLabelFromIso(dateByCallId.get(callId)) : null;
+    return label ? { ...item, dateLabel: label } : item;
+  });
 }
 
 function dateLabelFromSlackTs(ts: string | null | undefined) {

@@ -43,13 +43,22 @@ export async function syncQuoClientContacts() {
   const fromLedger = await syncClientContactsFromLedger();
   if (fromLedger.configured) {
     let slackLinks: { pending: number; resolved: number; saved: number } | null = null;
+    let evidenceLinks: { pending: number; resolved: number; saved: number } | null = null;
     try {
       const { resolveAndCacheQualifyingCallSlackLinks } = await import("@/lib/client-contact/qualifying-call-slack");
       slackLinks = await resolveAndCacheQualifyingCallSlackLinks();
     } catch (error) {
       console.error("[client-contact] qualifying-call Slack resolve failed", error);
     }
-    return { ...fromLedger, slackLinks };
+    try {
+      const { resolveAndCacheSentimentEvidenceSlackLinks } = await import(
+        "@/lib/client-contact/sentiment-evidence-slack"
+      );
+      evidenceLinks = await resolveAndCacheSentimentEvidenceSlackLinks();
+    } catch (error) {
+      console.error("[client-contact] sentiment evidence Slack resolve failed", error);
+    }
+    return { ...fromLedger, slackLinks, evidenceLinks };
   }
 
   if (!isQuoEnabled()) return { configured: false as const, cases: 0, phones: 0, source: "none" as const };

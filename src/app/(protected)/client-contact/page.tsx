@@ -10,7 +10,10 @@ import {
   sentimentFlagKey,
   worstSentimentByCaseNumber,
 } from "@/lib/client-contact/repository";
-import { attachSentimentEvidenceSlackLinks } from "@/lib/client-contact/evidence-slack";
+import {
+  attachSentimentEvidenceSlackLinks,
+  evidenceNeedsSlackResolve,
+} from "@/lib/client-contact/evidence-slack";
 import { clientContactDates, type ClientContactSummary } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
@@ -226,16 +229,26 @@ export default async function ClientContactPage() {
     if (channel.slackChannelId) channelIdByCase.set(cleanCaseNumber(caseNumber), channel.slackChannelId);
   }
 
-  // Call 60+sec Slack permalinks are resolved on contact cron and read from cache here.
-  // Sentiment evidence links stay a small best-effort page enrichment.
+  // Call 60+sec + Sentiment evidence Slack permalinks are resolved on contact cron.
+  // Page load only fills a small leftover set that is still missing cache.
   let sentimentRowsWithSlack = sentimentRows;
-  try {
-    sentimentRowsWithSlack = await attachSentimentEvidenceSlackLinks(sentimentRows, channelIdByCase, {
-      budgetMs: 2500,
-      maxChannels: 20,
-    });
-  } catch (error) {
-    console.error("[client-contact] Slack evidence enrichment skipped", error);
+  const pendingEvidence = sentimentRows.filter((row) => evidenceNeedsSlackResolve(row.sentimentEvidence));
+  if (pendingEvidence.length) {
+    try {
+      const enrichedPending = await attachSentimentEvidenceSlackLinks(pendingEvidence, channelIdByCase, {
+        budgetMs: 2500,
+        maxChannels: 20,
+      });
+      const byKey = new Map(
+        enrichedPending.map((row) => [`${cleanCaseNumber(row.caseNumber)}\t${row.clientName}`, row]),
+      );
+      sentimentRowsWithSlack = sentimentRows.map((row) => {
+        const next = byKey.get(`${cleanCaseNumber(row.caseNumber)}\t${row.clientName}`);
+        return next ?? row;
+      });
+    } catch (error) {
+      console.error("[client-contact] Slack evidence enrichment skipped", error);
+    }
   }
   const rowsWithSlack = rows;
 
