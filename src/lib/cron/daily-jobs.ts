@@ -164,9 +164,10 @@ export async function runDailyCronGroup(group: DailyCronGroup, options: DailyJob
   const errors: DailyJobStepError[] = [];
 
   if (group === "quoPhoneSync") {
-    // Hard budget: inbox lookups were timing out the whole 800s function and blocking the chain.
+    // Directory phones only. Inbox walks (messages API per contact × every Quo line) are for
+    // conversation-id enrichment and do not belong on the daily cron — they were timing out at 800s.
     const quoPhoneSyncResult = await runDailyJobStep("quoPhoneSync", () =>
-      syncQuoPhonesToTrackerIfConfigured({ maxMs: 240_000, maxInboxLookups: 20 }),
+      syncQuoPhonesToTrackerIfConfigured({ skipInboxLookups: true }),
     );
     if (quoPhoneSyncResult.error) errors.push(quoPhoneSyncResult.error);
     return {
