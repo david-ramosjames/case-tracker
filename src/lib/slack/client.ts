@@ -22,7 +22,12 @@ function toSlackForm(body: Record<string, unknown>) {
   return form;
 }
 
-async function slackApi<T>(method: string, body: Record<string, unknown>, attempt = 0): Promise<T> {
+async function slackApi<T>(
+  method: string,
+  body: Record<string, unknown>,
+  attempt = 0,
+  maxRetries = 4,
+): Promise<T> {
   const response = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",
     headers: {
@@ -33,11 +38,11 @@ async function slackApi<T>(method: string, body: Record<string, unknown>, attemp
   });
 
   const payload = (await response.json()) as T & { ok?: boolean; error?: string };
-  if (payload.error === "ratelimited" && attempt < 4) {
+  if (payload.error === "ratelimited" && attempt < maxRetries) {
     const retryAfter = Number(response.headers.get("retry-after") ?? 0);
     const waitMs = retryAfter > 0 ? retryAfter * 1000 : 1500 * (attempt + 1);
     await sleep(waitMs);
-    return slackApi<T>(method, body, attempt + 1);
+    return slackApi<T>(method, body, attempt + 1, maxRetries);
   }
 
   if (!response.ok || payload.ok === false) {
@@ -619,11 +624,12 @@ export async function fetchChannelHistory(
 /** Paginated channel history for pulse lookback (newest pages first, returned oldest→newest). */
 export async function fetchChannelHistorySince(
   channelId: string,
-  options?: { oldest?: string; latest?: string; maxMessages?: number },
+  options?: { oldest?: string; latest?: string; maxMessages?: number; maxRetries?: number },
 ): Promise<SlackHistoryMessage[]> {
   if (!isSlackEnabled()) return [];
 
   const maxMessages = options?.maxMessages ?? 200;
+  const maxRetries = options?.maxRetries ?? 4;
   const collected: SlackHistoryMessage[] = [];
   let cursor: string | undefined;
 
@@ -633,14 +639,19 @@ export async function fetchChannelHistorySince(
       ok: boolean;
       messages?: SlackHistoryMessage[];
       response_metadata?: { next_cursor?: string };
-    }>("conversations.history", {
-      channel: resolveSlackChannelParam(channelId),
-      limit,
-      oldest: options?.oldest,
-      latest: options?.latest,
-      inclusive: false,
-      cursor,
-    });
+    }>(
+      "conversations.history",
+      {
+        channel: resolveSlackChannelParam(channelId),
+        limit,
+        oldest: options?.oldest,
+        latest: options?.latest,
+        inclusive: false,
+        cursor,
+      },
+      0,
+      maxRetries,
+    );
 
     const batch = payload.messages ?? [];
     if (batch.length === 0) break;

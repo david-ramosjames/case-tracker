@@ -202,6 +202,32 @@ function toEvidenceItem(seed: EvidenceSeed): SentimentEvidenceItem {
   };
 }
 
+type SlackAttachOptions = {
+  /** Hard stop so Contact SSR never hangs on Slack rate limits. */
+  budgetMs?: number;
+  /** Cap channels touched this request. */
+  maxChannels?: number;
+};
+
+function isRateLimitedError(error: unknown) {
+  return /ratelimited/i.test(error instanceof Error ? error.message : String(error ?? ""));
+}
+
+async function loadChannelHistoryForContact(
+  channelId: string,
+  oldest: string,
+  latest: string,
+  maxMessages: number,
+) {
+  // No Slack retries here — Contact must stay fast when rate-limited.
+  return fetchChannelHistorySince(channelId, {
+    oldest,
+    latest,
+    maxMessages,
+    maxRetries: 0,
+  });
+}
+
 /**
  * Point sentiment evidence links at the Quo router Slack posts in the case channel
  * (instead of Quo), and fill a short date on each V/SMS label when possible.
@@ -215,7 +241,7 @@ export async function attachSentimentEvidenceSlackLinks<
     sentimentScoredAt?: string | null;
     clientPhones?: string[];
   },
->(rows: T[], channelIdByCase: Map<string, string>): Promise<T[]> {
+>(rows: T[], channelIdByCase: Map<string, string>, options?: SlackAttachOptions): Promise<T[]> {
   const pending = rows.filter(
     (row) => row.sentimentEvidence.length > 0 && channelIdByCase.get(cleanCaseNumber(row.caseNumber)),
   );
@@ -231,41 +257,50 @@ export async function attachSentimentEvidenceSlackLinks<
   }
 
   const resolved = new Map<T, SentimentEvidenceItem[]>();
+  const budgetMs = options?.budgetMs ?? 2500;
+  const maxChannels = options?.maxChannels ?? 20;
+  const deadline = Date.now() + budgetMs;
+  let channelsDone = 0;
 
-  await Promise.all(
-    [...byChannel.entries()].map(async ([channelId, group]) => {
-      const starts = group.map((row) => windowBounds(row).oldest).map(Number);
-      const ends = group.map((row) => windowBounds(row).latest).map(Number);
-      const oldest = String(Math.min(...starts));
-      const latest = String(Math.max(...ends));
-      let messages: SlackHistoryMessage[] = [];
-      try {
-        messages = await fetchChannelHistorySince(channelId, { oldest, latest, maxMessages: 400 });
-      } catch (error) {
-        console.error("[client-contact] Slack evidence lookup failed", channelId, error);
-        return;
-      }
+  for (const [channelId, group] of byChannel) {
+    if (channelsDone >= maxChannels || Date.now() >= deadline) break;
+    channelsDone += 1;
 
-      for (const row of group) {
-        const preferredMs = Date.parse(row.sentimentScoredAt ?? "");
-        const next = row.sentimentEvidence.map((item) => {
-          const ts = closestRouterMatch(
-            item,
-            messages,
-            Number.isFinite(preferredMs) ? preferredMs : null,
-            row.clientPhones ?? [],
-          );
-          const slackUrl = ts ? slackMessagePermalink(channelId, ts) : null;
-          return {
-            ...item,
-            url: slackUrl || item.url,
-            dateLabel: item.dateLabel || dateLabelFromSlackTs(ts) || null,
-          };
-        });
-        resolved.set(row, next);
+    const starts = group.map((row) => windowBounds(row).oldest).map(Number);
+    const ends = group.map((row) => windowBounds(row).latest).map(Number);
+    const oldest = String(Math.min(...starts));
+    const latest = String(Math.max(...ends));
+    let messages: SlackHistoryMessage[] = [];
+    try {
+      messages = await loadChannelHistoryForContact(channelId, oldest, latest, 100);
+    } catch (error) {
+      if (isRateLimitedError(error)) {
+        console.warn("[client-contact] Slack evidence lookup rate-limited; skipping remaining channels");
+        break;
       }
-    }),
-  );
+      console.error("[client-contact] Slack evidence lookup failed", channelId, error);
+      continue;
+    }
+
+    for (const row of group) {
+      const preferredMs = Date.parse(row.sentimentScoredAt ?? "");
+      const next = row.sentimentEvidence.map((item) => {
+        const ts = closestRouterMatch(
+          item,
+          messages,
+          Number.isFinite(preferredMs) ? preferredMs : null,
+          row.clientPhones ?? [],
+        );
+        const slackUrl = ts ? slackMessagePermalink(channelId, ts) : null;
+        return {
+          ...item,
+          url: slackUrl || item.url,
+          dateLabel: item.dateLabel || dateLabelFromSlackTs(ts) || null,
+        };
+      });
+      resolved.set(row, next);
+    }
+  }
 
   if (!resolved.size) return rows;
   return rows.map((row) => {
@@ -290,7 +325,7 @@ export async function attachQualifyingCallSlackLinks<
     lastQualifyingCallSlackUrl?: string | null;
     clientPhones?: string[];
   },
->(rows: T[], channelIdByCase: Map<string, string>): Promise<T[]> {
+>(rows: T[], channelIdByCase: Map<string, string>, options?: SlackAttachOptions): Promise<T[]> {
   const pending = rows.filter(
     (row) =>
       row.lastQualifyingCall &&
@@ -309,55 +344,64 @@ export async function attachQualifyingCallSlackLinks<
   }
 
   const found = new Map<T, string>();
+  const budgetMs = options?.budgetMs ?? 2500;
+  const maxChannels = options?.maxChannels ?? 25;
+  const deadline = Date.now() + budgetMs;
+  let channelsDone = 0;
 
-  await Promise.all(
-    [...byChannel.entries()].map(async ([channelId, group]) => {
-      const times = group
-        .map((row) => Date.parse(row.lastQualifyingCall ?? ""))
-        .filter((ms) => Number.isFinite(ms));
-      if (!times.length) return;
-      const oldest = String((Math.min(...times) - 12 * 60 * 60 * 1000) / 1000);
-      const latest = String((Math.max(...times) + 12 * 60 * 60 * 1000) / 1000);
-      let messages: SlackHistoryMessage[] = [];
-      try {
-        messages = await fetchChannelHistorySince(channelId, { oldest, latest, maxMessages: 300 });
-      } catch (error) {
-        console.error("[client-contact] Slack qualifying-call lookup failed", channelId, error);
-        return;
+  for (const [channelId, group] of byChannel) {
+    if (channelsDone >= maxChannels || Date.now() >= deadline) break;
+    channelsDone += 1;
+
+    const times = group
+      .map((row) => Date.parse(row.lastQualifyingCall ?? ""))
+      .filter((ms) => Number.isFinite(ms));
+    if (!times.length) continue;
+    const oldest = String((Math.min(...times) - 12 * 60 * 60 * 1000) / 1000);
+    const latest = String((Math.max(...times) + 12 * 60 * 60 * 1000) / 1000);
+    let messages: SlackHistoryMessage[] = [];
+    try {
+      messages = await loadChannelHistoryForContact(channelId, oldest, latest, 80);
+    } catch (error) {
+      if (isRateLimitedError(error)) {
+        console.warn("[client-contact] Slack qualifying-call lookup rate-limited; skipping remaining channels");
+        break;
       }
+      console.error("[client-contact] Slack qualifying-call lookup failed", channelId, error);
+      continue;
+    }
 
-      for (const row of group) {
-        const preferredMs = Date.parse(row.lastQualifyingCall ?? "");
-        const callId = row.lastQualifyingCallId?.trim() || "";
-        let best: { ts: string; distance: number; rank: number } | null = null;
-        const phones = (row.clientPhones ?? []).map(last10).filter(Boolean);
+    for (const row of group) {
+      const preferredMs = Date.parse(row.lastQualifyingCall ?? "");
+      const callId = row.lastQualifyingCallId?.trim() || "";
+      let best: { ts: string; distance: number; rank: number } | null = null;
+      const phones = (row.clientPhones ?? []).map(last10).filter(Boolean);
 
-        for (const message of messages) {
-          if (!message.ts) continue;
-          const text = extractSlackMessageText(message);
-          if (!isQuoRouterPost(text) && !text.includes("View in Quo")) continue;
-          if (/Text Message/i.test(text)) continue;
+      for (const message of messages) {
+        if (!message.ts) continue;
+        const text = extractSlackMessageText(message);
+        if (!isQuoRouterPost(text) && !text.includes("View in Quo")) continue;
+        if (/Text Message/i.test(text)) continue;
 
-          const idHit = Boolean(callId && text.includes(callId));
-          const phoneHit = phones.some((phone) => text.replace(/\D/g, "").includes(phone));
-          if (!idHit && !phoneHit) continue;
+        const idHit = Boolean(callId && text.includes(callId));
+        const phoneHit = phones.some((phone) => text.replace(/\D/g, "").includes(phone));
+        if (!idHit && !phoneHit) continue;
 
-          const posted = Number(message.ts) * 1000;
-          const distance =
-            Number.isFinite(preferredMs) && Number.isFinite(posted)
-              ? Math.abs(posted - preferredMs)
-              : Number.POSITIVE_INFINITY;
-          const rank = idHit ? 0 : 1;
-          if (!best || rank < best.rank || (rank === best.rank && distance < best.distance)) {
-            best = { ts: message.ts, distance, rank };
-          }
+        const posted = Number(message.ts) * 1000;
+        const distance =
+          Number.isFinite(preferredMs) && Number.isFinite(posted)
+            ? Math.abs(posted - preferredMs)
+            : Number.POSITIVE_INFINITY;
+        const rank = idHit ? 0 : 1;
+        if (!best || rank < best.rank || (rank === best.rank && distance < best.distance)) {
+          best = { ts: message.ts, distance, rank };
         }
-
-        const url = best?.ts ? slackMessagePermalink(channelId, best.ts) : null;
-        if (url) found.set(row, url);
       }
-    }),
-  );
+
+      const url = best?.ts ? slackMessagePermalink(channelId, best.ts) : null;
+      if (url) found.set(row, url);
+    }
+  }
 
   if (!found.size) return rows;
   return rows.map((row) => {
