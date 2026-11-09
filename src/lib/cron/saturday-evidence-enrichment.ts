@@ -5,8 +5,8 @@ import { postSlackMessage } from "@/lib/slack/client";
 import { getDailyPulseChannelId, isSlackEnabled } from "@/lib/slack/config";
 import { errorMessage } from "@/lib/utils";
 
-/** Saturday night Central hours when Quo conversation + evidence Slack caching may run. */
-export const SATURDAY_EVIDENCE_ENRICHMENT_HOURS = [21, 22, 23] as const;
+/** Saturday night Central hours: 10pm, 11pm, and midnight (Sunday 12am CT). */
+export const SATURDAY_EVIDENCE_ENRICHMENT_HOURS = [22, 23, 0] as const;
 
 export function getCentralWeekdayShort(now = new Date()) {
   return new Intl.DateTimeFormat("en-US", {
@@ -16,12 +16,16 @@ export function getCentralWeekdayShort(now = new Date()) {
 }
 
 /**
- * Vercel schedules both CDT/CST UTC times; only Saturday evening Central runs proceed.
+ * Vercel schedules both CDT/CST UTC times; only Sat 10pm–midnight Central runs proceed.
  * Manual calls can pass force=true to ignore the schedule gate.
  */
 export function isSaturdayEvidenceEnrichmentDue(now = new Date()) {
-  if (getCentralWeekdayShort(now) !== "Sat") return false;
-  return (SATURDAY_EVIDENCE_ENRICHMENT_HOURS as readonly number[]).includes(getCentralHour(now));
+  const weekday = getCentralWeekdayShort(now);
+  const hour = getCentralHour(now);
+  if (weekday === "Sat" && (hour === 22 || hour === 23)) return true;
+  // Midnight closes the Saturday-night window (Sunday 12:00am CT).
+  if (weekday === "Sun" && hour === 0) return true;
+  return false;
 }
 
 /**

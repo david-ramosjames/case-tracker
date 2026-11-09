@@ -17,7 +17,7 @@ export const dynamic = "force-dynamic";
  * Weekly sentiment lands Friday evening; this job fills conversation ids / permalinks
  * afterward and can re-run for several Saturday night hours until budgets finish.
  *
- * Schedules both CDT/CST UTC times in vercel.json; gate keeps only Saturday 9–11pm CT.
+ * Schedules both CDT/CST UTC times in vercel.json; gate keeps only Saturday 10pm–midnight CT.
  * Pass ?force=1 to run outside that window (admin/manual).
  */
 export async function GET(request: Request) {
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
       evidenceResolved: result.evidenceLinks?.resolved,
       notify,
     });
-    return NextResponse.json({ ok: result.ok !== false, ...result, notify });
+    return NextResponse.json({ ...result, ok: result.ok !== false, notify });
   } catch (error) {
     const message = errorMessage(error) || "Saturday evidence enrichment failed.";
     console.error("Saturday evidence enrichment failed", message, error);
