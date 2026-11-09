@@ -1002,8 +1002,7 @@ function EvidenceLinks({ items }: { items: SentimentEvidenceItem[] }) {
   return (
     <span className="inline-flex flex-wrap gap-x-2 gap-y-1">
       {items.slice(0, 8).map((item, index) => {
-        const prefix =
-          item.kind === "sms" ? `SMS${index + 1}` : item.kind === "call" ? `V${index + 1}` : `E${index + 1}`;
+        const prefix = item.kind === "sms" ? `SMS${index + 1}` : `V${index + 1}`;
         const label = item.dateLabel ? `${prefix} ${item.dateLabel}` : prefix;
         return (
           <a

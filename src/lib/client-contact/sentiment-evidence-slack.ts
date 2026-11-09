@@ -15,19 +15,38 @@ import { loadSlackChannelMapByCaseNumber } from "@/lib/slack/channels";
 import { getCases } from "@/lib/supabase/services";
 import { Client } from "pg";
 
-async function loadCallDateLabels(callIds: string[]) {
+function conversationIdFromUrl(url: string) {
+  try {
+    const parts = new URL(url).pathname.split("/").filter(Boolean);
+    return parts.includes("c") ? parts[parts.indexOf("c") + 1] || "" : "";
+  } catch {
+    return "";
+  }
+}
+
+function isoFromDb(value: Date | string | null | undefined) {
+  if (!value) return "";
+  if (value instanceof Date) return value.toISOString();
+  return String(value).trim();
+}
+
+async function loadEvidenceActivityDates(input: { callIds: string[]; conversationIds: string[] }) {
   const dateByCallId = new Map<string, string>();
-  const ids = [...new Set(callIds.map((id) => id.trim()).filter(Boolean))];
-  if (!ids.length) return dateByCallId;
+  const dateByConversationId = new Map<string, string>();
+  const callIds = [...new Set(input.callIds.map((id) => id.trim()).filter(Boolean))];
+  const conversationIds = [...new Set(input.conversationIds.map((id) => id.trim()).filter(Boolean))];
+  if (!callIds.length && !conversationIds.length) {
+    return { dateByCallId, dateByConversationId };
+  }
 
   const connectionString = process.env.REPORTING_DATABASE_URL?.trim();
-  if (!connectionString) return dateByCallId;
+  if (!connectionString) return { dateByCallId, dateByConversationId };
 
   const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } });
   try {
     await client.connect();
-    for (let index = 0; index < ids.length; index += 200) {
-      const chunk = ids.slice(index, index + 200);
+    for (let index = 0; index < callIds.length; index += 200) {
+      const chunk = callIds.slice(index, index + 200);
       const { rows } = await client.query<{ call_id: string; created_at: Date | string }>(
         `select call_id, created_at
          from quo_calls
@@ -37,20 +56,55 @@ async function loadCallDateLabels(callIds: string[]) {
       );
       for (const row of rows) {
         const callId = String(row.call_id ?? "").trim();
-        if (!callId) continue;
-        const iso =
-          row.created_at instanceof Date
-            ? row.created_at.toISOString()
-            : String(row.created_at ?? "").trim();
-        if (iso) dateByCallId.set(callId, iso);
+        const iso = isoFromDb(row.created_at);
+        if (callId && iso) dateByCallId.set(callId, iso);
+      }
+    }
+
+    for (let index = 0; index < conversationIds.length; index += 200) {
+      const chunk = conversationIds.slice(index, index + 200);
+      const { rows } = await client.query<{ conversation_id: string; created_at: Date | string }>(
+        `select conversation_id, max(created_at) as created_at
+         from (
+           select conversation_id, created_at from quo_calls
+           where conversation_id = any($1::text[]) and created_at is not null
+           union all
+           select conversation_id, created_at from quo_messages
+           where conversation_id = any($1::text[]) and created_at is not null
+         ) activity
+         group by conversation_id`,
+        [chunk],
+      );
+      for (const row of rows) {
+        const conversationId = String(row.conversation_id ?? "").trim();
+        const iso = isoFromDb(row.created_at);
+        if (conversationId && iso) dateByConversationId.set(conversationId, iso);
       }
     }
   } catch (error) {
-    console.error("[client-contact] call-date lookup for sentiment evidence failed", error);
+    console.error("[client-contact] evidence activity-date lookup failed", error);
   } finally {
     await client.end().catch(() => undefined);
   }
-  return dateByCallId;
+  return { dateByCallId, dateByConversationId };
+}
+
+function namesLooselyMatch(left: string, right: string) {
+  const normalize = (value: string) =>
+    value
+      .toLowerCase()
+      .replace(/\b(es|en|new)\b/g, " ")
+      .replace(/\d+/g, " ")
+      .replace(/[^a-z\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  const a = normalize(left);
+  const b = normalize(right);
+  if (!a || !b) return false;
+  if (a === b || a.includes(b) || b.includes(a)) return true;
+  const aParts = a.split(" ").filter((part) => part.length > 1);
+  const bParts = new Set(b.split(" ").filter((part) => part.length > 1));
+  return aParts.filter((part) => bParts.has(part)).length >= 2;
 }
 
 /**
@@ -84,18 +138,33 @@ export async function resolveAndCacheSentimentEvidenceSlackLinks(options?: {
   const callIds = readings.flatMap((reading) =>
     reading.evidenceItems.map((item) => callIdFromEvidenceUrl(item.quoUrl || item.url)).filter(Boolean),
   );
-  const dateByCallId = await loadCallDateLabels(callIds);
+  const conversationIds = readings.flatMap((reading) =>
+    reading.evidenceItems.map((item) => conversationIdFromUrl(item.quoUrl || item.url)).filter(Boolean),
+  );
+  const { dateByCallId, dateByConversationId } = await loadEvidenceActivityDates({
+    callIds,
+    conversationIds,
+  });
 
-  const phonesByCase = new Map<string, string[]>();
-  for (const record of open) {
-    const caseNumber = cleanCaseNumber(record.shared.caseNumber);
+  const openByCase = new Map(open.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
+  const phonesForReading = (caseNumber: string, clientName: string) => {
+    const record = openByCase.get(cleanCaseNumber(caseNumber));
+    if (!record) return [] as string[];
     const phones = new Set<string>();
-    if (record.tracker.clientPhone) phones.add(record.tracker.clientPhone);
-    for (const contact of record.tracker.quoContacts) {
+    const matchingContacts = record.tracker.quoContacts.filter((contact) =>
+      namesLooselyMatch(contact.displayName || "", clientName),
+    );
+    for (const contact of matchingContacts) {
       if (contact.phone) phones.add(contact.phone);
     }
-    if (phones.size) phonesByCase.set(caseNumber, [...phones]);
-  }
+    if (!phones.size && record.tracker.clientPhone) phones.add(record.tracker.clientPhone);
+    if (!phones.size) {
+      for (const contact of record.tracker.quoContacts) {
+        if (contact.phone) phones.add(contact.phone);
+      }
+    }
+    return [...phones];
+  };
 
   const slackChannels = await loadSlackChannelMapByCaseNumber();
   const channelIdByCase = new Map<string, string>();
@@ -103,27 +172,50 @@ export async function resolveAndCacheSentimentEvidenceSlackLinks(options?: {
     if (channel.slackChannelId) channelIdByCase.set(cleanCaseNumber(caseNumber), channel.slackChannelId);
   }
 
-  const rows = readings.map((reading) => ({
-    id: reading.id,
-    caseNumber: reading.caseNumber,
-    sentimentEvidence: applyEvidenceCallDateLabels(reading.evidenceItems, dateByCallId),
-    sentimentWindowStart: reading.windowStart,
-    sentimentWindowEnd: reading.windowEnd,
-    sentimentScoredAt: reading.scoredAt,
-    clientPhones: phonesByCase.get(cleanCaseNumber(reading.caseNumber)) ?? [],
-  }));
+  const rows = readings.map((reading) => {
+    const evidence = applyEvidenceCallDateLabels(
+      reading.evidenceItems,
+      dateByCallId,
+      dateByConversationId,
+    );
+    const preferredIso =
+      evidence
+        .map((item) => {
+          const href = item.quoUrl || item.url;
+          const callId = callIdFromEvidenceUrl(href);
+          const conversationId = conversationIdFromUrl(href);
+          return (
+            (callId ? dateByCallId.get(callId) : undefined) ||
+            (conversationId ? dateByConversationId.get(conversationId) : undefined) ||
+            null
+          );
+        })
+        .find(Boolean) || reading.scoredAt;
+    return {
+      id: reading.id,
+      caseNumber: reading.caseNumber,
+      clientName: reading.clientName,
+      sentimentEvidence: evidence,
+      sentimentWindowStart: reading.windowStart,
+      sentimentWindowEnd: reading.windowEnd,
+      sentimentScoredAt: preferredIso,
+      clientPhones: phonesForReading(reading.caseNumber, reading.clientName),
+    };
+  });
 
   const enriched = await attachSentimentEvidenceSlackLinks(rows, channelIdByCase, {
-    budgetMs: options?.budgetMs ?? 45_000,
-    maxChannels: options?.maxChannels ?? 200,
+    budgetMs: options?.budgetMs ?? 60_000,
+    maxChannels: options?.maxChannels ?? 250,
   });
 
   const updates = enriched
     .map((row) => ({
       id: row.id,
-      evidence: applyEvidenceCallDateLabels(row.sentimentEvidence, dateByCallId),
+      evidence: applyEvidenceCallDateLabels(row.sentimentEvidence, dateByCallId, dateByConversationId),
     }))
-    .filter((row) => row.evidence.some((item) => item.dateLabel || !/openphone\.com/i.test(item.url)));
+    .filter((row) =>
+      row.evidence.some((item) => item.dateLabel || !/openphone\.com|quo\.com/i.test(item.url)),
+    );
 
   const saved = updates.length ? await saveSentimentEvidenceResolved(updates) : { saved: 0 };
   return { pending: readings.length, resolved: updates.length, saved: saved.saved };

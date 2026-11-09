@@ -66,7 +66,9 @@ export function parseEvidenceItems(value: string | null | undefined): EvidenceSe
 export function evidenceKind(url: string, label: string | null): SentimentEvidenceItem["kind"] {
   const haystack = `${label ?? ""} ${url}`.toLowerCase();
   if (haystack.includes("sms") || haystack.includes("/message")) return "sms";
-  if (haystack.includes("/call") || haystack.includes("/inbox") || haystack.includes("openphone")) return "call";
+  // Bare inbox/conversation links are ambiguous (SMS or call) — do not force "call".
+  if (callIdFromEvidenceUrl(url) || haystack.includes("/call")) return "call";
+  if (haystack.includes("/inbox") || haystack.includes("openphone") || haystack.includes("quo.com")) return "other";
   return "other";
 }
 
@@ -110,16 +112,23 @@ export function evidenceNeedsSlackResolve(items: SentimentEvidenceItem[]) {
   });
 }
 
-/** Fill missing date labels from known Quo call created_at values. */
+/** Fill missing date labels from known Quo call / conversation timestamps. */
 export function applyEvidenceCallDateLabels(
   items: SentimentEvidenceItem[],
   dateByCallId: Map<string, string>,
+  dateByConversationId?: Map<string, string>,
 ): SentimentEvidenceItem[] {
-  if (!items.length || !dateByCallId.size) return items;
+  if (!items.length || (!dateByCallId.size && !(dateByConversationId?.size ?? 0))) return items;
   return items.map((item) => {
     if (item.dateLabel) return item;
-    const callId = callIdFromEvidenceUrl(item.quoUrl || item.url);
-    const label = callId ? dateLabelFromIso(dateByCallId.get(callId)) : null;
+    const href = item.quoUrl || item.url;
+    const callId = callIdFromEvidenceUrl(href);
+    const conversationId = conversationIdFromEvidenceUrl(href);
+    const iso =
+      (callId ? dateByCallId.get(callId) : undefined) ||
+      (conversationId ? dateByConversationId?.get(conversationId) : undefined) ||
+      null;
+    const label = dateLabelFromIso(iso);
     return label ? { ...item, dateLabel: label } : item;
   });
 }
@@ -174,6 +183,10 @@ function last10(value: string | null | undefined) {
   return digits.length >= 10 ? digits.slice(-10) : "";
 }
 
+function conversationIdFromEvidenceUrl(url: string) {
+  return quoMatchTokens(url).conversationId;
+}
+
 function closestRouterMatch(
   item: SentimentEvidenceItem,
   messages: SlackHistoryMessage[],
@@ -182,6 +195,8 @@ function closestRouterMatch(
 ) {
   let best: { ts: string; distance: number; rank: number } | null = null;
   const phones = clientPhones.map(last10).filter(Boolean);
+  const ambiguousInbox =
+    !callIdFromEvidenceUrl(item.quoUrl || item.url) && /\/inbox\//i.test(item.quoUrl || item.url);
 
   for (const message of messages) {
     if (!message.ts) continue;
@@ -193,8 +208,9 @@ function closestRouterMatch(
     const phoneHit = phones.some((phone) => text.replace(/\D/g, "").includes(phone));
     // Exact Quo deep-link wins; otherwise require a client phone on the router post.
     if (!urlHit && !phoneHit) continue;
-    if (item.kind === "sms" && !urlHit && !/Text Message/i.test(text)) continue;
-    if (item.kind === "call" && !urlHit && /Text Message/i.test(text)) continue;
+    // Ambiguous conversation links can be SMS or calls — don't exclude Text Message posts.
+    if (!ambiguousInbox && item.kind === "sms" && !urlHit && !/Text Message/i.test(text)) continue;
+    if (!ambiguousInbox && item.kind === "call" && !urlHit && /Text Message/i.test(text)) continue;
 
     const posted = Number(message.ts) * 1000;
     const distance =
@@ -304,7 +320,7 @@ export async function attachSentimentEvidenceSlackLinks<
     const latest = String(Math.max(...ends));
     let messages: SlackHistoryMessage[] = [];
     try {
-      messages = await loadChannelHistoryForContact(channelId, oldest, latest, 100);
+      messages = await loadChannelHistoryForContact(channelId, oldest, latest, 200);
     } catch (error) {
       if (isRateLimitedError(error)) {
         console.warn("[client-contact] Slack evidence lookup rate-limited; skipping remaining channels");
