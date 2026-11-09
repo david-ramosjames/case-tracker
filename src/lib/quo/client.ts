@@ -376,22 +376,31 @@ export async function resolveQuoPhoneNumberId() {
   return cachedQuoPhoneNumberId;
 }
 
-function pickClientParticipant(participants: string[] | undefined, firmLine: string) {
+function pickClientParticipant(participants: string[] | undefined, firmLines: Set<string> | string) {
+  const excluded = typeof firmLines === "string" ? new Set([firmLines].filter(Boolean)) : firmLines;
   for (const participant of participants ?? []) {
     const normalized = normalizePhoneForComparison(participant);
-    if (normalized && normalized !== firmLine) return normalized;
+    if (normalized && !excluded.has(normalized)) return normalized;
   }
   return null;
 }
 
+async function firmLineNumbers() {
+  const lines = await listQuoPhoneNumbers();
+  const numbers = new Set(lines.map((line) => line.number).filter((value): value is string => Boolean(value)));
+  const configured = normalizePhoneForComparison(getQuoFromPhone());
+  if (configured) numbers.add(configured);
+  return numbers;
+}
+
 async function listRecentQuoConversations(maxPages = 5) {
-  const fromPhone = getQuoFromPhone();
   const conversations: QuoConversationRow[] = [];
   let pageToken: string | undefined;
   let pages = 0;
 
   do {
-    const params = new URLSearchParams({ maxResults: "100", phoneNumbers: fromPhone });
+    // All firm lines — do not scope to QUO_FROM_PHONE / RJL Main Line only.
+    const params = new URLSearchParams({ maxResults: "100" });
     if (pageToken) params.set("pageToken", pageToken);
 
     const response = await quoApiFetch(`${QUO_API_BASE}/conversations?${params.toString()}`, {
@@ -420,8 +429,7 @@ export type QuoClientActivity = {
 
 /** Client-side of recent inbox threads, newest activity first. Stops once a page is entirely older than `newerThan`. */
 export async function listRecentQuoClientActivity(options?: { maxPages?: number; newerThan?: string }) {
-  const fromPhone = getQuoFromPhone();
-  const firmLine = normalizePhoneForComparison(fromPhone);
+  const firmLines = await firmLineNumbers();
   const cutoff = options?.newerThan ? Date.parse(options.newerThan) : 0;
   const maxPages = options?.maxPages ?? 40;
   const activity: QuoClientActivity[] = [];
@@ -429,7 +437,8 @@ export async function listRecentQuoClientActivity(options?: { maxPages?: number;
   let pages = 0;
 
   do {
-    const params = new URLSearchParams({ maxResults: "100", phoneNumbers: fromPhone });
+    // All firm lines — do not scope to QUO_FROM_PHONE / RJL Main Line only.
+    const params = new URLSearchParams({ maxResults: "100" });
     if (pageToken) params.set("pageToken", pageToken);
 
     const response = await quoApiFetch(`${QUO_API_BASE}/conversations?${params.toString()}`, {
@@ -446,7 +455,7 @@ export async function listRecentQuoClientActivity(options?: { maxPages?: number;
     for (const conversation of page) {
       const at = Date.parse(conversation.lastActivityAt ?? "");
       if (Number.isFinite(at)) newestOnPage = Math.max(newestOnPage, at);
-      const phone = pickClientParticipant(conversation.participants, firmLine);
+      const phone = pickClientParticipant(conversation.participants, firmLines);
       if (!conversation.id || !phone || !Number.isFinite(at)) continue;
       if (cutoff && at < cutoff) continue;
       activity.push({ conversationId: conversation.id, phone, lastActivityAt: conversation.lastActivityAt! });
@@ -465,15 +474,15 @@ export async function lookupQuoInboxByContactDisplayName(displayName: string): P
   const target = normalizeContactLabel(displayName);
   if (!target) return null;
 
-  const firmLine = normalizePhoneForComparison(getQuoFromPhone());
-  const defaultPhoneNumberId = await resolveQuoPhoneNumberId();
+  const firmLines = await firmLineNumbers();
   const conversations = await listRecentQuoConversations();
 
   for (const conversation of conversations) {
     const conversationId = conversation.id?.trim();
-    if (!conversationId) continue;
+    const phoneNumberId = conversation.phoneNumberId?.trim();
+    if (!conversationId || !phoneNumberId) continue;
 
-    const participant = pickClientParticipant(conversation.participants, firmLine);
+    const participant = pickClientParticipant(conversation.participants, firmLines);
     if (!participant) continue;
 
     const conversationLabel = normalizeContactLabel(conversation.name ?? "");
@@ -481,7 +490,7 @@ export async function lookupQuoInboxByContactDisplayName(displayName: string): P
       return {
         phone: participant,
         conversationId,
-        phoneNumberId: conversation.phoneNumberId?.trim() || defaultPhoneNumberId,
+        phoneNumberId,
       };
     }
   }
@@ -490,6 +499,9 @@ export async function lookupQuoInboxByContactDisplayName(displayName: string): P
 }
 
 export type QuoCallActivity = {
+  id: string | null;
+  phoneNumberId: string | null;
+  conversationId: string | null;
   createdAt: string;
   direction: "incoming" | "outgoing";
   answered: boolean;
@@ -573,10 +585,18 @@ export async function getQuoCallById(callId: string): Promise<{
   };
 }
 
-/** Latest calls with one client. Participants is required by Quo, so this is one request per phone. */
+/** Latest calls with one client across every firm Quo line. */
 export async function listQuoCallsForPhone(clientPhone: string): Promise<QuoCallActivity[]> {
-  const phoneNumberId = await resolveQuoPhoneNumberId();
-  return listQuoCallsForPhoneOnLine(clientPhone, phoneNumberId);
+  const lines = await listQuoPhoneNumberIds();
+  const byKey = new Map<string, QuoCallActivity>();
+  for (const lineId of lines) {
+    for (const call of await listQuoCallsForPhoneOnLine(clientPhone, lineId)) {
+      const key = call.id || `${call.createdAt}|${call.direction}|${call.durationSec}|${call.phoneNumberId ?? ""}`;
+      const existing = byKey.get(key);
+      if (!existing || Date.parse(call.createdAt) >= Date.parse(existing.createdAt)) byKey.set(key, call);
+    }
+  }
+  return [...byKey.values()].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 }
 
 /**
@@ -595,6 +615,9 @@ export async function listQuoCallsForPhoneOnLine(clientPhone: string, phoneNumbe
   }
   const payload = (await response.json()) as {
     data?: Array<{
+      id?: string | null;
+      phoneNumberId?: string | null;
+      conversationId?: string | null;
       createdAt?: string | null;
       direction?: string | null;
       status?: string | null;
@@ -610,70 +633,87 @@ export async function listQuoCallsForPhoneOnLine(clientPhone: string, phoneNumbe
     const aiHandled = call.aiHandled === true || call.aiHandled === "true";
     const durationSec = typeof call.duration === "number" && Number.isFinite(call.duration) ? call.duration : 0;
     const answered = !aiHandled && (Boolean(call.answeredAt) || durationSec > 0);
-    return [{ createdAt: call.createdAt, direction, answered, durationSec, aiHandled }];
+    return [
+      {
+        id: call.id?.trim() || null,
+        phoneNumberId: call.phoneNumberId?.trim() || phoneNumberId,
+        conversationId: call.conversationId?.trim() || null,
+        createdAt: call.createdAt,
+        direction,
+        answered,
+        durationSec,
+        aiHandled,
+      },
+    ];
   });
 }
 
-/** Latest texts with one client. */
+/** Latest texts with one client across every firm Quo line. */
 export async function listQuoMessagesForPhone(clientPhone: string): Promise<QuoMessageActivity[]> {
   const participant = normalizePhoneForComparison(clientPhone);
   if (!participant) return [];
-  const phoneNumberId = await resolveQuoPhoneNumberId();
-  const params = new URLSearchParams({ phoneNumberId, maxResults: "30" });
-  params.append("participants", participant);
-  const response = await quoApiFetch(`${QUO_API_BASE}/messages?${params.toString()}`, { headers: quoHeaders() });
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Quo list messages failed (${response.status}): ${body}`);
+  const lines = await listQuoPhoneNumberIds();
+  const byKey = new Map<string, QuoMessageActivity>();
+  for (const lineId of lines) {
+    const params = new URLSearchParams({ phoneNumberId: lineId, maxResults: "30" });
+    params.append("participants", participant);
+    const response = await quoApiFetch(`${QUO_API_BASE}/messages?${params.toString()}`, { headers: quoHeaders() });
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Quo list messages failed (${response.status}): ${body}`);
+    }
+    const payload = (await response.json()) as {
+      data?: Array<{ id?: string | null; createdAt?: string | null; direction?: string | null }>;
+    };
+    for (const message of payload.data ?? []) {
+      if (!message.createdAt) continue;
+      const direction =
+        message.direction === "outgoing" ? "outgoing" : message.direction === "incoming" ? "incoming" : null;
+      if (!direction) continue;
+      const row = { createdAt: message.createdAt, direction } as QuoMessageActivity;
+      const key = message.id?.trim() || `${message.createdAt}|${direction}|${lineId}`;
+      const existing = byKey.get(key);
+      if (!existing || Date.parse(row.createdAt) >= Date.parse(existing.createdAt)) byKey.set(key, row);
+    }
   }
-  const payload = (await response.json()) as {
-    data?: Array<{ createdAt?: string | null; direction?: string | null }>;
-  };
-  return (payload.data ?? []).flatMap((message) => {
-    if (!message.createdAt) return [];
-    const direction = message.direction === "outgoing" ? "outgoing" : message.direction === "incoming" ? "incoming" : null;
-    if (!direction) return [];
-    return [{ createdAt: message.createdAt, direction }];
-  });
+  return [...byKey.values()].sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
 }
 
-/** Resolve inbox thread for one client phone via the messages API (most recent activity). */
+/** Resolve inbox thread for one client phone via the messages API (most recent activity on any line). */
 export async function lookupQuoInboxForClientPhone(clientPhone: string): Promise<QuoInboxMatch | null> {
   const participant = normalizePhoneForComparison(clientPhone);
   if (!participant) return null;
 
-  const phoneNumberId = await resolveQuoPhoneNumberId();
-  const params = new URLSearchParams({
-    phoneNumberId,
-    maxResults: "25",
-  });
-  params.append("participants", participant);
+  let best: QuoInboxMatch | null = null;
+  let bestMs = Number.NEGATIVE_INFINITY;
+  for (const lineId of await listQuoPhoneNumberIds()) {
+    const params = new URLSearchParams({
+      phoneNumberId: lineId,
+      maxResults: "25",
+    });
+    params.append("participants", participant);
 
-  const response = await quoApiFetch(`${QUO_API_BASE}/messages?${params.toString()}`, {
-    headers: quoHeaders(),
-  });
+    const response = await quoApiFetch(`${QUO_API_BASE}/messages?${params.toString()}`, {
+      headers: quoHeaders(),
+    });
 
-  if (!response.ok) {
-    const body = await response.text();
-    throw new Error(`Quo list messages failed (${response.status}): ${body}`);
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Quo list messages failed (${response.status}): ${body}`);
+    }
+
+    const payload = (await response.json()) as QuoListMessagesResponse;
+    for (const message of payload.data ?? []) {
+      const conversationId = message.conversationId?.trim();
+      const phoneNumberId = message.phoneNumberId?.trim() || lineId;
+      const at = Date.parse(message.createdAt ?? "");
+      if (!conversationId || !phoneNumberId || !Number.isFinite(at) || at < bestMs) continue;
+      bestMs = at;
+      best = { phone: participant, conversationId, phoneNumberId };
+    }
   }
 
-  const payload = (await response.json()) as QuoListMessagesResponse;
-  const messages = [...(payload.data ?? [])].sort((left, right) => {
-    const leftTime = Date.parse(left.createdAt ?? "") || 0;
-    const rightTime = Date.parse(right.createdAt ?? "") || 0;
-    return rightTime - leftTime;
-  });
-
-  const message = messages[0];
-  const conversationId = message?.conversationId?.trim();
-  if (!conversationId) return null;
-
-  return {
-    phone: participant,
-    conversationId,
-    phoneNumberId: message.phoneNumberId?.trim() || phoneNumberId,
-  };
+  return best;
 }
 
 /** Resolve inbox thread for a matched Quo contact (phone profile, messages API, then inbox name scan). */

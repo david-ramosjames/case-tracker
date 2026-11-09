@@ -9,12 +9,15 @@ import {
   sentimentFlagKey,
   worstSentimentByCaseNumber,
 } from "@/lib/client-contact/repository";
-import { attachSentimentEvidenceSlackLinks } from "@/lib/client-contact/evidence-slack";
-import { clientContactDates } from "@/lib/client-contact/types";
+import {
+  attachQualifyingCallSlackLinks,
+  attachSentimentEvidenceSlackLinks,
+} from "@/lib/client-contact/evidence-slack";
+import { clientContactDates, type ClientContactSummary } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
-import { getQuoClientSmsUrl, getQuoContactUrl } from "@/lib/quo/links";
+import { getQuoClientSmsUrl, getQuoContactUrl, getQuoConversationUrl } from "@/lib/quo/links";
 import { loadSlackChannelMapByCaseNumber } from "@/lib/slack/channels";
 import { type CaseRecord } from "@/lib/types";
 
@@ -43,7 +46,14 @@ function isReferredCase(record: CaseRecord, topicStage: string | null | undefine
   );
 }
 
-function quoUrlForCase(record: CaseRecord) {
+function quoUrlForCase(record: CaseRecord, stored?: ClientContactSummary | null) {
+  // Prefer the line that actually owns the latest qualifying call — never invent RJL Main Line.
+  const fromQualifying = getQuoConversationUrl({
+    quoConversationId: stored?.lastQualifyingCallConversationId,
+    quoPhoneNumberId: stored?.lastQualifyingCallPhoneNumberId,
+  });
+  if (fromQualifying) return fromQualifying;
+
   const candidates = [
     {
       quoConversationId: record.tracker.quoConversationId,
@@ -120,6 +130,8 @@ export default async function ClientContactPage() {
       lastInteraction: dates.lastInteraction,
       lastAttempt: dates.lastAttempt,
       lastQualifyingCall: stored?.lastQualifyingCallAt ?? null,
+      lastQualifyingCallId: stored?.lastQualifyingCallId ?? null,
+      lastQualifyingCallSlackUrl: null as string | null,
       lastInboundText: stored?.lastInboundTextAt ?? null,
       lastOutboundText: stored?.lastOutboundTextAt ?? null,
       lastTextExchange: stored?.lastTextExchangeAt ?? null,
@@ -138,7 +150,7 @@ export default async function ClientContactPage() {
       sentimentScoredAt: sentiment?.scoredAt ?? null,
       clientPhones: phonesForCase(record),
       actionRequired: isActionRequired(record.shared.caseNumber, record.shared.clientName),
-      quoUrl: quoUrlForCase(record),
+      quoUrl: quoUrlForCase(record, stored),
     };
   });
 
@@ -161,6 +173,8 @@ export default async function ClientContactPage() {
       lastInteraction: dates.lastInteraction,
       lastAttempt: dates.lastAttempt,
       lastQualifyingCall: stored?.lastQualifyingCallAt ?? null,
+      lastQualifyingCallId: stored?.lastQualifyingCallId ?? null,
+      lastQualifyingCallSlackUrl: null as string | null,
       lastInboundText: stored?.lastInboundTextAt ?? null,
       lastOutboundText: stored?.lastOutboundTextAt ?? null,
       lastTextExchange: stored?.lastTextExchangeAt ?? null,
@@ -179,7 +193,7 @@ export default async function ClientContactPage() {
       sentimentScoredAt: reading.scoredAt,
       clientPhones: phonesForCase(record),
       actionRequired: isActionRequired(record.shared.caseNumber, reading.clientName),
-      quoUrl: quoUrlForCase(record),
+      quoUrl: quoUrlForCase(record, stored),
     });
   }
 
@@ -205,12 +219,17 @@ export default async function ClientContactPage() {
   for (const [caseNumber, channel] of slackChannels) {
     if (channel.slackChannelId) channelIdByCase.set(cleanCaseNumber(caseNumber), channel.slackChannelId);
   }
-  const sentimentRowsWithSlack = await attachSentimentEvidenceSlackLinks(sentimentRows, channelIdByCase);
+  const [rowsWithSlack, sentimentRowsWithSlack] = await Promise.all([
+    attachQualifyingCallSlackLinks(rows, channelIdByCase),
+    attachSentimentEvidenceSlackLinks(sentimentRows, channelIdByCase).then((next) =>
+      attachQualifyingCallSlackLinks(next, channelIdByCase),
+    ),
+  ]);
 
   return (
     <Suspense fallback={<div className="text-sm text-muted-foreground">Loading contact…</div>}>
       <ClientContactView
-        rows={rows}
+        rows={rowsWithSlack}
         sentimentRows={sentimentRowsWithSlack}
         scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds}
       />

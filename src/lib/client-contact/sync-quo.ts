@@ -102,7 +102,14 @@ export async function syncQuoClientContacts() {
             }
             if (call.answered) stamp.humanCallAt = latestDate([stamp.humanCallAt, call.createdAt]);
             if (isQualifyingClientCall(call)) {
-              stamp.qualifyingCallAt = latestDate([stamp.qualifyingCallAt, call.createdAt]);
+              const prevMs = Date.parse(stamp.qualifyingCallAt ?? "");
+              const nextMs = Date.parse(call.createdAt);
+              if (!Number.isFinite(prevMs) || nextMs >= prevMs) {
+                stamp.qualifyingCallAt = call.createdAt;
+                stamp.qualifyingCallId = call.id;
+                stamp.qualifyingCallPhoneNumberId = call.phoneNumberId;
+                stamp.qualifyingCallConversationId = call.conversationId;
+              }
             }
           }
           for (const message of messages) {
@@ -267,7 +274,14 @@ export async function syncClientContactLineBackfill(options?: {
           if (call.direction === "outgoing") stamp.outboundCallAt = latestDate([stamp.outboundCallAt, call.createdAt]);
           if (call.answered) stamp.humanCallAt = latestDate([stamp.humanCallAt, call.createdAt]);
           if (isQualifyingClientCall(call)) {
-            stamp.qualifyingCallAt = latestDate([stamp.qualifyingCallAt, call.createdAt]);
+            const prevMs = Date.parse(stamp.qualifyingCallAt ?? "");
+            const nextMs = Date.parse(call.createdAt);
+            if (!Number.isFinite(prevMs) || nextMs >= prevMs) {
+              stamp.qualifyingCallAt = call.createdAt;
+              stamp.qualifyingCallId = call.id;
+              stamp.qualifyingCallPhoneNumberId = call.phoneNumberId;
+              stamp.qualifyingCallConversationId = call.conversationId;
+            }
           }
         }
       }

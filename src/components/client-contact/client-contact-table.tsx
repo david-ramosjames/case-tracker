@@ -48,6 +48,8 @@ export type ClientContactRow = {
   lastAttempt: string | null;
   /** Latest call of at least 60 seconds (Sona excluded). */
   lastQualifyingCall: string | null;
+  lastQualifyingCallId?: string | null;
+  lastQualifyingCallSlackUrl?: string | null;
   lastInboundText: string | null;
   lastOutboundText: string | null;
   /** Later message of the latest inbound+outbound pair within 7 days. */
@@ -703,7 +705,12 @@ function CallsTable({
                   </TableCell>
                   <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastAttempt)}</TableCell>
                   <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastOutboundCall)}</TableCell>
-                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastQualifyingCall)}</TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>
+                    <QualifyingCallDate
+                      at={row.lastQualifyingCall}
+                      slackUrl={row.lastQualifyingCallSlackUrl}
+                    />
+                  </TableCell>
                   <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastInboundText)}</TableCell>
                   <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastOutboundText)}</TableCell>
                   <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastTextExchange)}</TableCell>
@@ -1069,6 +1076,24 @@ function formatContactDate(value: string | null) {
   if (!value) return "—";
   const formatted = formatDate(value);
   return formatted === "Not reviewed" ? "—" : formatted;
+}
+
+function QualifyingCallDate({ at, slackUrl }: { at: string | null; slackUrl?: string | null }) {
+  const label = formatContactDate(at);
+  if (label === "—") return <span>—</span>;
+  if (!slackUrl) return <span>{label}</span>;
+  return (
+    <a
+      href={slackUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-0.5 font-medium text-pink-600 hover:text-pink-500"
+      title="Open Quo router Slack post"
+    >
+      {label}
+      <ExternalLink className="h-3 w-3" />
+    </a>
+  );
 }
 
 function formatOtherContact(value: string | null, contactType: string | null) {

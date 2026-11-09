@@ -15,6 +15,9 @@ type SummaryRow = {
   last_outbound_text_at: string | null;
   last_conversation_at: string | null;
   last_qualifying_call_at: string | null;
+  last_qualifying_call_id: string | null;
+  last_qualifying_call_phone_number_id: string | null;
+  last_qualifying_call_conversation_id: string | null;
   last_text_exchange_at: string | null;
   last_other_at: string | null;
   last_other_type: string | null;
@@ -30,6 +33,9 @@ export type ContactStamp = {
   outboundTextAt?: string | null;
   conversationAt?: string | null;
   qualifyingCallAt?: string | null;
+  qualifyingCallId?: string | null;
+  qualifyingCallPhoneNumberId?: string | null;
+  qualifyingCallConversationId?: string | null;
   textExchangeAt?: string | null;
   /** Ledger recompute: write these dates even when they move backward, and clear one inside the lookback. */
   replaceQualifying?: boolean;
@@ -69,6 +75,9 @@ function rowToSummary(row: SummaryRow): ClientContactSummary {
     lastOutboundTextAt: row.last_outbound_text_at,
     lastConversationAt: row.last_conversation_at,
     lastQualifyingCallAt: row.last_qualifying_call_at,
+    lastQualifyingCallId: row.last_qualifying_call_id,
+    lastQualifyingCallPhoneNumberId: row.last_qualifying_call_phone_number_id,
+    lastQualifyingCallConversationId: row.last_qualifying_call_conversation_id,
     lastTextExchangeAt: row.last_text_exchange_at,
     lastOtherAt: row.last_other_at,
     lastOtherType: row.last_other_type,
@@ -85,6 +94,37 @@ function keptQualifyingDate(
   // The Quo ledger can miss older calls (or store them without the client phone).
   // Never erase a qualifying date the Quo API / an earlier sync already proved.
   return latestDate([previous, computed]);
+}
+
+function keptQualifyingCallLink(
+  previousAt: string | null | undefined,
+  previousId: string | null | undefined,
+  previousPhoneNumberId: string | null | undefined,
+  previousConversationId: string | null | undefined,
+  stamp: ContactStamp,
+) {
+  const at = keptQualifyingDate(previousAt, stamp.qualifyingCallAt, stamp.lookbackStart, Boolean(stamp.replaceQualifying));
+  if (!at) {
+    return { at: null, id: null, phoneNumberId: null, conversationId: null };
+  }
+  const computedWins =
+    Boolean(stamp.qualifyingCallAt) &&
+    at === stamp.qualifyingCallAt &&
+    (!previousAt || previousAt !== stamp.qualifyingCallAt || !previousId);
+  if (computedWins) {
+    return {
+      at,
+      id: stamp.qualifyingCallId?.trim() || previousId || null,
+      phoneNumberId: stamp.qualifyingCallPhoneNumberId?.trim() || previousPhoneNumberId || null,
+      conversationId: stamp.qualifyingCallConversationId?.trim() || previousConversationId || null,
+    };
+  }
+  return {
+    at,
+    id: previousId || stamp.qualifyingCallId?.trim() || null,
+    phoneNumberId: previousPhoneNumberId || stamp.qualifyingCallPhoneNumberId?.trim() || null,
+    conversationId: previousConversationId || stamp.qualifyingCallConversationId?.trim() || null,
+  };
 }
 
 function otherMoment(at: string | null | undefined) {
@@ -162,11 +202,25 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
       outboundTextAt: latestDate([current.outboundTextAt, stamp.outboundTextAt]),
       conversationAt: latestDate([current.conversationAt, stamp.conversationAt]),
       qualifyingCallAt: stamp.replaceQualifying ? (stamp.qualifyingCallAt ?? null) : latestDate([current.qualifyingCallAt, stamp.qualifyingCallAt]),
+      qualifyingCallId: stamp.qualifyingCallId ?? current.qualifyingCallId,
+      qualifyingCallPhoneNumberId: stamp.qualifyingCallPhoneNumberId ?? current.qualifyingCallPhoneNumberId,
+      qualifyingCallConversationId: stamp.qualifyingCallConversationId ?? current.qualifyingCallConversationId,
       textExchangeAt: stamp.replaceQualifying ? (stamp.textExchangeAt ?? null) : latestDate([current.textExchangeAt, stamp.textExchangeAt]),
       replaceQualifying: Boolean(current.replaceQualifying || stamp.replaceQualifying),
       lookbackStart: stamp.lookbackStart ?? current.lookbackStart,
       ...mergedOther(current, stamp),
     });
+    // When a newer qualifying call wins inside this batch, keep its Quo ids.
+    const mergedStamp = merged.get(caseNumber)!;
+    if (
+      stamp.qualifyingCallAt &&
+      mergedStamp.qualifyingCallAt === stamp.qualifyingCallAt &&
+      stamp.qualifyingCallId
+    ) {
+      mergedStamp.qualifyingCallId = stamp.qualifyingCallId;
+      mergedStamp.qualifyingCallPhoneNumberId = stamp.qualifyingCallPhoneNumberId ?? null;
+      mergedStamp.qualifyingCallConversationId = stamp.qualifyingCallConversationId ?? null;
+    }
   }
   if (merged.size === 0) return { cases: 0 };
 
@@ -185,12 +239,21 @@ export async function applyContactStamps(stamps: ContactStamp[]) {
       last_inbound_text_at: latestDate([previous?.lastInboundTextAt, stamp.inboundTextAt]),
       last_outbound_text_at: latestDate([previous?.lastOutboundTextAt, stamp.outboundTextAt]),
       last_conversation_at: latestDate([previous?.lastConversationAt, stamp.conversationAt]),
-      last_qualifying_call_at: keptQualifyingDate(
-        previous?.lastQualifyingCallAt,
-        stamp.qualifyingCallAt,
-        stamp.lookbackStart,
-        Boolean(stamp.replaceQualifying),
-      ),
+      ...(() => {
+        const link = keptQualifyingCallLink(
+          previous?.lastQualifyingCallAt,
+          previous?.lastQualifyingCallId,
+          previous?.lastQualifyingCallPhoneNumberId,
+          previous?.lastQualifyingCallConversationId,
+          stamp,
+        );
+        return {
+          last_qualifying_call_at: link.at,
+          last_qualifying_call_id: link.id,
+          last_qualifying_call_phone_number_id: link.phoneNumberId,
+          last_qualifying_call_conversation_id: link.conversationId,
+        };
+      })(),
       last_text_exchange_at: keptQualifyingDate(
         previous?.lastTextExchangeAt,
         stamp.textExchangeAt,

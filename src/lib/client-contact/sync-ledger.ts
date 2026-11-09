@@ -21,6 +21,8 @@ const MAX_ORPHAN_ENRICHMENTS = 80;
 
 type LedgerCall = {
   call_id: string | null;
+  phone_number_id: string | null;
+  conversation_id: string | null;
   direction: string | null;
   status: string | null;
   ai_handled: boolean | null;
@@ -45,10 +47,28 @@ type LedgerCall = {
         completedAt?: string | null;
         duration?: number | null;
         aiHandled?: boolean | string | null;
+        phoneNumberId?: string | null;
+        conversationId?: string | null;
       };
     };
   } | null;
 };
+
+function stampQualifyingCall(
+  stamp: ContactStamp,
+  createdAt: string,
+  meta: { callId?: string | null; phoneNumberId?: string | null; conversationId?: string | null },
+) {
+  const prevMs = Date.parse(stamp.qualifyingCallAt ?? "");
+  const nextMs = Date.parse(createdAt);
+  if (!Number.isFinite(nextMs)) return;
+  if (Number.isFinite(prevMs) && nextMs < prevMs) return;
+  if (Number.isFinite(prevMs) && nextMs === prevMs && stamp.qualifyingCallId) return;
+  stamp.qualifyingCallAt = createdAt;
+  stamp.qualifyingCallId = meta.callId?.trim() || null;
+  stamp.qualifyingCallPhoneNumberId = meta.phoneNumberId?.trim() || null;
+  stamp.qualifyingCallConversationId = meta.conversationId?.trim() || null;
+}
 
 type LedgerMessage = {
   direction: string | null;
@@ -174,7 +194,7 @@ export async function syncClientContactsFromLedger() {
   try {
     await client.connect();
     const calls = await client.query<LedgerCall>(
-      `select call_id, direction, status, ai_handled, created_at, answered_at, completed_at, duration_sec, participants, payload_json
+      `select call_id, phone_number_id, conversation_id, direction, status, ai_handled, created_at, answered_at, completed_at, duration_sec, participants, payload_json
        from quo_calls
        where coalesce(created_at, updated_at) >= $1
        order by created_at asc nulls last`,
@@ -247,7 +267,13 @@ export async function syncClientContactsFromLedger() {
         stamp.conversationAt = latestDate([stamp.conversationAt, createdAt]);
         if (direction === "outgoing") stamp.outboundCallAt = latestDate([stamp.outboundCallAt, createdAt]);
         if (answered) stamp.humanCallAt = latestDate([stamp.humanCallAt, createdAt]);
-        if (qualifyingCall) stamp.qualifyingCallAt = latestDate([stamp.qualifyingCallAt, createdAt]);
+        if (qualifyingCall) {
+          stampQualifyingCall(stamp, createdAt, {
+            callId: row.call_id,
+            phoneNumberId: row.phone_number_id || object?.phoneNumberId,
+            conversationId: row.conversation_id || object?.conversationId,
+          });
+        }
       }
     }
 

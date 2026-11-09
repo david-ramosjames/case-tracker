@@ -15,16 +15,14 @@ export function getQuoContactUrl(quoContactId: string | null | undefined) {
   return `${getQuoAppBaseUrl()}/contacts/${id}`;
 }
 
-/** Quo web inbox URL: /inbox/{PN…}/c/{CN…} */
+/** Quo web inbox URL: /inbox/{PN…}/c/{CN…}. Requires both ids — never guess the firm line. */
 export function getQuoConversationUrl(input: {
   quoConversationId?: string | null;
   quoPhoneNumberId?: string | null;
 }) {
   const conversationId = input.quoConversationId?.trim();
-  if (!conversationId) return null;
-
-  const phoneNumberId = input.quoPhoneNumberId?.trim() || getConfiguredQuoPhoneNumberId();
-  if (!phoneNumberId) return null;
+  const phoneNumberId = input.quoPhoneNumberId?.trim();
+  if (!conversationId || !phoneNumberId) return null;
 
   return `${getQuoAppBaseUrl()}/inbox/${phoneNumberId}/c/${conversationId}`;
 }

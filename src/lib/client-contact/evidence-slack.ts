@@ -277,3 +277,91 @@ export async function attachSentimentEvidenceSlackLinks<
 export function evidenceItemsFromStoredUrls(value: string | null | undefined): SentimentEvidenceItem[] {
   return parseEvidenceItems(value).map(toEvidenceItem);
 }
+
+/**
+ * Point Call 60+sec dates at the Quo router Slack post for that call.
+ * Prefers an exact call-id hit; falls back to phone + router call markers near the stamp.
+ */
+export async function attachQualifyingCallSlackLinks<
+  T extends {
+    caseNumber: string;
+    lastQualifyingCall: string | null;
+    lastQualifyingCallId?: string | null;
+    lastQualifyingCallSlackUrl?: string | null;
+    clientPhones?: string[];
+  },
+>(rows: T[], channelIdByCase: Map<string, string>): Promise<T[]> {
+  const pending = rows.filter(
+    (row) =>
+      row.lastQualifyingCall &&
+      !row.lastQualifyingCallSlackUrl &&
+      channelIdByCase.get(cleanCaseNumber(row.caseNumber)),
+  );
+  if (!pending.length) return rows;
+
+  const byChannel = new Map<string, T[]>();
+  for (const row of pending) {
+    const channelId = channelIdByCase.get(cleanCaseNumber(row.caseNumber));
+    if (!channelId) continue;
+    const group = byChannel.get(channelId) ?? [];
+    group.push(row);
+    byChannel.set(channelId, group);
+  }
+
+  const found = new Map<T, string>();
+
+  await Promise.all(
+    [...byChannel.entries()].map(async ([channelId, group]) => {
+      const times = group
+        .map((row) => Date.parse(row.lastQualifyingCall ?? ""))
+        .filter((ms) => Number.isFinite(ms));
+      if (!times.length) return;
+      const oldest = String((Math.min(...times) - 12 * 60 * 60 * 1000) / 1000);
+      const latest = String((Math.max(...times) + 12 * 60 * 60 * 1000) / 1000);
+      let messages: SlackHistoryMessage[] = [];
+      try {
+        messages = await fetchChannelHistorySince(channelId, { oldest, latest, maxMessages: 300 });
+      } catch (error) {
+        console.error("[client-contact] Slack qualifying-call lookup failed", channelId, error);
+        return;
+      }
+
+      for (const row of group) {
+        const preferredMs = Date.parse(row.lastQualifyingCall ?? "");
+        const callId = row.lastQualifyingCallId?.trim() || "";
+        let best: { ts: string; distance: number; rank: number } | null = null;
+        const phones = (row.clientPhones ?? []).map(last10).filter(Boolean);
+
+        for (const message of messages) {
+          if (!message.ts) continue;
+          const text = extractSlackMessageText(message);
+          if (!isQuoRouterPost(text) && !text.includes("View in Quo")) continue;
+          if (/Text Message/i.test(text)) continue;
+
+          const idHit = Boolean(callId && text.includes(callId));
+          const phoneHit = phones.some((phone) => text.replace(/\D/g, "").includes(phone));
+          if (!idHit && !phoneHit) continue;
+
+          const posted = Number(message.ts) * 1000;
+          const distance =
+            Number.isFinite(preferredMs) && Number.isFinite(posted)
+              ? Math.abs(posted - preferredMs)
+              : Number.POSITIVE_INFINITY;
+          const rank = idHit ? 0 : 1;
+          if (!best || rank < best.rank || (rank === best.rank && distance < best.distance)) {
+            best = { ts: message.ts, distance, rank };
+          }
+        }
+
+        const url = best?.ts ? slackMessagePermalink(channelId, best.ts) : null;
+        if (url) found.set(row, url);
+      }
+    }),
+  );
+
+  if (!found.size) return rows;
+  return rows.map((row) => {
+    const url = found.get(row);
+    return url ? { ...row, lastQualifyingCallSlackUrl: url } : row;
+  });
+}

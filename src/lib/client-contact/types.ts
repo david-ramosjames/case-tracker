@@ -12,6 +12,9 @@ export type ClientContactSummary = {
   lastConversationAt: string | null;
   /** Latest call of at least 60 seconds that Sona did not handle. */
   lastQualifyingCallAt: string | null;
+  lastQualifyingCallId: string | null;
+  lastQualifyingCallPhoneNumberId: string | null;
+  lastQualifyingCallConversationId: string | null;
   /** Later message of the latest inbound+outbound pair within 7 days. */
   lastTextExchangeAt: string | null;
   lastOtherAt: string | null;
