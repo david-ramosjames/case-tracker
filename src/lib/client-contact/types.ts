@@ -94,6 +94,38 @@ export function contactNeedsFollowUp(lastInteractionAt: string | null, now = Dat
   return days === null || days >= CLIENT_CONTACT_WINDOW_DAYS;
 }
 
+export type ClientContactStatus = "contacted" | "attempted_no_response" | "not_attempted_recently";
+
+export const CLIENT_CONTACT_STATUS_LABEL: Record<ClientContactStatus, string> = {
+  contacted: "Contacted",
+  attempted_no_response: "Attempted — No Response",
+  not_attempted_recently: "Not Attempted Recently",
+};
+
+export const CLIENT_CONTACT_STATUS_HELP: Record<ClientContactStatus, string> = {
+  contacted: "Confirmed two-way communication within 30 days.",
+  attempted_no_response: "Outreach occurred, but no qualifying contact.",
+  not_attempted_recently: "No recent outreach attempt recorded.",
+};
+
+/**
+ * Contacted = qualifying interaction in the last 30 days.
+ * Attempted — No Response = recent outbound attempt, but no qualifying interaction in 30 days.
+ * Not Attempted Recently = no outreach attempt in the last 30 days.
+ */
+export function clientContactStatus(
+  lastInteractionAt: string | null,
+  lastAttemptAt: string | null,
+  now = Date.now(),
+): ClientContactStatus {
+  const interactionDays = daysSinceContact(lastInteractionAt, now);
+  if (interactionDays !== null && interactionDays < CLIENT_CONTACT_WINDOW_DAYS) return "contacted";
+
+  const attemptDays = daysSinceContact(lastAttemptAt, now);
+  if (attemptDays !== null && attemptDays < CLIENT_CONTACT_WINDOW_DAYS) return "attempted_no_response";
+  return "not_attempted_recently";
+}
+
 export type ClientSentimentLabel = "Positive" | "Neutral" | "Negative" | "Unknown" | "—";
 
 /** Sentiment only counts when last interaction is under 30 days; day 30+ is Unknown. */

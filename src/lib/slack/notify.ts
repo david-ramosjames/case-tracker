@@ -122,6 +122,8 @@ export async function notifySlackCommentPosted(
     mentionSlackUserIds?: string[];
     /** Overrides the default Slack label derived from comment type. */
     slackLabel?: string | null;
+    /** When set, posts this exact Slack text instead of the default comment layout. */
+    slackText?: string | null;
   },
 ) {
   if (!isSlackEnabled()) return;
@@ -136,6 +138,14 @@ export async function notifySlackCommentPosted(
 
   const context = await getSlackContextForRecord(record);
   if (!context) return;
+
+  if (input.slackText?.trim()) {
+    await postSlackMessage({
+      channel: context.channelId,
+      text: input.slackText.trim(),
+    });
+    return;
+  }
 
   const label =
     input.slackLabel?.trim() ||

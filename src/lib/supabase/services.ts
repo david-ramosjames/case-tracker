@@ -2770,6 +2770,9 @@ export async function createTrackerComment(
     notifyContactIds?: string[];
     /** Optional Slack heading override (e.g. "Sentiment Note"). */
     slackLabel?: string | null;
+    /** Optional full Slack message body override. */
+    slackText?: string | null;
+    mentionSlackUserIds?: string[];
   },
 ): Promise<{ comment: TrackerComment; activity: ActivityLogEntry | null }> {
   const client = (await createSupabaseAdminClient()) ?? (await createTrackerClient());
@@ -2812,12 +2815,15 @@ export async function createTrackerComment(
   if (record) {
     try {
       const notifyIds = [...new Set((input.notifyContactIds ?? []).filter((id) => isUuid(id)))];
-      const mentionSlackUserIds =
+      const mentionFromContacts =
         notifyIds.length > 0
           ? (await getUsers())
               .filter((user) => notifyIds.includes(user.id) && user.slackUserId)
               .map((user) => user.slackUserId!)
           : [];
+      const mentionSlackUserIds = [
+        ...new Set([...(input.mentionSlackUserIds ?? []), ...mentionFromContacts].filter(Boolean)),
+      ];
 
       await notifySlackCommentPosted(record, {
         type: input.type,
@@ -2825,6 +2831,7 @@ export async function createTrackerComment(
         authorName,
         mentionSlackUserIds,
         slackLabel: input.slackLabel,
+        slackText: input.slackText,
       });
     } catch (error) {
       console.error("Slack comment notification failed", error);

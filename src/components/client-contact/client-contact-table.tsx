@@ -12,14 +12,23 @@ import { type SentimentEvidenceItem } from "@/lib/client-contact/evidence-slack"
 import { QUALIFYING_CALL_SECONDS, TEXT_EXCHANGE_WINDOW_DAYS } from "@/lib/client-contact/qualify";
 import {
   CLIENT_CONTACT_LONG_GAP_DAYS,
+  CLIENT_CONTACT_STATUS_HELP,
+  CLIENT_CONTACT_STATUS_LABEL,
   CLIENT_CONTACT_WINDOW_DAYS,
+  clientContactStatus,
   contactNeedsFollowUp,
   contactSentimentLabel,
   daysSinceContact,
+  type ClientContactStatus,
 } from "@/lib/client-contact/types";
 import { cn, formatDate } from "@/lib/utils";
 
 const SENTIMENT_FILTERS = ["Positive", "Neutral", "Negative", "Unknown", "No reading"] as const;
+const CONTACT_STATUS_FILTERS = [
+  "contacted",
+  "attempted_no_response",
+  "not_attempted_recently",
+] as const satisfies readonly ClientContactStatus[];
 const DAY_RANGE_FILTERS = [
   { value: "0-10", label: "0–10 days" },
   { value: "10-20", label: "10–20 days" },
@@ -96,6 +105,7 @@ export function ClientContactView({
   const [legalAssistants, setLegalAssistants] = useState<string[]>([]);
   const [sentimentFilters, setSentimentFilters] = useState<string[]>([]);
   const [dayRanges, setDayRanges] = useState<string[]>([]);
+  const [contactStatuses, setContactStatuses] = useState<ClientContactStatus[]>([]);
   const [sortKey, setSortKey] = useState<CallSortKey>("days");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [sentimentSortKey, setSentimentSortKey] = useState<SentimentSortKey>("week");
@@ -174,7 +184,12 @@ export function ClientContactView({
       const response = await fetch("/api/client-contact/sentiment-note", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ caseId: row.caseId, clientName: row.clientName, note }),
+        body: JSON.stringify({
+          caseId: row.caseId,
+          clientName: row.clientName,
+          note,
+          sentiment: row.sentiment,
+        }),
       });
       if (!response.ok) {
         const detail = (await response.json().catch(() => null)) as { error?: string } | null;
@@ -308,39 +323,44 @@ export function ClientContactView({
   );
 
   const callFiltered = useMemo(() => {
-    return staffFiltered.filter((row) => matchesDayRanges(row.lastInteraction, dayRanges));
-  }, [staffFiltered, dayRanges]);
+    return staffFiltered
+      .filter((row) => matchesDayRanges(row.lastInteraction, dayRanges))
+      .filter((row) => {
+        if (!contactStatuses.length) return true;
+        return contactStatuses.includes(clientContactStatus(row.lastInteraction, row.lastAttempt));
+      });
+  }, [staffFiltered, dayRanges, contactStatuses]);
 
   const counted = useMemo(() => {
     let never = 0;
-    let over45 = 0;
     let over30 = 0;
-    let within = 0;
+    let contacted = 0;
+    let attemptedNoResponse = 0;
+    let notAttemptedRecently = 0;
     for (const row of callFiltered) {
       const days = daysSinceContact(row.lastInteraction);
       if (days === null) {
         never += 1;
         over30 += 1;
-      } else if (days >= CLIENT_CONTACT_LONG_GAP_DAYS) {
-        over45 += 1;
-        over30 += 1;
       } else if (days >= CLIENT_CONTACT_WINDOW_DAYS) {
         over30 += 1;
-      } else {
-        within += 1;
       }
+      const status = clientContactStatus(row.lastInteraction, row.lastAttempt);
+      if (status === "contacted") contacted += 1;
+      else if (status === "attempted_no_response") attemptedNoResponse += 1;
+      else notAttemptedRecently += 1;
     }
-    return { never, over45, over30, within };
+    return { never, over30, contacted, attemptedNoResponse, notAttemptedRecently };
   }, [callFiltered]);
 
   const callVisible = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const enforceOverdue = overdueOnly && dayRanges.length === 0;
+    const enforceOverdue = overdueOnly && dayRanges.length === 0 && contactStatuses.length === 0;
     return callFiltered
       .filter((row) => !enforceOverdue || contactNeedsFollowUp(row.lastInteraction))
       .filter((row) => matchesSearch(row, needle))
       .sort((left, right) => compareRows(left, right, sortKey, sortDirection));
-  }, [callFiltered, overdueOnly, dayRanges, query, sortKey, sortDirection]);
+  }, [callFiltered, overdueOnly, dayRanges, contactStatuses, query, sortKey, sortDirection]);
 
   const sentimentFiltered = useMemo(() => {
     return sentimentStaffFiltered.filter((row) => {
@@ -378,16 +398,21 @@ export function ClientContactView({
         <p className="font-semibold text-navy-950">What counts for the {CLIENT_CONTACT_WINDOW_DAYS} days</p>
         <ul className="mt-1 list-disc pl-4">
           <li>
+            <span className="font-medium text-navy-950">{CLIENT_CONTACT_STATUS_LABEL.contacted}:</span>{" "}
+            {CLIENT_CONTACT_STATUS_HELP.contacted}
+          </li>
+          <li>
+            <span className="font-medium text-navy-950">{CLIENT_CONTACT_STATUS_LABEL.attempted_no_response}:</span>{" "}
+            {CLIENT_CONTACT_STATUS_HELP.attempted_no_response}
+          </li>
+          <li>
+            <span className="font-medium text-navy-950">{CLIENT_CONTACT_STATUS_LABEL.not_attempted_recently}:</span>{" "}
+            {CLIENT_CONTACT_STATUS_HELP.not_attempted_recently}
+          </li>
+          <li>
             <span className="font-medium text-navy-950">Last interaction</span> is the latest of Call{" "}
-            {QUALIFYING_CALL_SECONDS}+sec, Text exchange, or Other.
-          </li>
-          <li>
-            <span className="font-medium text-navy-950">Call {QUALIFYING_CALL_SECONDS}+sec</span> is a connected call of
-            at least {QUALIFYING_CALL_SECONDS} seconds. Sona does not count.
-          </li>
-          <li>
-            <span className="font-medium text-navy-950">Text exchange</span> needs both an inbound and an outbound text
-            within {TEXT_EXCHANGE_WINDOW_DAYS} days. A one-way text does not reset the clock.
+            {QUALIFYING_CALL_SECONDS}+sec, Text exchange, or Other. Call {QUALIFYING_CALL_SECONDS}+sec must be connected
+            (Sona does not count). Text exchange needs inbound + outbound within {TEXT_EXCHANGE_WINDOW_DAYS} days.
           </li>
           <li>
             <span className="font-medium text-navy-950">Last attempt</span> still includes outbound calls and texts that
@@ -458,24 +483,87 @@ export function ClientContactView({
 
       {tab === "calls" ? (
         <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            title={CLIENT_CONTACT_STATUS_HELP.contacted}
+            onClick={() =>
+              setContactStatuses((current) =>
+                current.length === 1 && current[0] === "contacted" ? [] : ["contacted"],
+              )
+            }
+            className="rounded-full"
+          >
+            <Badge
+              variant={contactStatuses[0] === "contacted" ? "success" : "outline"}
+              className="px-2 py-0 text-[11px]"
+            >
+              {counted.contacted} Contacted
+            </Badge>
+          </button>
+          <button
+            type="button"
+            title={CLIENT_CONTACT_STATUS_HELP.attempted_no_response}
+            onClick={() =>
+              setContactStatuses((current) =>
+                current.length === 1 && current[0] === "attempted_no_response"
+                  ? []
+                  : ["attempted_no_response"],
+              )
+            }
+            className="rounded-full"
+          >
+            <Badge
+              variant={contactStatuses[0] === "attempted_no_response" ? "warning" : "outline"}
+              className="px-2 py-0 text-[11px]"
+            >
+              {counted.attemptedNoResponse} Attempted — No Response
+            </Badge>
+          </button>
+          <button
+            type="button"
+            title={CLIENT_CONTACT_STATUS_HELP.not_attempted_recently}
+            onClick={() =>
+              setContactStatuses((current) =>
+                current.length === 1 && current[0] === "not_attempted_recently"
+                  ? []
+                  : ["not_attempted_recently"],
+              )
+            }
+            className="rounded-full"
+          >
+            <Badge
+              variant={contactStatuses[0] === "not_attempted_recently" ? "danger" : "outline"}
+              className="px-2 py-0 text-[11px]"
+            >
+              {counted.notAttemptedRecently} Not Attempted Recently
+            </Badge>
+          </button>
           <Badge variant="danger" className="px-2 py-0 text-[11px]">
             {counted.over30} {CLIENT_CONTACT_WINDOW_DAYS}+ days
-          </Badge>
-          <Badge variant="danger" className="px-2 py-0 text-[11px]">
-            {counted.over45} over {CLIENT_CONTACT_LONG_GAP_DAYS} days
           </Badge>
           <Badge variant="outline" className="px-2 py-0 text-[11px]">
             {counted.never} never
           </Badge>
-          <Badge variant="success" className="px-2 py-0 text-[11px]">
-            {counted.within} within {CLIENT_CONTACT_WINDOW_DAYS} days
-          </Badge>
+          <HeaderMultiFilter
+            label="Status"
+            options={CONTACT_STATUS_FILTERS.map((value) => ({
+              value,
+              label: CLIENT_CONTACT_STATUS_LABEL[value],
+            }))}
+            selected={contactStatuses}
+            onChange={(next) => setContactStatuses(next as ClientContactStatus[])}
+          />
           <button
             type="button"
-            onClick={() => setOverdueOnly((current) => !current)}
+            onClick={() => {
+              setOverdueOnly((current) => !current);
+              if (contactStatuses.length) setContactStatuses([]);
+            }}
             className="text-xs font-medium text-pink-600 underline-offset-2 hover:underline"
           >
-            {overdueOnly && dayRanges.length === 0 ? "Show all open cases" : "Show only cases needing contact"}
+            {overdueOnly && dayRanges.length === 0 && contactStatuses.length === 0
+              ? "Show all open cases"
+              : "Show only cases needing contact"}
           </button>
           <Input
             value={query}
@@ -643,6 +731,12 @@ function CallsTable({
             <TableHead className={compactHead}>Attorney</TableHead>
             <TableHead className={compactHead}>Paralegal</TableHead>
             <TableHead className={compactHead}>Legal assistant</TableHead>
+            <TableHead
+              className={compactHead}
+              title={`${CLIENT_CONTACT_STATUS_HELP.contacted} ${CLIENT_CONTACT_STATUS_HELP.attempted_no_response} ${CLIENT_CONTACT_STATUS_HELP.not_attempted_recently}`}
+            >
+              Status
+            </TableHead>
             <TableHead className={compactHead} title="Latest qualifying contact">
               Last interaction
             </TableHead>
@@ -669,13 +763,14 @@ function CallsTable({
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={15} className={cn(compactCell, "text-muted-foreground")}>
+              <TableCell colSpan={16} className={cn(compactCell, "text-muted-foreground")}>
                 {overdueOnly ? "Every open case has a client interaction in the last 30 days." : "No matching cases."}
               </TableCell>
             </TableRow>
           ) : (
             rows.map((row) => {
               const days = daysSinceContact(row.lastInteraction);
+              const status = clientContactStatus(row.lastInteraction, row.lastAttempt);
               return (
                 <TableRow key={row.caseId}>
                   <TableCell className={compactCell}>
@@ -700,6 +795,15 @@ function CallsTable({
                   <TableCell className={cn(compactCell, "max-w-36 truncate")}>{row.attorneyName}</TableCell>
                   <TableCell className={cn(compactCell, "max-w-36 truncate")}>{row.paralegalName || "—"}</TableCell>
                   <TableCell className={cn(compactCell, "max-w-36 truncate")}>{row.legalAssistantName || "—"}</TableCell>
+                  <TableCell className={cn(compactCell, "whitespace-nowrap")}>
+                    <Badge
+                      variant={contactStatusBadgeVariant(status)}
+                      className="max-w-40 truncate px-1.5 py-0 text-[10px]"
+                      title={CLIENT_CONTACT_STATUS_HELP[status]}
+                    >
+                      {CLIENT_CONTACT_STATUS_LABEL[status]}
+                    </Badge>
+                  </TableCell>
                   <TableCell className={cn(compactCell, "whitespace-nowrap")}>{formatContactDate(row.lastInteraction)}</TableCell>
                   <TableCell className={compactCell}>
                     <Badge variant={daysBadgeVariant(days)} className="px-1.5 py-0 text-[10px]">
@@ -1109,6 +1213,12 @@ function daysBadgeVariant(days: number | null) {
   if (days === null || days >= CLIENT_CONTACT_LONG_GAP_DAYS) return "danger" as const;
   if (days >= CLIENT_CONTACT_WINDOW_DAYS) return "warning" as const;
   return "success" as const;
+}
+
+function contactStatusBadgeVariant(status: ClientContactStatus) {
+  if (status === "contacted") return "success" as const;
+  if (status === "attempted_no_response") return "warning" as const;
+  return "danger" as const;
 }
 
 function contactAge(value: string | null) {
