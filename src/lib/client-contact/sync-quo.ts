@@ -6,7 +6,12 @@ import {
   type ContactStamp,
 } from "@/lib/client-contact/repository";
 import { syncClientContactsFromLedger } from "@/lib/client-contact/sync-ledger";
-import { isQualifyingClientCall, latestTextExchangeAt, type TextDirection } from "@/lib/client-contact/qualify";
+import {
+  clientContactLookbackSinceIso,
+  isQualifyingClientCall,
+  latestTextExchangeAt,
+  type TextDirection,
+} from "@/lib/client-contact/qualify";
 import { latestDate } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
@@ -20,8 +25,6 @@ import {
 } from "@/lib/quo/client";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCases } from "@/lib/supabase/services";
-
-const LOOKBACK_MS = 120 * 24 * 60 * 60 * 1000;
 const BACKFILL_SETTINGS_KEY = "client_contact_line_backfill";
 /** Two daily runs at this size cover a few hundred open phones before morning review. */
 const DEFAULT_BACKFILL_PHONES = 220;
@@ -53,7 +56,7 @@ export async function syncQuoClientContacts() {
     matches.some((match) => openCases.has(match.caseNumber)),
   );
 
-  const newerThan = new Date(Date.now() - LOOKBACK_MS).toISOString();
+  const newerThan = clientContactLookbackSinceIso();
   const conversations = await listRecentQuoClientActivity({ maxPages: 40, newerThan });
   const byCase = new Map<string, ContactStamp>();
   const textsByCase = new Map<string, Array<{ at: string; direction: TextDirection }>>();

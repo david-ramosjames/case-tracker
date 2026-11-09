@@ -10,7 +10,7 @@ export type ClientContactSummary = {
   lastInboundTextAt: string | null;
   lastOutboundTextAt: string | null;
   lastConversationAt: string | null;
-  /** Latest call of at least 90 seconds that Sona did not handle. */
+  /** Latest call of at least 60 seconds that Sona did not handle. */
   lastQualifyingCallAt: string | null;
   /** Later message of the latest inbound+outbound pair within 7 days. */
   lastTextExchangeAt: string | null;
@@ -22,7 +22,7 @@ export type ClientContactSummary = {
 export type ClientContactDates = {
   /**
    * What resets the 30-day clock.
-   * A call of at least 90 seconds (Sona excluded), an inbound and outbound text within 7 days,
+   * A call of at least 60 seconds (Sona excluded), an inbound and outbound text within 7 days,
    * or a manual contact log. A short call, Sona, or a one-way text does not count.
    */
   lastInteraction: string | null;

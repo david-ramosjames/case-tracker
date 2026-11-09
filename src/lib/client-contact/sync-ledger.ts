@@ -1,7 +1,13 @@
 import { loadCaseContactMaps, type ContactCase } from "@/lib/client-contact/case-phones";
 import { mergeQuoDirectoryContacts } from "@/lib/client-contact/directory-contacts";
 import { applyContactStamps, markQualifyingContactRuleReady, type ContactStamp } from "@/lib/client-contact/repository";
-import { callDurationSeconds, isQualifyingClientCall, latestTextExchangeAt, textDirection } from "@/lib/client-contact/qualify";
+import {
+  callDurationSeconds,
+  clientContactLookbackSinceIso,
+  isQualifyingClientCall,
+  latestTextExchangeAt,
+  textDirection,
+} from "@/lib/client-contact/qualify";
 import { latestDate } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
@@ -10,7 +16,6 @@ import { normalizePhoneForComparison } from "@/lib/quo/phone";
 import { getCases } from "@/lib/supabase/services";
 import { Client } from "pg";
 
-const LOOKBACK_DAYS = 120;
 /** Cap Quo GET lookups so orphan recovery stays inside the ledger cron budget. */
 const MAX_ORPHAN_ENRICHMENTS = 80;
 
@@ -146,7 +151,7 @@ export async function syncClientContactsFromLedger() {
     }
   }
 
-  const since = new Date(Date.now() - LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  const since = clientContactLookbackSinceIso();
   const local = /@(localhost|127\.0\.0\.1)[:/]/.test(connectionString);
   const client = new Client({
     connectionString,

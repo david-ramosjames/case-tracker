@@ -9,6 +9,7 @@ import {
   sentimentFlagKey,
   worstSentimentByCaseNumber,
 } from "@/lib/client-contact/repository";
+import { attachSentimentEvidenceSlackLinks } from "@/lib/client-contact/evidence-slack";
 import { clientContactDates } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
@@ -62,6 +63,15 @@ function quoUrlForCase(record: CaseRecord) {
     record.tracker.quoContacts.map((contact) => getQuoContactUrl(contact.quoContactId)).find((url) => url) ??
     null
   );
+}
+
+function phonesForCase(record: CaseRecord) {
+  const phones = new Set<string>();
+  if (record.tracker.clientPhone) phones.add(record.tracker.clientPhone);
+  for (const contact of record.tracker.quoContacts) {
+    if (contact.phone) phones.add(contact.phone);
+  }
+  return [...phones];
 }
 
 export default async function ClientContactPage() {
@@ -121,8 +131,12 @@ export default async function ClientContactPage() {
       sentimentScore: sentiment?.score ?? null,
       sentimentReason: sentiment?.reasonSummary ?? null,
       sentimentEvidenceUrls: sentiment?.evidenceUrls ?? [],
+      sentimentEvidence: sentiment?.evidenceItems ?? [],
       sentimentWeekLabel: sentiment?.weekLabel ?? null,
+      sentimentWindowStart: sentiment?.windowStart ?? null,
+      sentimentWindowEnd: sentiment?.windowEnd ?? null,
       sentimentScoredAt: sentiment?.scoredAt ?? null,
+      clientPhones: phonesForCase(record),
       actionRequired: isActionRequired(record.shared.caseNumber, record.shared.clientName),
       quoUrl: quoUrlForCase(record),
     };
@@ -158,8 +172,12 @@ export default async function ClientContactPage() {
       sentimentScore: reading.score,
       sentimentReason: reading.reasonSummary,
       sentimentEvidenceUrls: reading.evidenceUrls,
+      sentimentEvidence: reading.evidenceItems,
       sentimentWeekLabel: reading.weekLabel,
+      sentimentWindowStart: reading.windowStart,
+      sentimentWindowEnd: reading.windowEnd,
       sentimentScoredAt: reading.scoredAt,
+      clientPhones: phonesForCase(record),
       actionRequired: isActionRequired(record.shared.caseNumber, reading.clientName),
       quoUrl: quoUrlForCase(record),
     });
@@ -175,16 +193,25 @@ export default async function ClientContactPage() {
       sentimentScore: null,
       sentimentReason: null,
       sentimentEvidenceUrls: [],
+      sentimentEvidence: [],
       sentimentWeekLabel: null,
+      sentimentWindowStart: null,
+      sentimentWindowEnd: null,
       sentimentScoredAt: null,
     });
   }
+
+  const channelIdByCase = new Map<string, string>();
+  for (const [caseNumber, channel] of slackChannels) {
+    if (channel.slackChannelId) channelIdByCase.set(cleanCaseNumber(caseNumber), channel.slackChannelId);
+  }
+  const sentimentRowsWithSlack = await attachSentimentEvidenceSlackLinks(sentimentRows, channelIdByCase);
 
   return (
     <Suspense fallback={<div className="text-sm text-muted-foreground">Loading contact…</div>}>
       <ClientContactView
         rows={rows}
-        sentimentRows={sentimentRows}
+        sentimentRows={sentimentRowsWithSlack}
         scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds}
       />
     </Suspense>

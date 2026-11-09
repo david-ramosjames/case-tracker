@@ -1,5 +1,17 @@
 /** A call counts toward the 30-day contact clock only at or above this length. */
-export const QUALIFYING_CALL_SECONDS = 90;
+export const QUALIFYING_CALL_SECONDS = 60;
+
+/**
+ * Contact sync reads Quo ledger activity from this floor forward
+ * (July 1, 2026 00:00 America/Chicago).
+ */
+export const CLIENT_CONTACT_LEDGER_FLOOR_ISO = "2026-07-01T05:00:00.000Z";
+
+export function clientContactLookbackSinceIso(now = Date.now()) {
+  const floorMs = Date.parse(CLIENT_CONTACT_LEDGER_FLOOR_ISO);
+  if (Number.isFinite(floorMs) && floorMs < now) return new Date(floorMs).toISOString();
+  return new Date(now - 120 * 24 * 60 * 60 * 1000).toISOString();
+}
 
 /**
  * An inbound text and an outbound text count only when both happen inside this window.

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { type SentimentEvidenceItem } from "@/lib/client-contact/evidence-slack";
 import { QUALIFYING_CALL_SECONDS, TEXT_EXCHANGE_WINDOW_DAYS } from "@/lib/client-contact/qualify";
 import {
   CLIENT_CONTACT_LONG_GAP_DAYS,
@@ -45,7 +46,7 @@ export type ClientContactRow = {
   legalAssistantName: string;
   lastInteraction: string | null;
   lastAttempt: string | null;
-  /** Latest call of at least 90 seconds (Sona excluded). */
+  /** Latest call of at least 60 seconds (Sona excluded). */
   lastQualifyingCall: string | null;
   lastInboundText: string | null;
   lastOutboundText: string | null;
@@ -59,8 +60,12 @@ export type ClientContactRow = {
   sentimentScore: number | null;
   sentimentReason: string | null;
   sentimentEvidenceUrls: string[];
+  sentimentEvidence: SentimentEvidenceItem[];
   sentimentWeekLabel: string | null;
+  sentimentWindowStart?: string | null;
+  sentimentWindowEnd?: string | null;
   sentimentScoredAt: string | null;
+  clientPhones?: string[];
   actionRequired: boolean;
   quoUrl: string | null;
 };
@@ -96,6 +101,9 @@ export function ClientContactView({
   const [actionRequiredOnly, setActionRequiredOnly] = useState(false);
   const [actionOverrides, setActionOverrides] = useState<Record<string, boolean>>({});
   const [actionSaving, setActionSaving] = useState<Record<string, boolean>>({});
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [noteSaving, setNoteSaving] = useState<Record<string, boolean>>({});
+  const [noteStatus, setNoteStatus] = useState<Record<string, string>>({});
   const [focusedCaseNumber, setFocusedCaseNumber] = useState<string | null>(null);
   const sentimentTabDefaultsApplied = useRef(false);
   const searchParams = useSearchParams();
@@ -150,6 +158,39 @@ export function ClientContactView({
   function isActionRequired(row: ClientContactRow) {
     const key = actionFlagKey(row);
     return key in actionOverrides ? actionOverrides[key] : row.actionRequired;
+  }
+
+  async function submitSentimentNote(row: ClientContactRow) {
+    const key = actionFlagKey(row);
+    const note = (noteDrafts[key] ?? "").trim();
+    if (!note) return;
+    setNoteSaving((current) => ({ ...current, [key]: true }));
+    setNoteStatus((current) => ({ ...current, [key]: "" }));
+    try {
+      const response = await fetch("/api/client-contact/sentiment-note", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caseId: row.caseId, note }),
+      });
+      if (!response.ok) {
+        const detail = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(detail?.error || "Unable to post note.");
+      }
+      setNoteDrafts((current) => ({ ...current, [key]: "" }));
+      setNoteStatus((current) => ({ ...current, [key]: "Posted" }));
+    } catch (error) {
+      setNoteStatus((current) => ({
+        ...current,
+        [key]: error instanceof Error ? error.message : "Unable to post note.",
+      }));
+      console.error(error);
+    } finally {
+      setNoteSaving((current) => {
+        const copy = { ...current };
+        delete copy[key];
+        return copy;
+      });
+    }
   }
 
   async function toggleActionRequired(row: ClientContactRow, next: boolean) {
@@ -553,6 +594,15 @@ export function ClientContactView({
           isActionRequired={isActionRequired}
           actionSaving={actionSaving}
           onToggleActionRequired={toggleActionRequired}
+          noteDrafts={noteDrafts}
+          noteSaving={noteSaving}
+          noteStatus={noteStatus}
+          onNoteChange={(row, value) => {
+            const key = actionFlagKey(row);
+            setNoteDrafts((current) => ({ ...current, [key]: value }));
+            setNoteStatus((current) => ({ ...current, [key]: "" }));
+          }}
+          onNoteSubmit={submitSentimentNote}
         />
       )}
     </div>
@@ -682,6 +732,11 @@ function SentimentTable({
   isActionRequired,
   actionSaving,
   onToggleActionRequired,
+  noteDrafts,
+  noteSaving,
+  noteStatus,
+  onNoteChange,
+  onNoteSubmit,
 }: {
   rows: ClientContactRow[];
   focusedCaseNumber: string | null;
@@ -691,6 +746,11 @@ function SentimentTable({
   isActionRequired: (row: ClientContactRow) => boolean;
   actionSaving: Record<string, boolean>;
   onToggleActionRequired: (row: ClientContactRow, next: boolean) => void;
+  noteDrafts: Record<string, string>;
+  noteSaving: Record<string, boolean>;
+  noteStatus: Record<string, string>;
+  onNoteChange: (row: ClientContactRow, value: string) => void;
+  onNoteSubmit: (row: ClientContactRow) => void;
 }) {
   return (
     <div className="rounded-lg border">
@@ -708,12 +768,13 @@ function SentimentTable({
             <SortableHead label="Week" sortKey="week" active={sortKey} direction={sortDirection} onSort={onSort} />
             <TableHead className={compactHead}>Why</TableHead>
             <TableHead className={compactHead}>Evidence</TableHead>
+            <TableHead className={compactHead}>Notes</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={9} className={cn(compactCell, "text-muted-foreground")}>
+              <TableCell colSpan={10} className={cn(compactCell, "text-muted-foreground")}>
                 No matching sentiment readings.
               </TableCell>
             </TableRow>
@@ -723,7 +784,11 @@ function SentimentTable({
               const showScore = label !== "Unknown" && label !== "—" && row.sentimentScore != null;
               const weekLabel = formatWeekLabel(row.sentimentWeekLabel, row.sentimentScoredAt);
               const required = isActionRequired(row);
-              const saving = Boolean(actionSaving[`${row.caseNumber.trim()}\t${row.clientName.trim()}`]);
+              const rowKey = `${row.caseNumber.trim()}\t${row.clientName.trim()}`;
+              const saving = Boolean(actionSaving[rowKey]);
+              const noteBusy = Boolean(noteSaving[rowKey]);
+              const noteValue = noteDrafts[rowKey] ?? "";
+              const noteMessage = noteStatus[rowKey] ?? "";
               const reason =
                 label === "Unknown"
                   ? "Last interaction is older than 30 days, so this reading is not current enough."
@@ -764,8 +829,45 @@ function SentimentTable({
                   <TableCell className={cn(compactCell, "min-w-64 max-w-xl whitespace-normal text-[11px] leading-snug text-muted-foreground")}>
                     {reason}
                   </TableCell>
-                  <TableCell className={cn(compactCell, "min-w-28 whitespace-nowrap")}>
-                    <EvidenceLinks urls={row.sentimentEvidenceUrls} />
+                  <TableCell className={cn(compactCell, "min-w-36 max-w-56 whitespace-normal")}>
+                    <EvidenceLinks items={row.sentimentEvidence} />
+                  </TableCell>
+                  <TableCell className={cn(compactCell, "min-w-48 max-w-64")}>
+                    <form
+                      className="flex flex-col gap-1"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        onNoteSubmit(row);
+                      }}
+                    >
+                      <Input
+                        value={noteValue}
+                        disabled={noteBusy}
+                        placeholder="Add note…"
+                        className="h-7 text-xs"
+                        aria-label={`Note for ${row.clientName}`}
+                        onChange={(event) => onNoteChange(row, event.target.value)}
+                      />
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="submit"
+                          disabled={noteBusy || !noteValue.trim()}
+                          className="text-[10px] font-medium text-pink-600 disabled:text-muted-foreground"
+                        >
+                          {noteBusy ? "Posting…" : "Post"}
+                        </button>
+                        {noteMessage ? (
+                          <span
+                            className={cn(
+                              "text-[10px]",
+                              noteMessage === "Posted" ? "text-emerald-700" : "text-pink-600",
+                            )}
+                          >
+                            {noteMessage}
+                          </span>
+                        ) : null}
+                      </div>
+                    </form>
                   </TableCell>
                 </TableRow>
               );
@@ -883,33 +985,31 @@ function SentimentCell({ row, onOpen }: { row: ClientContactRow; onOpen: () => v
   );
 }
 
-/** Compact Quo call/SMS evidence links — same sources as the weekly sentiment email. */
-function EvidenceLinks({ urls }: { urls: string[] }) {
-  if (!urls.length) return <span className="text-muted-foreground">—</span>;
+/** Compact evidence links — Slack Quo-router posts when found, with dates. */
+function EvidenceLinks({ items }: { items: SentimentEvidenceItem[] }) {
+  if (!items.length) return <span className="text-muted-foreground">—</span>;
   return (
-    <span className="inline-flex flex-wrap gap-1">
-      {urls.slice(0, 8).map((url, index) => (
-        <a
-          key={`${url}-${index}`}
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-0.5 font-medium text-pink-600 hover:text-pink-500"
-          title={url}
-        >
-          {evidenceLinkLabel(url, index)}
-          <ExternalLink className="h-3 w-3" />
-        </a>
-      ))}
+    <span className="inline-flex flex-wrap gap-x-2 gap-y-1">
+      {items.slice(0, 8).map((item, index) => {
+        const prefix =
+          item.kind === "sms" ? `SMS${index + 1}` : item.kind === "call" ? `V${index + 1}` : `E${index + 1}`;
+        const label = item.dateLabel ? `${prefix} ${item.dateLabel}` : prefix;
+        return (
+          <a
+            key={`${item.url}-${index}`}
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-0.5 whitespace-nowrap font-medium text-pink-600 hover:text-pink-500"
+            title={item.url}
+          >
+            {label}
+            <ExternalLink className="h-3 w-3" />
+          </a>
+        );
+      })}
     </span>
   );
-}
-
-function evidenceLinkLabel(url: string, index: number) {
-  const lower = url.toLowerCase();
-  if (lower.includes("/message") || lower.includes("sms")) return `SMS${index + 1}`;
-  if (lower.includes("/call") || lower.includes("/inbox")) return `V${index + 1}`;
-  return `E${index + 1}`;
 }
 
 function sentimentBadgeVariant(label: string) {

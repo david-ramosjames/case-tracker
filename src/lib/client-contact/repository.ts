@@ -1,4 +1,8 @@
 import { cleanCaseNumber } from "@/lib/csv/parse";
+import {
+  evidenceItemsFromStoredUrls,
+  type SentimentEvidenceItem,
+} from "@/lib/client-contact/evidence-slack";
 import { latestDate, type ClientContactSummary } from "@/lib/client-contact/types";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 
@@ -75,16 +79,12 @@ function rowToSummary(row: SummaryRow): ClientContactSummary {
 function keptQualifyingDate(
   previous: string | null | undefined,
   computed: string | null | undefined,
-  lookbackStart: string | null | undefined,
-  replace: boolean,
+  _lookbackStart: string | null | undefined,
+  _replace: boolean,
 ) {
-  if (!replace) return latestDate([previous, computed]);
-  if (computed) return computed;
-  if (!previous || !lookbackStart) return previous ?? null;
-  const previousMs = Date.parse(previous);
-  const startMs = Date.parse(lookbackStart);
-  if (Number.isFinite(previousMs) && Number.isFinite(startMs) && previousMs < startMs) return previous;
-  return null;
+  // The Quo ledger can miss older calls (or store them without the client phone).
+  // Never erase a qualifying date the Quo API / an earlier sync already proved.
+  return latestDate([previous, computed]);
 }
 
 function otherMoment(at: string | null | undefined) {
@@ -123,7 +123,7 @@ export async function listClientContactSummaries(caseNumbers: string[]) {
   return summaries;
 }
 
-/** True after a ledger sync has stored 90-second calls and 7-day text exchanges. */
+/** True after a ledger sync has stored 60-second calls and 7-day text exchanges. */
 export async function isQualifyingContactRuleReady() {
   const admin = createSupabaseAdminClient();
   if (!admin) return false;
@@ -138,8 +138,8 @@ export async function markQualifyingContactRuleReady() {
   const { error } = await admin.from("case_tracker_settings").upsert(
     {
       key: QUALIFYING_RULE_KEY,
-      value: { ready: true, at: new Date().toISOString() },
-      description: "30-day contact counts a 90-second human call or a 7-day inbound and outbound text exchange. Sona does not count.",
+      value: { ready: true, at: new Date().toISOString(), callSeconds: 60, ledgerFloor: "2026-07-01" },
+      description: "30-day contact counts a 60-second human call or a 7-day inbound and outbound text exchange. Sona does not count. Ledger floor July 1, 2026.",
     },
     { onConflict: "key" },
   );
@@ -221,7 +221,11 @@ export type ClientSentimentReading = {
   score: number | null;
   reasonSummary: string | null;
   evidenceUrls: string[];
+  /** Structured evidence with optional date labels from the weekly markdown. */
+  evidenceItems: SentimentEvidenceItem[];
   weekLabel: string | null;
+  windowStart: string | null;
+  windowEnd: string | null;
   scoredAt: string;
 };
 
@@ -233,14 +237,10 @@ type SentimentRow = {
   reason_summary: string | null;
   evidence_urls: string | null;
   week_label: string | null;
+  window_start: string | null;
+  window_end: string | null;
   scored_at: string;
 };
-
-function parseEvidenceUrls(value: string | null | undefined) {
-  if (!value?.trim()) return [];
-  const found = value.match(/https?:\/\/[^\s<>"']+/g) ?? [];
-  return [...new Set(found.map((url) => url.replace(/[),.;]+$/g, "")).filter(Boolean))];
-}
 
 const SENTIMENT_SEVERITY: Record<string, number> = { Negative: 0, Neutral: 1, Positive: 2 };
 
@@ -262,7 +262,9 @@ export async function listLatestClientSentiments(caseNumbers: string[]) {
     for (;;) {
       const { data, error } = await admin
         .from("case_client_sentiment")
-        .select("case_number, client_name, sentiment, score, reason_summary, evidence_urls, week_label, scored_at")
+        .select(
+          "case_number, client_name, sentiment, score, reason_summary, evidence_urls, week_label, window_start, window_end, scored_at",
+        )
         .in("case_number", chunk)
         .order("scored_at", { ascending: false })
         .range(from, from + 999);
@@ -271,14 +273,18 @@ export async function listLatestClientSentiments(caseNumbers: string[]) {
       for (const row of page) {
         const contactKey = contactKeyForReading(row);
         if (byContact.has(contactKey)) continue;
+        const evidenceItems = evidenceItemsFromStoredUrls(row.evidence_urls);
         byContact.set(contactKey, {
           caseNumber: row.case_number,
           clientName: contactKey,
           sentiment: row.sentiment,
           score: row.score,
           reasonSummary: row.reason_summary,
-          evidenceUrls: parseEvidenceUrls(row.evidence_urls),
+          evidenceUrls: evidenceItems.map((item) => item.url),
+          evidenceItems,
           weekLabel: row.week_label,
+          windowStart: row.window_start,
+          windowEnd: row.window_end,
           scoredAt: row.scored_at,
         });
       }
