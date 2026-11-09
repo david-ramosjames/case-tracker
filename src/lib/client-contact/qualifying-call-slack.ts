@@ -37,15 +37,16 @@ export async function resolveAndCacheQualifyingCallSlackLinks(options?: {
       lastQualifyingCall: summary.lastQualifyingCallAt,
       lastQualifyingCallId: summary.lastQualifyingCallId,
       lastQualifyingCallSlackUrl: summary.lastQualifyingCallSlackUrl,
-    }));
+    }))
+    .sort((a, b) => Date.parse(b.lastQualifyingCall ?? "") - Date.parse(a.lastQualifyingCall ?? ""));
 
   if (!rows.length) {
     return { pending: 0, resolved: 0, saved: 0 };
   }
 
   const enriched = await attachQualifyingCallSlackLinks(rows, channelIdByCase, {
-    budgetMs: options?.budgetMs ?? 20_000,
-    maxChannels: options?.maxChannels ?? 80,
+    budgetMs: options?.budgetMs ?? 45_000,
+    maxChannels: options?.maxChannels ?? 200,
   });
 
   const updates = enriched
