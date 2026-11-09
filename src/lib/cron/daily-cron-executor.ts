@@ -25,10 +25,18 @@ export type DailyCronRunOptions = {
 
 async function runAndSaveGroup(runId: string, batchIndex: number, group: DailyCronGroup, options: DailyCronRunOptions) {
   console.info("Daily cron group starting", { runId, batchIndex, group });
-  const result = await runDailyCronGroup(group, options);
-  await saveDailyCronGroupResult(runId, group, result);
-  console.info("Daily cron group finished", { runId, batchIndex, group, ok: result.ok !== false });
-  return result;
+  try {
+    const result = await runDailyCronGroup(group, options);
+    await saveDailyCronGroupResult(runId, group, result);
+    console.info("Daily cron group finished", { runId, batchIndex, group, ok: result.ok !== false });
+    return result;
+  } catch (error) {
+    const message = errorMessage(error) || `${group} failed.`;
+    const result = { ok: false as const, group, error: message };
+    await saveDailyCronGroupResult(runId, group, result);
+    console.error("Daily cron group crashed", { runId, batchIndex, group, message }, error);
+    return result;
+  }
 }
 
 export async function runDailyCronBatch(
@@ -79,6 +87,8 @@ export async function executeDailyCronBatchStep(
   runId: string,
   options: DailyCronRunOptions,
 ) {
+  // Always attempt the next batch even when this one reported ok:false — one bad
+  // sheet/Quo step must not stop settlements, pulse, reminders, or SMS.
   const outcome = await runDailyCronBatch(batchIndex, runId, options);
   const progressNotify = await notifyDailyCronBatchProgress(runId, batchIndex, outcome);
   console.info("Daily cron batch progress notify", { runId, batchIndex, progressNotify });
@@ -86,7 +96,7 @@ export async function executeDailyCronBatchStep(
   const nextBatch = getNextDailyCronBatchIndex(batchIndex);
   if (nextBatch != null) {
     const kick = await kickDailyCronBatch(request, nextBatch, runId);
-    console.info("Daily cron next batch kick", { runId, nextBatch, kick });
+    console.info("Daily cron next batch kick", { runId, nextBatch, kick, priorOk: outcome.ok });
     return { ...outcome, chained: nextBatch, completed: false as const, progressNotify, kick };
   }
 

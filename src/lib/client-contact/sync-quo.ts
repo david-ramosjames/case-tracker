@@ -42,30 +42,9 @@ type BackfillCursor = {
 export async function syncQuoClientContacts() {
   const fromLedger = await syncClientContactsFromLedger();
   if (fromLedger.configured) {
-    let slackLinks: { pending: number; resolved: number; saved: number } | null = null;
-    let evidenceLinks: { pending: number; resolved: number; saved: number } | null = null;
-    // Keep Slack resolve budgets well under the 800s Vercel maxDuration (ledger sync already uses time).
-    try {
-      const { resolveAndCacheQualifyingCallSlackLinks } = await import("@/lib/client-contact/qualifying-call-slack");
-      slackLinks = await resolveAndCacheQualifyingCallSlackLinks({
-        budgetMs: 25_000,
-        maxChannels: 80,
-      });
-    } catch (error) {
-      console.error("[client-contact] qualifying-call Slack resolve failed", error);
-    }
-    try {
-      const { resolveAndCacheSentimentEvidenceSlackLinks } = await import(
-        "@/lib/client-contact/sentiment-evidence-slack"
-      );
-      evidenceLinks = await resolveAndCacheSentimentEvidenceSlackLinks({
-        budgetMs: 30_000,
-        maxChannels: 100,
-      });
-    } catch (error) {
-      console.error("[client-contact] sentiment evidence Slack resolve failed", error);
-    }
-    return { ...fromLedger, slackLinks, evidenceLinks };
+    // Slack permalink resolve runs on client-contact-backfill so a Slack hang
+    // cannot block ledger timestamps from updating.
+    return fromLedger;
   }
 
   if (!isQuoEnabled()) return { configured: false as const, cases: 0, phones: 0, source: "none" as const };
@@ -194,22 +173,58 @@ async function saveBackfillCursor(cursor: BackfillCursor) {
   if (error) throw new Error(error.message);
 }
 
+/** Soft-fail Slack permalink caching for Call 60+sec + Sentiment evidence. */
+export async function resolveClientContactSlackCaches(options?: {
+  budgetMs?: number;
+  maxChannels?: number;
+}) {
+  const budgetMs = options?.budgetMs ?? 55_000;
+  const maxChannels = options?.maxChannels ?? 100;
+  let slackLinks: { pending: number; resolved: number; saved: number } | null = null;
+  let evidenceLinks: { pending: number; resolved: number; saved: number } | null = null;
+  try {
+    const { resolveAndCacheQualifyingCallSlackLinks } = await import("@/lib/client-contact/qualifying-call-slack");
+    slackLinks = await resolveAndCacheQualifyingCallSlackLinks({
+      budgetMs: Math.floor(budgetMs / 2),
+      maxChannels,
+    });
+  } catch (error) {
+    console.error("[client-contact] qualifying-call Slack resolve failed", error);
+  }
+  try {
+    const { resolveAndCacheSentimentEvidenceSlackLinks } = await import(
+      "@/lib/client-contact/sentiment-evidence-slack"
+    );
+    evidenceLinks = await resolveAndCacheSentimentEvidenceSlackLinks({
+      budgetMs: Math.floor(budgetMs / 2),
+      maxChannels,
+    });
+  } catch (error) {
+    console.error("[client-contact] sentiment evidence Slack resolve failed", error);
+  }
+  return { slackLinks, evidenceLinks };
+}
+
 /**
  * Asks Quo for calls by client phone on every firm line.
  * Persists a phone cursor so orphans are recovered across runs without
- * timing out the ledger cron.
+ * timing out the ledger cron. Also caches Slack permalinks for Contact.
  */
 export async function syncClientContactLineBackfill(options?: {
   maxPhones?: number;
   maxMs?: number;
 }) {
-  if (!process.env.QUO_API_KEY?.trim()) {
-    return { configured: false as const, phones: 0, lines: 0, cases: 0, processed: 0 };
-  }
-
   const maxPhones = options?.maxPhones ?? DEFAULT_BACKFILL_PHONES;
   const maxMs = options?.maxMs ?? DEFAULT_BACKFILL_MS;
   const started = Date.now();
+
+  if (!process.env.QUO_API_KEY?.trim()) {
+    const slack = await resolveClientContactSlackCaches({
+      budgetMs: Math.min(55_000, maxMs),
+      maxChannels: 100,
+    });
+    return { configured: false as const, phones: 0, lines: 0, cases: 0, processed: 0, ...slack };
+  }
 
   const maps = await loadCaseContactMaps();
   const openList: ContactCase[] = (await getCases())
@@ -321,6 +336,12 @@ export async function syncClientContactLineBackfill(options?: {
   if (!nextPhone) nextPhone = phoneEntries[0]?.phone ?? null;
   await saveBackfillCursor({ nextPhone });
 
+  const slackBudgetLeft = Math.max(5_000, maxMs - (Date.now() - started));
+  const slack = await resolveClientContactSlackCaches({
+    budgetMs: Math.min(55_000, slackBudgetLeft),
+    maxChannels: 100,
+  });
+
   return {
     configured: true as const,
     source: "quo_line_backfill" as const,
@@ -329,5 +350,6 @@ export async function syncClientContactLineBackfill(options?: {
     cases: savedCases,
     processed,
     nextPhone,
+    ...slack,
   };
 }

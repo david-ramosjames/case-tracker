@@ -23,19 +23,23 @@ export const DAILY_CRON_GROUP_ORDER: DailyCronGroup[] = [
 ];
 
 /**
- * Batched invocations (chained via HTTP). Within a parallel batch, groups run concurrently.
- * Order across batches is strict: early syncs → settlement → stage/Slack → SMS last.
- * Settlement stays alone (can take several minutes). SMS is always the final batch.
+ * Batched invocations (chained via HTTP). One heavy group per batch so a Quo/Sheets
+ * timeout cannot eat the full 800s maxDuration and block later steps.
+ * Order: early syncs → settlement → stage/Slack → SMS last.
  */
 export const DAILY_CRON_BATCHES: DailyCronGroup[][] = [
-  ["quoSync", "slackChannels"],
+  ["quoSync"],
+  ["slackChannels"],
   ["settlementSync"],
-  ["treatmentPromotion", "dailyPulse", "missingFields", "fieldReminders"],
+  ["treatmentPromotion"],
+  ["dailyPulse"],
+  ["missingFields"],
+  ["fieldReminders"],
   ["sms"],
 ];
 
 /** Batch indexes whose groups have no mutual dependency and can run in parallel. */
-export const DAILY_CRON_PARALLEL_BATCH_INDEXES = new Set<number>([0]);
+export const DAILY_CRON_PARALLEL_BATCH_INDEXES = new Set<number>();
 
 export function isDailyCronBatchParallel(batchIndex: number) {
   return DAILY_CRON_PARALLEL_BATCH_INDEXES.has(batchIndex);
