@@ -47,6 +47,22 @@
     {
       "path": "/api/cron/client-contact-backfill?slot=afternoon",
       "schedule": "5 23 * * *"
+    },
+    {
+      "path": "/api/cron/quo-evidence-enrichment",
+      "schedule": "0 2 * * 0"
+    },
+    {
+      "path": "/api/cron/quo-evidence-enrichment",
+      "schedule": "0 3 * * 0"
+    },
+    {
+      "path": "/api/cron/quo-evidence-enrichment",
+      "schedule": "0 4 * * 0"
+    },
+    {
+      "path": "/api/cron/quo-evidence-enrichment",
+      "schedule": "0 5 * * 0"
     }
   ],
   "functions": {
@@ -63,6 +79,9 @@
       "maxDuration": 800
     },
     "src/app/api/cron/client-contact-backfill/route.ts": {
+      "maxDuration": 800
+    },
+    "src/app/api/cron/quo-evidence-enrichment/route.ts": {
       "maxDuration": 800
     },
     "src/app/api/admin/slack-topic-sync-all/route.ts": {
