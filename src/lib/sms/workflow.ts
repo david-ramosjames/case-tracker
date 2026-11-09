@@ -715,7 +715,11 @@ export async function approveAndSendSmsPendingApproval(approvalId: string) {
   }
 }
 
-export async function syncQuoPhonesToTrackerIfConfigured() {
+export async function syncQuoPhonesToTrackerIfConfigured(options?: {
+  maxMs?: number;
+  maxInboxLookups?: number;
+  skipInboxLookups?: boolean;
+}) {
   if (!isQuoEnabled()) {
     return {
       configured: false,
@@ -725,10 +729,13 @@ export async function syncQuoPhonesToTrackerIfConfigured() {
       skipped: 0,
       conversationLinks: 0,
       conversationSyncWarning: null as string | null,
+      partial: false,
+      inboxLookups: 0,
     };
   }
 
-  const result = await syncQuoPhonesToTracker();
+  // Callers (daily cron) should pass maxMs / maxInboxLookups. Manual runs omit them for a full sync.
+  const result = await syncQuoPhonesToTracker(undefined, options);
   return { configured: true, ...result };
 }
 
@@ -823,9 +830,24 @@ async function loadTrackerRowsForQuoSync(
   return { rows, missingCaseNumbers, backfilled };
 }
 
-export async function syncQuoPhonesToTracker(filterCaseNumbers?: string[]) {
+export async function syncQuoPhonesToTracker(
+  filterCaseNumbers?: string[],
+  options?: {
+    /** Soft stop so daily cron can chain later batches. */
+    maxMs?: number;
+    /** Cap expensive Quo inbox API walks (per-line message scans). */
+    maxInboxLookups?: number;
+    /** Directory phones only — skip inbox enrichment entirely. */
+    skipInboxLookups?: boolean;
+  },
+) {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required.");
+
+  const started = Date.now();
+  const maxMs = options?.maxMs ?? null;
+  const maxInboxLookups = options?.maxInboxLookups ?? Number.POSITIVE_INFINITY;
+  const skipInboxLookups = Boolean(options?.skipInboxLookups);
 
   const filterSet = filterCaseNumbers?.length
     ? new Set(filterCaseNumbers.map((n) => cleanCaseNumber(n)).filter(Boolean))
@@ -853,15 +875,28 @@ export async function syncQuoPhonesToTracker(filterCaseNumbers?: string[]) {
 
   const inboxCache = new Map<string, QuoInboxMatch | null>();
   let conversationSyncWarning: string | null = null;
+  let inboxLookups = 0;
+  let partial = false;
+
+  function budgetExceeded() {
+    return maxMs != null && Date.now() - started >= maxMs;
+  }
 
   async function resolveInboxForMatch(input: {
     quoContactId: string;
     displayName: string;
     phone?: string | null;
+    alreadyLinked?: boolean;
   }) {
+    if (skipInboxLookups) return null;
+    // Prefer keeping existing conversation links; only spend API budget on gaps.
+    if (input.alreadyLinked) return null;
+    if (inboxLookups >= maxInboxLookups) return null;
+
     const cacheKey = `${input.quoContactId}|${input.displayName}|${input.phone ?? ""}`;
     if (inboxCache.has(cacheKey)) return inboxCache.get(cacheKey) ?? null;
 
+    inboxLookups += 1;
     try {
       const inbox = await lookupQuoInboxForContact(input);
       inboxCache.set(cacheKey, inbox ?? null);
@@ -883,6 +918,17 @@ export async function syncQuoPhonesToTracker(filterCaseNumbers?: string[]) {
   let conversationLinks = 0;
 
   for (const row of trackerRows) {
+    if (budgetExceeded()) {
+      partial = true;
+      console.warn("[quo-phone-sync] stopping early for time budget", {
+        elapsedMs: Date.now() - started,
+        maxMs,
+        processed: matched + skipped + updated,
+        remaining: trackerRows.length - (matched + skipped),
+      });
+      break;
+    }
+
     const caseNumber = cleanCaseNumber(String(row.case_number ?? ""));
     const caseMatches = listQuoContactMatchesForCase(groupedMatches.get(caseNumber) ?? [], row.client_name_snapshot);
 
@@ -908,11 +954,15 @@ export async function syncQuoPhonesToTracker(filterCaseNumbers?: string[]) {
         quoContactId: match.quoContactId,
         displayName: match.displayName,
         phone,
+        alreadyLinked: Boolean(currentConversationId && currentPhoneNumberId),
       });
       if (inbox) {
         phone = inbox.phone;
         conversationId = inbox.conversationId;
         phoneNumberId = inbox.phoneNumberId;
+      } else if (currentConversationId && currentPhoneNumberId && match.quoContactId === currentContactId) {
+        conversationId = currentConversationId;
+        phoneNumberId = currentPhoneNumberId;
       }
 
       syncedContacts.push({
@@ -972,5 +1022,7 @@ export async function syncQuoPhonesToTracker(filterCaseNumbers?: string[]) {
     unmatchedContacts,
     missingCaseNumbers,
     backfilled,
+    partial,
+    inboxLookups,
   };
 }

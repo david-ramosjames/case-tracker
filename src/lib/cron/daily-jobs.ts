@@ -164,7 +164,10 @@ export async function runDailyCronGroup(group: DailyCronGroup, options: DailyJob
   const errors: DailyJobStepError[] = [];
 
   if (group === "quoPhoneSync") {
-    const quoPhoneSyncResult = await runDailyJobStep("quoPhoneSync", syncQuoPhonesToTrackerIfConfigured);
+    // Hard budget: inbox lookups were timing out the whole 800s function and blocking the chain.
+    const quoPhoneSyncResult = await runDailyJobStep("quoPhoneSync", () =>
+      syncQuoPhonesToTrackerIfConfigured({ maxMs: 240_000, maxInboxLookups: 20 }),
+    );
     if (quoPhoneSyncResult.error) errors.push(quoPhoneSyncResult.error);
     return {
       ok: errors.length === 0,
