@@ -45,40 +45,46 @@ async function loadEvidenceActivityDates(input: { callIds: string[]; conversatio
   const client = new Client({ connectionString, ssl: { rejectUnauthorized: false } });
   try {
     await client.connect();
+
     for (let index = 0; index < callIds.length; index += 200) {
       const chunk = callIds.slice(index, index + 200);
-      const { rows } = await client.query<{ call_id: string; created_at: Date | string }>(
-        `select call_id, created_at
-         from quo_calls
-         where call_id = any($1::text[])
-           and created_at is not null`,
-        [chunk],
-      );
-      for (const row of rows) {
-        const callId = String(row.call_id ?? "").trim();
-        const iso = isoFromDb(row.created_at);
-        if (callId && iso) dateByCallId.set(callId, iso);
+      try {
+        const { rows } = await client.query<{ call_id: string; created_at: Date | string }>(
+          `select call_id, created_at
+           from quo_calls
+           where call_id = any($1::text[])
+             and created_at is not null`,
+          [chunk],
+        );
+        for (const row of rows) {
+          const callId = String(row.call_id ?? "").trim();
+          const iso = isoFromDb(row.created_at);
+          if (callId && iso) dateByCallId.set(callId, iso);
+        }
+      } catch (error) {
+        console.error("[client-contact] evidence call-date lookup failed", error);
       }
     }
 
+    // quo_messages has no conversation_id column — only quo_calls does.
     for (let index = 0; index < conversationIds.length; index += 200) {
       const chunk = conversationIds.slice(index, index + 200);
-      const { rows } = await client.query<{ conversation_id: string; created_at: Date | string }>(
-        `select conversation_id, max(created_at) as created_at
-         from (
-           select conversation_id, created_at from quo_calls
-           where conversation_id = any($1::text[]) and created_at is not null
-           union all
-           select conversation_id, created_at from quo_messages
-           where conversation_id = any($1::text[]) and created_at is not null
-         ) activity
-         group by conversation_id`,
-        [chunk],
-      );
-      for (const row of rows) {
-        const conversationId = String(row.conversation_id ?? "").trim();
-        const iso = isoFromDb(row.created_at);
-        if (conversationId && iso) dateByConversationId.set(conversationId, iso);
+      try {
+        const { rows } = await client.query<{ conversation_id: string; created_at: Date | string }>(
+          `select conversation_id, max(created_at) as created_at
+           from quo_calls
+           where conversation_id = any($1::text[])
+             and created_at is not null
+           group by conversation_id`,
+          [chunk],
+        );
+        for (const row of rows) {
+          const conversationId = String(row.conversation_id ?? "").trim();
+          const iso = isoFromDb(row.created_at);
+          if (conversationId && iso) dateByConversationId.set(conversationId, iso);
+        }
+      } catch (error) {
+        console.error("[client-contact] evidence conversation-date lookup failed", error);
       }
     }
   } catch (error) {
@@ -204,8 +210,8 @@ export async function resolveAndCacheSentimentEvidenceSlackLinks(options?: {
   });
 
   const enriched = await attachSentimentEvidenceSlackLinks(rows, channelIdByCase, {
-    budgetMs: options?.budgetMs ?? 60_000,
-    maxChannels: options?.maxChannels ?? 250,
+    budgetMs: options?.budgetMs ?? 30_000,
+    maxChannels: options?.maxChannels ?? 100,
   });
 
   const updates = enriched

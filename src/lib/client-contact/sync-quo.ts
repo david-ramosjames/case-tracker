@@ -44,9 +44,13 @@ export async function syncQuoClientContacts() {
   if (fromLedger.configured) {
     let slackLinks: { pending: number; resolved: number; saved: number } | null = null;
     let evidenceLinks: { pending: number; resolved: number; saved: number } | null = null;
+    // Keep Slack resolve budgets well under the 800s Vercel maxDuration (ledger sync already uses time).
     try {
       const { resolveAndCacheQualifyingCallSlackLinks } = await import("@/lib/client-contact/qualifying-call-slack");
-      slackLinks = await resolveAndCacheQualifyingCallSlackLinks();
+      slackLinks = await resolveAndCacheQualifyingCallSlackLinks({
+        budgetMs: 25_000,
+        maxChannels: 80,
+      });
     } catch (error) {
       console.error("[client-contact] qualifying-call Slack resolve failed", error);
     }
@@ -54,7 +58,10 @@ export async function syncQuoClientContacts() {
       const { resolveAndCacheSentimentEvidenceSlackLinks } = await import(
         "@/lib/client-contact/sentiment-evidence-slack"
       );
-      evidenceLinks = await resolveAndCacheSentimentEvidenceSlackLinks();
+      evidenceLinks = await resolveAndCacheSentimentEvidenceSlackLinks({
+        budgetMs: 30_000,
+        maxChannels: 100,
+      });
     } catch (error) {
       console.error("[client-contact] sentiment evidence Slack resolve failed", error);
     }
