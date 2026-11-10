@@ -326,7 +326,13 @@ export async function attachSentimentEvidenceSlackLinks<
         console.warn("[client-contact] Slack evidence lookup rate-limited; skipping remaining channels");
         break;
       }
-      console.error("[client-contact] Slack evidence lookup failed", channelId, error);
+      // Private channels the bot was never invited to — expected until @Case Tracker is added.
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("not_in_channel")) {
+        console.warn("[client-contact] Slack evidence skipped (bot not in channel)", channelId);
+      } else {
+        console.error("[client-contact] Slack evidence lookup failed", channelId, error);
+      }
       continue;
     }
 

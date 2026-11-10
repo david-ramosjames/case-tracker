@@ -97,7 +97,41 @@ export async function executeDailyCronBatchStep(
   if (nextBatch != null) {
     const kick = await kickDailyCronBatch(request, nextBatch, runId);
     console.info("Daily cron next batch kick", { runId, nextBatch, kick, priorOk: outcome.ok });
-    return { ...outcome, chained: nextBatch, completed: false as const, progressNotify, kick };
+    if (kick.ok) {
+      return { ...outcome, chained: nextBatch, completed: false as const, progressNotify, kick };
+    }
+
+    // Vercel returns 508 INFINITE_LOOP_DETECTED after enough same-deployment
+    // self-fetches. Finish the remaining batches here so the morning run does
+    // not stop mid-chain (settlement done, treatment/SMS never started).
+    console.warn("Daily cron kick failed; continuing remaining batches inline", {
+      runId,
+      nextBatch,
+      kick,
+    });
+    let index: number | null = nextBatch;
+    let lastOutcome = outcome;
+    while (index != null) {
+      lastOutcome = await runDailyCronBatch(index, runId, options);
+      await notifyDailyCronBatchProgress(runId, index, lastOutcome);
+      index = getNextDailyCronBatchIndex(index);
+    }
+    const finished = await finishDailyCronRun(runId);
+    console.info("Daily cron completed after inline continuation", {
+      runId,
+      ok: finished.merged.ok,
+      slackNotify: finished.slackNotify,
+    });
+    return {
+      ...lastOutcome,
+      merged: finished.merged,
+      slackNotify: finished.slackNotify,
+      completed: true as const,
+      ok: finished.merged.ok,
+      progressNotify,
+      kick,
+      continuedInline: true as const,
+    };
   }
 
   const { merged, slackNotify } = await finishDailyCronRun(runId);

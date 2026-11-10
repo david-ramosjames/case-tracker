@@ -25,20 +25,17 @@ export const DAILY_CRON_GROUP_ORDER: DailyCronGroup[] = [
 ];
 
 /**
- * Batched invocations (chained via HTTP). One heavy group per batch so a Quo/Sheets
- * timeout cannot eat the full 800s maxDuration and block later steps.
+ * Batched invocations (chained via HTTP). Keep ≤4 batches: Vercel blocks the
+ * 5th same-deployment self-fetch with INFINITE_LOOP_DETECTED (508), which is
+ * what stopped the 10 AM run at settlement→treatment. Heavy Quo + Sheets stay
+ * alone; lighter Slack/SMS steps share the last hop.
  * Order: early syncs → settlement → stage/Slack → SMS last.
  */
 export const DAILY_CRON_BATCHES: DailyCronGroup[][] = [
   ["quoPhoneSync"],
-  ["quoLanguageTag"],
-  ["slackChannels"],
+  ["quoLanguageTag", "slackChannels"],
   ["settlementSync"],
-  ["treatmentPromotion"],
-  ["dailyPulse"],
-  ["missingFields"],
-  ["fieldReminders"],
-  ["sms"],
+  ["treatmentPromotion", "dailyPulse", "missingFields", "fieldReminders", "sms"],
 ];
 
 /** Batch indexes whose groups have no mutual dependency and can run in parallel. */

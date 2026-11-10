@@ -75,9 +75,11 @@ function isBenignSlackInviteError(message: string) {
   return (
     message.includes("already_in_channel") ||
     message.includes("cant_invite_self") ||
+    message.includes("cant_invite") ||
     message.includes("user_not_found") ||
     message.includes("deleted_user") ||
-    message.includes("restricted_action")
+    message.includes("restricted_action") ||
+    message.includes("not_in_channel")
   );
 }
 
