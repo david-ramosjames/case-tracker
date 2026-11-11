@@ -5,6 +5,7 @@ import { lookupQuoInboxForContact, type QuoInboxMatch } from "@/lib/quo/client";
 import { isQuoEnabled } from "@/lib/quo/config";
 import { sendQuoTextMessage } from "@/lib/quo/client";
 import { renderSmsMessage } from "@/lib/sms/message-template";
+import { personalizeCasePathLink } from "@/lib/casepath/visit-link";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
 import { postSlackMessage } from "@/lib/slack/client";
 import { isSlackEnabled, getSmsApprovalSlackChannelId } from "@/lib/slack/config";
@@ -34,10 +35,21 @@ function resolveClientLanguage(record: CaseRecord): "en" | "es" {
   return record.shared.preferredLanguage === "es" ? "es" : "en";
 }
 
-function buildAutomationMessage(automation: SmsAutomation, record: CaseRecord, fromStage: CaseStage, toStage: CaseStage) {
+async function buildAutomationMessage(
+  automation: SmsAutomation,
+  record: CaseRecord,
+  fromStage: CaseStage,
+  toStage: CaseStage,
+  phone: string,
+) {
   const language = resolveClientLanguage(record);
   const template = language === "es" ? automation.messageEs : automation.messageEn;
-  const youtubeUrl = language === "es" ? automation.youtubeUrlEs : automation.youtubeUrlEn;
+  const sharedLink = language === "es" ? automation.youtubeUrlEs : automation.youtubeUrlEn;
+  const youtubeUrl = await personalizeCasePathLink({
+    url: sharedLink,
+    caseNumber: record.shared.caseNumber,
+    phone,
+  });
 
   return renderSmsMessage(template, {
     clientName: record.shared.clientName,
@@ -114,7 +126,13 @@ async function queueSmsApprovalsForAutomation(
       continue;
     }
 
-    const messageBody = buildAutomationMessage(automation, record, stages.fromStage, stages.toStage);
+    const messageBody = await buildAutomationMessage(
+      automation,
+      record,
+      stages.fromStage,
+      stages.toStage,
+      recipient.phone,
+    );
     const approval = await createSmsPendingApproval({
       caseId: record.shared.id,
       trackerEntryId: record.tracker.id,
@@ -313,7 +331,6 @@ export async function processManualAttorneyDepartureSms(options: {
     record: CaseRecord;
     recipient: ReturnType<typeof getSmsRecipients>[number];
     language: "en" | "es";
-    messageBody: string;
   };
 
   const records = await getCases();
@@ -365,12 +382,6 @@ export async function processManualAttorneyDepartureSms(options: {
         record,
         recipient,
         language,
-        messageBody: buildAutomationMessage(
-          automation,
-          record,
-          record.tracker.caseStage,
-          record.tracker.caseStage,
-        ),
       });
     }
   }
@@ -412,6 +423,13 @@ export async function processManualAttorneyDepartureSms(options: {
   for (const item of batch) {
     if (Date.now() >= deadlineMs) break;
 
+    const messageBody = await buildAutomationMessage(
+      automation,
+      item.record,
+      item.record.tracker.caseStage,
+      item.record.tracker.caseStage,
+      item.recipient.phone,
+    );
     const approval = await createSmsPendingApproval({
       caseId: item.record.shared.id,
       trackerEntryId: item.record.tracker.id,
@@ -422,7 +440,7 @@ export async function processManualAttorneyDepartureSms(options: {
       quoContactId: item.recipient.quoContactId,
       quoContactName: item.recipient.displayName,
       language: item.language,
-      messageBody: item.messageBody,
+      messageBody,
       fromStage: item.record.tracker.caseStage,
       toStage: item.record.tracker.caseStage,
     });
@@ -430,7 +448,7 @@ export async function processManualAttorneyDepartureSms(options: {
     try {
       const quoMessageId = await sendQuoTextMessage({
         to: item.recipient.phone,
-        content: item.messageBody,
+        content: messageBody,
       });
       await updateSmsPendingApproval(approval.id, {
         status: "sent",
