@@ -571,6 +571,17 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
         return;
       }
 
+      if (onlyCaseNumbers.length > 0) {
+        setMessage(
+          [
+            `Sent ${body.sent ?? 0} text${(body.sent ?? 0) === 1 ? "" : "s"} to case ${onlyCaseNumbers.join(", ")}.`,
+            `Leave ${onlyCaseNumbers.join(", ")} in the box and click Send SMS again for another test.`,
+            ...(body.failures?.length ? [`Failures: ${body.failures.join(" · ")}`] : []),
+          ].join("\n"),
+        );
+        return;
+      }
+
       if (body.done || (body.remaining ?? 0) === 0) {
         setMessage(
           [
@@ -596,8 +607,11 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     } finally {
       setRunningId(null);
       const selectedAttorney = runAttorneyByAutomation[automationId]?.trim() ?? "";
-      if (selectedAttorney) {
-        void loadManualProgress(automationId, selectedAttorney);
+      if (selectedAttorney || (onlyCasesByAutomation[automationId] ?? "").trim()) {
+        void loadManualProgress(automationId, selectedAttorney, {
+          excludeInput: excludeCasesByAutomation[automationId] ?? "",
+          onlyInput: onlyCasesByAutomation[automationId] ?? "",
+        });
       }
     }
   }
