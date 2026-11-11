@@ -14,7 +14,7 @@ import { getSmsRecipients } from "@/lib/sms/recipients";
 import { createSupabaseAdminClient, fetchAllSupabaseRows } from "@/lib/supabase/admin";
 import { syncTrackerQuoContacts } from "@/lib/supabase/quo-contacts";
 import { MANUAL_SMS_BATCH_SIZE } from "@/lib/sms/manual-send";
-import { automationMatchesStageChange, automationMatchesTimeInStage, automationMatchesManualAttorney, normalizeSmsExcludeCaseNumbers } from "@/lib/sms/automation-match";
+import { automationMatchesStageChange, automationMatchesTimeInStage, manualSendIncludesCase, normalizeSmsExcludeCaseNumbers } from "@/lib/sms/automation-match";
 import {
   claimSmsPendingApproval,
   createSmsPendingApproval,
@@ -350,16 +350,11 @@ export async function processManualAttorneyDepartureSms(options: {
   let excluded = 0;
   let outsideOnlyFilter = 0;
 
+  const retest = onlyCaseNumbers.size > 0;
   for (const record of records) {
-    const matchesAttorney = automationMatchesManualAttorney(automation, record, options.attorneyContactId);
-    if (!matchesAttorney) continue;
     const caseNumber = cleanCaseNumber(record.shared.caseNumber);
-    if (onlyCaseNumbers.size > 0 && !onlyCaseNumbers.has(caseNumber)) {
-      outsideOnlyFilter += 1;
-      continue;
-    }
-    if (excludeCaseNumbers.has(caseNumber)) {
-      excluded += 1;
+    if (!manualSendIncludesCase(automation, record, options.attorneyContactId, onlyCaseNumbers, excludeCaseNumbers)) {
+      if (excludeCaseNumbers.has(caseNumber)) excluded += 1;
       continue;
     }
     matchedCaseIds.add(record.shared.id);
@@ -374,7 +369,7 @@ export async function processManualAttorneyDepartureSms(options: {
     }
 
     for (const recipient of recipients) {
-      if (handledKeys.has(`${record.shared.id}::${recipient.phone}`)) {
+      if (!retest && handledKeys.has(`${record.shared.id}::${recipient.phone}`)) {
         alreadyHandled += 1;
         continue;
       }
@@ -531,16 +526,15 @@ export async function getManualAttorneyDepartureSmsProgress(options: {
 
   const records = await getCases();
   let excludedCount = 0;
+  const retest = onlyCaseNumbers.size > 0;
   const matched = records.filter((record) => {
-    if (!automationMatchesManualAttorney(automation, record, options.attorneyContactId, { requireEnabled: false })) {
-      return false;
-    }
     const caseNumber = cleanCaseNumber(record.shared.caseNumber);
-    if (onlyCaseNumbers.size > 0 && !onlyCaseNumbers.has(caseNumber)) {
-      return false;
-    }
-    if (excludeCaseNumbers.has(caseNumber)) {
-      excludedCount += 1;
+    if (
+      !manualSendIncludesCase(automation, record, options.attorneyContactId, onlyCaseNumbers, excludeCaseNumbers, {
+        requireEnabled: false,
+      })
+    ) {
+      if (excludeCaseNumbers.has(caseNumber)) excludedCount += 1;
       return false;
     }
     return true;
@@ -604,7 +598,9 @@ export async function getManualAttorneyDepartureSmsProgress(options: {
         errorMessage: failedRow?.errorMessage ?? null,
       };
 
-      if (sentRow) {
+      if (retest) {
+        remaining.push(item);
+      } else if (sentRow) {
         sent.push(item);
       } else if (skippedRow) {
         skipped.push(item);
@@ -641,7 +637,10 @@ export async function getManualAttorneyDepartureSmsProgress(options: {
     excludedCount,
     excludedCaseNumbers: [...excludeCaseNumbers],
     onlyCaseNumbers: [...onlyCaseNumbers],
-    done: remaining.length === 0,
+    notFoundCaseNumbers: [...onlyCaseNumbers].filter(
+      (caseNumber) => !matched.some((record) => cleanCaseNumber(record.shared.caseNumber) === caseNumber),
+    ),
+    done: !retest && matched.length > 0 && remaining.length === 0,
     sent,
     skipped,
     failed,

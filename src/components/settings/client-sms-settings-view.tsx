@@ -40,6 +40,7 @@ type ManualSmsProgress = {
   missingPhoneCount: number;
   excludedCount?: number;
   onlyCaseNumbers?: string[];
+  notFoundCaseNumbers?: string[];
   done: boolean;
   sent: ManualSmsProgressItem[];
   failed: ManualSmsProgressItem[];
@@ -224,6 +225,7 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
           missingPhoneCount: body.missingPhoneCount,
           excludedCount: body.excludedCount ?? 0,
           onlyCaseNumbers: body.onlyCaseNumbers ?? [],
+          notFoundCaseNumbers: body.notFoundCaseNumbers ?? [],
           done: body.done,
           sent: body.sent ?? [],
           failed: body.failed ?? [],
@@ -838,8 +840,8 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                         placeholder="e.g. 1693"
                       />
                       <span className="mt-1 block text-xs text-muted-foreground">
-                        Leave blank for the full attorney list. When set, Preview/Send/progress only include these
-                        cases (real SMS if you click Send).
+                        Leave blank for the full attorney list. A number here sends again, even if that case is closed
+                        or already got this message. Send still goes out for real.
                       </span>
                     </label>
                     <label className="block rounded-md border bg-slate-50 p-3">
@@ -917,6 +919,16 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                             ) : null}
                             {progressByAutomation[automation.id]!.done ? (
                               <span className="font-medium text-emerald-700"> · All recipients handled</span>
+                            ) : null}
+                            {(progressByAutomation[automation.id]!.notFoundCaseNumbers?.length ?? 0) > 0 ? (
+                              <span className="font-medium text-pink-600">
+                                {" "}
+                                · No case found for {progressByAutomation[automation.id]!.notFoundCaseNumbers!.join(", ")}
+                              </span>
+                            ) : null}
+                            {progressByAutomation[automation.id]!.cases === 0 &&
+                            (progressByAutomation[automation.id]!.onlyCaseNumbers?.length ?? 0) === 0 ? (
+                              <span> · No active cases for this attorney</span>
                             ) : null}
                           </p>
 

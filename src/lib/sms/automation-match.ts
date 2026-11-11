@@ -126,6 +126,29 @@ export function automationMatchesTimeInStage(automation: SmsAutomation, record: 
   return true;
 }
 
+/**
+ * A full manual run is active cases for one attorney, and each phone is sent once.
+ * A filled "only these case numbers" box is a test: that case is sent again even if it
+ * is closed or already received this automation.
+ */
+export function manualSendIncludesCase(
+  automation: SmsAutomation,
+  record: CaseRecord,
+  attorneyContactId: string,
+  onlyCaseNumbers: Set<string>,
+  excludeCaseNumbers: Set<string>,
+  options?: { requireEnabled?: boolean },
+) {
+  if (automation.triggerType !== "manual") return false;
+  if (options?.requireEnabled !== false && !automation.enabled) return false;
+  const caseNumber = cleanCaseNumber(record.shared.caseNumber);
+  if (!caseNumber || excludeCaseNumbers.has(caseNumber)) return false;
+  if (automation.caseTypes.length > 0 && !automation.caseTypes.includes(record.shared.caseType)) return false;
+  if (onlyCaseNumbers.size > 0) return onlyCaseNumbers.has(caseNumber);
+  if (!isSmsActivePipelineCase(record)) return false;
+  return record.shared.attorneyId === attorneyContactId;
+}
+
 /** Manual attorney-departure (and similar) sends: active cases for a specific attorney. */
 export function automationMatchesManualAttorney(
   automation: SmsAutomation,
