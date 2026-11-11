@@ -1,4 +1,5 @@
 const CASEPATH_ORIGIN = "https://casepath.ramosjames.com";
+const CASEPATH_URL = /https:\/\/casepath\.ramosjames\.com\/[^\s<]+/gi;
 
 export function casePathTarget(raw: string | null | undefined) {
   const value = raw?.trim() ?? "";
@@ -33,13 +34,16 @@ function isMintedCasePathUrl(value: string) {
   }
 }
 
-/** Replace a shared CasePath link with one tied to this case and the phone being texted. */
-export async function personalizeCasePathLink(input: { url: string | null; caseNumber: string; phone: string }) {
-  const shared = input.url?.trim() || null;
-  const target = casePathTarget(shared);
+async function mintOnce(input: { url: string; caseNumber: string; phone: string; lang?: "en" | "es" }) {
+  const target = casePathTarget(input.url);
   const secret = process.env.CASEPATH_TOKEN_SECRET?.trim() ?? "";
-  if (!shared || !target || !secret || !input.caseNumber.trim() || !input.phone.trim()) return shared;
+  if (!target || !secret || !input.caseNumber.trim() || !input.phone.trim()) {
+    if (!secret) console.warn("casepath visit link skipped: CASEPATH_TOKEN_SECRET is not set");
+    return null;
+  }
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
   try {
     const response = await fetch(`${casePathOrigin()}/api/visit-tokens`, {
       method: "POST",
@@ -50,20 +54,62 @@ export async function personalizeCasePathLink(input: { url: string | null; caseN
       body: JSON.stringify({
         caseNumber: input.caseNumber.trim(),
         path: target.path,
-        lang: target.lang,
+        lang: input.lang ?? target.lang,
         phone: input.phone.trim(),
       }),
-      signal: AbortSignal.timeout(8000),
+      signal: controller.signal,
+      cache: "no-store",
     });
     if (!response.ok) {
       console.warn("casepath visit link", response.status);
-      return shared;
+      return null;
     }
     const body = (await response.json().catch(() => null)) as { url?: unknown } | null;
     const minted = typeof body?.url === "string" ? body.url : "";
-    return isMintedCasePathUrl(minted) ? minted : shared;
+    return isMintedCasePathUrl(minted) ? minted : null;
   } catch (error) {
     console.warn("casepath visit link", error instanceof Error ? error.message : "request failed");
-    return shared;
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+/** Replace a shared CasePath link with one tied to this case and the phone being texted. */
+export async function personalizeCasePathLink(input: { url: string | null; caseNumber: string; phone: string }) {
+  const shared = input.url?.trim() || null;
+  if (!shared) return shared;
+  if (isMintedCasePathUrl(shared)) return shared;
+
+  const minted = (await mintOnce({ url: shared, caseNumber: input.caseNumber, phone: input.phone }))
+    ?? (await mintOnce({ url: shared, caseNumber: input.caseNumber, phone: input.phone }));
+  return minted ?? shared;
+}
+
+/**
+ * Find every CasePath URL in an SMS body and mint a tracked ?rid= link for each shared one.
+ * Used when queueing Slack approvals and again right before Quo send.
+ */
+export async function personalizeCasePathUrlsInText(input: {
+  text: string;
+  caseNumber: string;
+  phone: string;
+  lang?: "en" | "es";
+}) {
+  const found = input.text.match(CASEPATH_URL) ?? [];
+  if (found.length === 0) return input.text;
+
+  let next = input.text;
+  const seen = new Set<string>();
+  for (const raw of found) {
+    const match = raw.replace(/[>,.;:!?)]+$/, "");
+    if (seen.has(match)) continue;
+    seen.add(match);
+    if (isMintedCasePathUrl(match)) continue;
+    const minted =
+      (await mintOnce({ url: match, caseNumber: input.caseNumber, phone: input.phone, lang: input.lang })) ??
+      (await mintOnce({ url: match, caseNumber: input.caseNumber, phone: input.phone, lang: input.lang }));
+    if (minted) next = next.split(match).join(minted);
+  }
+  return next;
 }

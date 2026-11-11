@@ -5,7 +5,7 @@ import { lookupQuoInboxForContact, type QuoInboxMatch } from "@/lib/quo/client";
 import { isQuoEnabled } from "@/lib/quo/config";
 import { sendQuoTextMessage } from "@/lib/quo/client";
 import { renderSmsMessage } from "@/lib/sms/message-template";
-import { personalizeCasePathLink } from "@/lib/casepath/visit-link";
+import { personalizeCasePathLink, personalizeCasePathUrlsInText } from "@/lib/casepath/visit-link";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
 import { postSlackMessage } from "@/lib/slack/client";
 import { isSlackEnabled, getSmsApprovalSlackChannelId } from "@/lib/slack/config";
@@ -51,13 +51,22 @@ async function buildAutomationMessage(
     phone,
   });
 
-  return renderSmsMessage(template, {
+  const rendered = renderSmsMessage(template, {
     clientName: record.shared.clientName,
     caseNumber: record.shared.caseNumber,
     fromStage,
     toStage,
     language,
     youtubeUrl,
+  });
+
+  // Second pass: if minting failed on the URL field, still try every CasePath link in the body
+  // before the Slack approval is posted (cron used to fall back to the shared link).
+  return personalizeCasePathUrlsInText({
+    text: rendered,
+    caseNumber: record.shared.caseNumber,
+    phone,
+    lang: language,
   });
 }
 
@@ -711,9 +720,20 @@ export async function approveAndSendSmsPendingApproval(approvalId: string) {
   }
 
   try {
+    // Remint right before send so Slack-queued texts still get ?rid= even if cron missed it.
+    const messageBody = await personalizeCasePathUrlsInText({
+      text: claimed.messageBody,
+      caseNumber: claimed.caseNumber,
+      phone: claimed.phone,
+      lang: claimed.language === "es" ? "es" : "en",
+    });
+    if (messageBody !== claimed.messageBody) {
+      await updateSmsPendingApproval(approvalId, { messageBody });
+    }
+
     const quoMessageId = await sendQuoTextMessage({
       to: claimed.phone,
-      content: claimed.messageBody,
+      content: messageBody,
     });
     await updateSmsPendingApproval(approvalId, {
       status: "sent",

@@ -370,6 +370,7 @@ export async function updateSmsPendingApproval(
     quoMessageId: string | null;
     errorMessage: string | null;
     sentAt: string | null;
+    messageBody: string;
   }>,
 ) {
   const admin = requireAdmin();
@@ -380,6 +381,7 @@ export async function updateSmsPendingApproval(
   if (patch.quoMessageId !== undefined) row.quo_message_id = patch.quoMessageId;
   if (patch.errorMessage !== undefined) row.error_message = patch.errorMessage;
   if (patch.sentAt !== undefined) row.sent_at = patch.sentAt;
+  if (patch.messageBody !== undefined) row.message_body = patch.messageBody;
 
   const { data, error } = await admin.from("sms_pending_approvals").update(row).eq("id", id).select("*").single();
   if (error) throw new Error(error.message);
