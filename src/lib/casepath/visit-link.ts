@@ -10,8 +10,9 @@ export function casePathTarget(raw: string | null | undefined) {
     return null;
   }
   if (url.protocol !== "https:" || url.hostname !== "casepath.ramosjames.com") return null;
-  if (!url.pathname.startsWith("/") || url.pathname.startsWith("//") || url.pathname.length > 180) return null;
-  return { path: url.pathname, lang: url.searchParams.get("lang") === "es" ? ("es" as const) : ("en" as const) };
+  const path = url.pathname.replace(/\/t\/[A-Za-z0-9_-]{32,128}$/, "") || "/";
+  if (!path.startsWith("/") || path.startsWith("//") || path.length > 180) return null;
+  return { path, lang: url.searchParams.get("lang") === "es" ? ("es" as const) : ("en" as const) };
 }
 
 function casePathOrigin() {
@@ -21,7 +22,8 @@ function casePathOrigin() {
 function isMintedCasePathUrl(value: string) {
   try {
     const url = new URL(value);
-    return url.protocol === "https:" && url.hostname === "casepath.ramosjames.com" && url.searchParams.has("t");
+    const tokenInPath = /\/t\/[A-Za-z0-9_-]{32,128}$/.test(url.pathname);
+    return url.protocol === "https:" && url.hostname === "casepath.ramosjames.com" && (tokenInPath || url.searchParams.has("t"));
   } catch {
     return false;
   }
