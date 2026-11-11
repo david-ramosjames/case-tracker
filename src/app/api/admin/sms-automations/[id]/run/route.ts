@@ -36,11 +36,11 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const url = new URL(request.url);
   const attorneyContactId = url.searchParams.get("attorneyContactId")?.trim() ?? "";
-  if (!attorneyContactId) {
-    return NextResponse.json({ error: "Select the departing attorney." }, { status: 400 });
-  }
   const excludeCaseNumbers = parseCaseNumbers(url.searchParams.get("excludeCaseNumbers"));
   const onlyCaseNumbers = parseCaseNumbers(url.searchParams.get("onlyCaseNumbers"));
+  if (!attorneyContactId && onlyCaseNumbers.length === 0) {
+    return NextResponse.json({ error: "Select the departing attorney." }, { status: 400 });
+  }
 
   try {
     const result = await getManualAttorneyDepartureSmsProgress({
@@ -85,11 +85,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       onlyCaseNumbers?: string[] | string;
     };
     const attorneyContactId = typeof body.attorneyContactId === "string" ? body.attorneyContactId.trim() : "";
-    if (!attorneyContactId) {
+    const onlyCaseNumbers = parseCaseNumbers(body.onlyCaseNumbers);
+    if (!attorneyContactId && onlyCaseNumbers.length === 0) {
       return NextResponse.json({ error: "Select the departing attorney." }, { status: 400 });
     }
 
-    const onlyCaseNumbers = parseCaseNumbers(body.onlyCaseNumbers);
     const result = await processManualAttorneyDepartureSms({
       automationId: id,
       attorneyContactId,

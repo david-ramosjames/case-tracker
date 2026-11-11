@@ -303,7 +303,8 @@ export async function processManualAttorneyDepartureSms(options: {
       reason: "automation_disabled" as const,
     };
   }
-  if (!options.attorneyContactId.trim()) {
+  const onlyCaseNumbers = normalizeSmsExcludeCaseNumbers(options.onlyCaseNumbers);
+  if (!options.attorneyContactId.trim() && onlyCaseNumbers.size === 0) {
     return {
       sent: 0,
       failed: 0,
@@ -316,7 +317,6 @@ export async function processManualAttorneyDepartureSms(options: {
     };
   }
 
-  const onlyCaseNumbers = normalizeSmsExcludeCaseNumbers(options.onlyCaseNumbers);
   // Single-case tests should never fan out into a large batch.
   const batchSize = onlyCaseNumbers.size > 0
     ? Math.max(1, Math.min(options.batchSize ?? 1, 5))
@@ -515,12 +515,12 @@ export async function getManualAttorneyDepartureSmsProgress(options: {
   if (automation.triggerType !== "manual") {
     return { reason: "not_manual_automation" as const };
   }
-  if (!options.attorneyContactId.trim()) {
+  const excludeCaseNumbers = normalizeSmsExcludeCaseNumbers(options.excludeCaseNumbers);
+  const onlyCaseNumbers = normalizeSmsExcludeCaseNumbers(options.onlyCaseNumbers);
+  if (!options.attorneyContactId.trim() && onlyCaseNumbers.size === 0) {
     return { reason: "attorney_required" as const };
   }
 
-  const excludeCaseNumbers = normalizeSmsExcludeCaseNumbers(options.excludeCaseNumbers);
-  const onlyCaseNumbers = normalizeSmsExcludeCaseNumbers(options.onlyCaseNumbers);
   // Only clear stranded rows — not an in-flight send from a concurrent POST.
   await failInterruptedManualSmsApprovals(automation.id, { olderThanSeconds: 60 });
 

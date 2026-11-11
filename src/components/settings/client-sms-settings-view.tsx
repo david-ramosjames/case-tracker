@@ -186,7 +186,10 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     attorneyContactId: string,
     filters?: { excludeInput?: string; onlyInput?: string },
   ) {
-    if (!attorneyContactId.trim()) {
+    const requestedOnly = parseCaseNumbersInput(
+      filters?.onlyInput ?? debouncedOnlyByAutomation[automationId] ?? onlyCasesByAutomation[automationId] ?? "",
+    );
+    if (!attorneyContactId.trim() && requestedOnly.length === 0) {
       setProgressByAutomation((current) => ({ ...current, [automationId]: null }));
       return;
     }
@@ -257,7 +260,8 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
     for (const automation of automations) {
       if (automation.triggerType !== "manual") continue;
       const attorneyContactId = runAttorneyByAutomation[automation.id]?.trim() ?? "";
-      if (!attorneyContactId) {
+      const onlyInput = debouncedOnlyByAutomation[automation.id] ?? "";
+      if (!attorneyContactId && !onlyInput.trim()) {
         setProgressByAutomation((current) =>
           current[automation.id] == null ? current : { ...current, [automation.id]: null },
         );
@@ -489,14 +493,14 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
 
   async function runManualAutomation(automationId: string, dryRun: boolean) {
     const attorneyContactId = runAttorneyByAutomation[automationId]?.trim() ?? "";
-    if (!attorneyContactId) {
-      setError("Select the departing attorney before sending SMS.");
+    const excludeCaseNumbers = parseCaseNumbersInput(excludeCasesByAutomation[automationId] ?? "");
+    const onlyCaseNumbers = parseCaseNumbersInput(onlyCasesByAutomation[automationId] ?? "");
+    if (!attorneyContactId && onlyCaseNumbers.length === 0) {
+      setError("Select the attorney, or enter a case number.");
       return;
     }
 
-    const attorneyName = allAttorneys.find((user) => user.id === attorneyContactId)?.name ?? "this attorney";
-    const excludeCaseNumbers = parseCaseNumbersInput(excludeCasesByAutomation[automationId] ?? "");
-    const onlyCaseNumbers = parseCaseNumbersInput(onlyCasesByAutomation[automationId] ?? "");
+    const attorneyName = allAttorneys.find((user) => user.id === attorneyContactId)?.name ?? "the listed case";
     if (
       !dryRun &&
       !window.confirm(
@@ -864,7 +868,8 @@ export function ClientSmsSettingsView({ users }: ClientSmsSettingsViewProps) {
                     </label>
                   </div>
 
-                  {(runAttorneyByAutomation[automation.id] ?? "").trim() ? (
+                  {(runAttorneyByAutomation[automation.id] ?? "").trim() ||
+                  (onlyCasesByAutomation[automation.id] ?? "").trim() ? (
                     <div className="rounded-md border border-slate-200 bg-white p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs font-semibold uppercase tracking-wide text-navy-950">
