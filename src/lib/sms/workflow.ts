@@ -348,7 +348,7 @@ export async function processManualAttorneyDepartureSms(options: {
   let alreadyHandled = 0;
   let missingPhone = 0;
   let excluded = 0;
-  let outsideOnlyFilter = 0;
+  const outsideOnlyFilter = 0;
 
   const retest = onlyCaseNumbers.size > 0;
   for (const record of records) {
