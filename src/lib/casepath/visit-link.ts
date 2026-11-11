@@ -10,7 +10,7 @@ export function casePathTarget(raw: string | null | undefined) {
     return null;
   }
   if (url.protocol !== "https:" || url.hostname !== "casepath.ramosjames.com") return null;
-  // Shared template links point at a page. Minted links use /r/TOKEN or /…/t/TOKEN.
+  // Shared template links point at a page. Already-minted /r/TOKEN links are not templates.
   if (/^\/r\/[A-Za-z0-9_-]{8,128}\/?$/.test(url.pathname)) return null;
   const path = url.pathname.replace(/\/t\/[A-Za-z0-9_-]{8,128}$/, "") || "/";
   if (!path.startsWith("/") || path.startsWith("//") || path.length > 180) return null;
@@ -27,7 +27,7 @@ function isMintedCasePathUrl(value: string) {
     if (url.protocol !== "https:" || url.hostname !== "casepath.ramosjames.com") return false;
     const shortLink = /^\/r\/[A-Za-z0-9_-]{8,128}\/?$/.test(url.pathname);
     const tokenInPath = /\/t\/[A-Za-z0-9_-]{8,128}$/.test(url.pathname);
-    return shortLink || tokenInPath || url.searchParams.has("t");
+    return shortLink || tokenInPath || url.searchParams.has("rid") || url.searchParams.has("t");
   } catch {
     return false;
   }
