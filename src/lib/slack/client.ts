@@ -627,24 +627,40 @@ export function extractSlackMessageTextForParsing(
   return text;
 }
 
+/**
+ * Public channels can be joined on demand. Private channels cannot — the retry
+ * then fails with not_in_channel and the caller skips that channel.
+ */
+async function withChannelMembership<T>(channelId: string, read: (channel: string) => Promise<T>): Promise<T> {
+  const channel = resolveSlackChannelParam(channelId);
+  try {
+    return await read(channel);
+  } catch (error) {
+    if (!isNotInChannelError(error)) throw error;
+    await ensureSlackChannelMembership(channel);
+    return await read(channel);
+  }
+}
+
 export async function fetchChannelHistory(
   channelId: string,
   options?: { oldest?: string; limit?: number },
 ): Promise<SlackHistoryMessage[]> {
   if (!isSlackEnabled()) return [];
 
-  const payload = await slackApi<{
-    ok: boolean;
-    messages?: SlackHistoryMessage[];
-  }>("conversations.history", {
-    channel: resolveSlackChannelParam(channelId),
-    limit: options?.limit ?? 20,
-    oldest: options?.oldest,
-    inclusive: false,
-  });
+  return withChannelMembership(channelId, async (channel) => {
+    const payload = await slackApi<{
+      ok: boolean;
+      messages?: SlackHistoryMessage[];
+    }>("conversations.history", {
+      channel,
+      limit: options?.limit ?? 20,
+      oldest: options?.oldest,
+      inclusive: false,
+    });
 
-  const messages = [...(payload.messages ?? [])].sort((a, b) => Number(a.ts) - Number(b.ts));
-  return messages;
+    return [...(payload.messages ?? [])].sort((a, b) => Number(a.ts) - Number(b.ts));
+  });
 }
 
 /** Paginated channel history for pulse lookback (newest pages first, returned oldest→newest). */
@@ -656,41 +672,44 @@ export async function fetchChannelHistorySince(
 
   const maxMessages = options?.maxMessages ?? 200;
   const maxRetries = options?.maxRetries ?? 4;
-  const collected: SlackHistoryMessage[] = [];
-  let cursor: string | undefined;
 
-  while (collected.length < maxMessages) {
-    const limit = Math.min(100, maxMessages - collected.length);
-    const payload = await slackApi<{
-      ok: boolean;
-      messages?: SlackHistoryMessage[];
-      response_metadata?: { next_cursor?: string };
-    }>(
-      "conversations.history",
-      {
-        channel: resolveSlackChannelParam(channelId),
-        limit,
-        oldest: options?.oldest,
-        latest: options?.latest,
-        inclusive: false,
-        cursor,
-      },
-      0,
-      maxRetries,
-    );
+  return withChannelMembership(channelId, async (channel) => {
+    const collected: SlackHistoryMessage[] = [];
+    let cursor: string | undefined;
 
-    const batch = payload.messages ?? [];
-    if (batch.length === 0) break;
-    collected.push(...batch);
+    while (collected.length < maxMessages) {
+      const limit = Math.min(100, maxMessages - collected.length);
+      const payload = await slackApi<{
+        ok: boolean;
+        messages?: SlackHistoryMessage[];
+        response_metadata?: { next_cursor?: string };
+      }>(
+        "conversations.history",
+        {
+          channel,
+          limit,
+          oldest: options?.oldest,
+          latest: options?.latest,
+          inclusive: false,
+          cursor,
+        },
+        0,
+        maxRetries,
+      );
 
-    cursor = payload.response_metadata?.next_cursor || undefined;
-    if (!cursor) break;
-  }
+      const batch = payload.messages ?? [];
+      if (batch.length === 0) break;
+      collected.push(...batch);
 
-  const deduped = new Map<string, SlackHistoryMessage>();
-  for (const message of collected) {
-    if (message.ts) deduped.set(message.ts, message);
-  }
+      cursor = payload.response_metadata?.next_cursor || undefined;
+      if (!cursor) break;
+    }
 
-  return [...deduped.values()].sort((a, b) => Number(a.ts) - Number(b.ts));
+    const deduped = new Map<string, SlackHistoryMessage>();
+    for (const message of collected) {
+      if (message.ts) deduped.set(message.ts, message);
+    }
+
+    return [...deduped.values()].sort((a, b) => Number(a.ts) - Number(b.ts));
+  });
 }
