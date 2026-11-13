@@ -12,6 +12,29 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Slack allows about one chat.postMessage per second. Bursts can be accepted
+ * by the API and then hidden ("high volume of activity"), so wait out the gap
+ * instead of relying on that burst. One queue per server instance — the daily
+ * job posts hundreds of messages from a single invocation.
+ */
+const SLACK_POST_MIN_INTERVAL_MS = 1100;
+let slackPostQueue: Promise<void> = Promise.resolve();
+let nextSlackPostAt = 0;
+
+function reserveSlackPostSlot() {
+  const turn = slackPostQueue.then(async () => {
+    const waitMs = nextSlackPostAt - Date.now();
+    if (waitMs > 0) await sleep(waitMs);
+    nextSlackPostAt = Date.now() + SLACK_POST_MIN_INTERVAL_MS;
+  });
+  slackPostQueue = turn.then(
+    () => undefined,
+    () => undefined,
+  );
+  return turn;
+}
+
 /** Form-encoded so read methods (users.info, users.list, conversations.info/history) see their args; they ignore JSON bodies. */
 function toSlackForm(body: Record<string, unknown>) {
   const form = new URLSearchParams();
@@ -370,6 +393,7 @@ export async function postSlackMessage(input: {
   const channel = resolveSlackChannelParam(input.channel);
 
   async function attemptPost() {
+    await reserveSlackPostSlot();
     const payload = await slackApi<SlackPostMessageResponse>("chat.postMessage", {
       channel,
       text: input.text,
