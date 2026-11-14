@@ -1,24 +1,18 @@
 import { findContactForSession } from "@/lib/auth/access";
 import { requireSessionUser } from "@/lib/auth/session";
 import { AttorneyPlanView } from "@/components/performance/attorney-plan-view";
+import { ConfirmEventsPanel, type ConfirmEventRow } from "@/components/performance/confirm-events-panel";
 import { canBrowsePerformancePeople } from "@/lib/performance/access";
 import { listAttorneyPlanLines } from "@/lib/performance/attorney-plans";
+import { filterAttorneys, isAttorneyRole } from "@/lib/performance/staff-roles";
 import { weekStartMondayCt } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
+import { getNextScheduledDocketFlowEvents } from "@/lib/supabase/services";
 import { type AppUser } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-function isAttorneyLike(user: AppUser) {
-  return (
-    user.role === "attorney" ||
-    user.role === "admin" ||
-    user.role === "manager" ||
-    user.role === "super_admin"
-  );
-}
-
-export default async function PerformanceAttorneyPage({
+export default async function PerformanceAttorneysPage({
   searchParams,
 }: {
   searchParams?: Promise<{ person?: string }>;
@@ -30,9 +24,9 @@ export default async function PerformanceAttorneyPage({
   const weekStart = weekStartMondayCt();
   const canBrowsePeople = canBrowsePerformancePeople(sessionUser.role);
 
-  const attorneys = users.filter(isAttorneyLike).sort((a, b) => a.name.localeCompare(b.name));
+  const attorneys = filterAttorneys(users);
   let selectedAttorney: AppUser | null =
-    contact && isAttorneyLike(contact) ? contact : attorneys[0] ?? null;
+    contact && isAttorneyRole(contact.role) ? contact : attorneys[0] ?? null;
   if (canBrowsePeople && params.person) {
     selectedAttorney = attorneys.find((u) => u.id === params.person) ?? selectedAttorney;
   }
@@ -50,14 +44,39 @@ export default async function PerformanceAttorneyPage({
       clientName: r.shared.clientName,
     }));
 
+  const confirmRows: ConfirmEventRow[] = [];
+  if (selectedAttorney) {
+    const attorneyRecords = records.filter((r) => r.shared.attorneyId === selectedAttorney.id).slice(0, 25);
+    for (const record of attorneyRecords) {
+      try {
+        const events = await getNextScheduledDocketFlowEvents(record.shared.id, 2);
+        for (const event of events) {
+          confirmRows.push({
+            caseId: record.shared.id,
+            caseNumber: record.shared.caseNumber,
+            clientName: record.shared.clientName,
+            attorneyUserId: record.shared.attorneyId,
+            assigneeUserId: record.shared.paralegalId,
+            event,
+          });
+        }
+      } catch {
+        // Calendar read is best-effort for confirmation queue.
+      }
+    }
+  }
+
   return (
-    <AttorneyPlanView
-      initialLines={lines}
-      weekStart={weekStart}
-      selectedAttorney={selectedAttorney}
-      attorneys={attorneys}
-      canBrowsePeople={canBrowsePeople}
-      caseOptions={caseOptions}
-    />
+    <div className="space-y-6">
+      <AttorneyPlanView
+        initialLines={lines}
+        weekStart={weekStart}
+        selectedAttorney={selectedAttorney}
+        attorneys={attorneys}
+        canBrowsePeople={canBrowsePeople}
+        caseOptions={caseOptions}
+      />
+      {confirmRows.length > 0 ? <ConfirmEventsPanel rows={confirmRows} /> : null}
+    </div>
   );
 }

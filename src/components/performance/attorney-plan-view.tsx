@@ -119,10 +119,11 @@ export function AttorneyPlanView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-navy-950">
-            Upcoming week — {selectedAttorney?.name ?? "Attorney"}
+            {selectedAttorney?.name ?? "Attorney"} — upcoming week
           </h2>
           <p className="text-sm text-muted-foreground">
-            Week of {weekStart}. Plans are intent only — they never change case status.
+            Week of {weekStart}. Lit events, lawsuits, and settlements planned for this week (intent only — never
+            changes case status).
           </p>
         </div>
         {canBrowsePeople ? (

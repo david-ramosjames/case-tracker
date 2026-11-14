@@ -7,8 +7,8 @@ import { cn } from "@/lib/utils";
 const tabs = [
   { href: "/performance/overview", label: "Overview" },
   { href: "/performance/team", label: "Team" },
-  { href: "/performance/my-work", label: "My Work" },
-  { href: "/performance/attorney", label: "Attorney" },
+  { href: "/performance/my-work", label: "Paralegals" },
+  { href: "/performance/attorney", label: "Attorneys" },
   { href: "/performance/history", label: "History" },
   { href: "/performance/settings", label: "Settings" },
 ] as const;

@@ -117,6 +117,34 @@ describe("pair week rollup", () => {
     assert.equal(mike.counts.lawsuit_filed, 0);
   });
 
+  it("counts attorney lit completed and closings on the pair", () => {
+    const pairs = [pair({ id: "p1" })];
+    const deliverables = [
+      done({ id: "d1", deliverableType: "deposition" }),
+      done({ id: "d2", deliverableType: "mediation" }),
+      done({ id: "d3", deliverableType: "hearing" }),
+      done({ id: "d4", deliverableType: "settlement" }),
+      done({ id: "d5", deliverableType: "disbursement" }),
+      done({ id: "d6", deliverableType: "disengagement" }),
+    ];
+    const [row] = buildPairWeekRollup({
+      weekStart: "2026-11-09",
+      pairs,
+      deliverables,
+      nameById: new Map([
+        ["att-1", "Jesus"],
+        ["par-1", "Adrian"],
+      ]),
+    });
+    assert.equal(row.counts.deposition, 1);
+    assert.equal(row.counts.mediation, 1);
+    assert.equal(row.counts.hearing, 1);
+    assert.equal(row.attorneyLitTotal, 3);
+    assert.equal(row.counts.settlement, 1);
+    assert.equal(row.counts.disbursement, 1);
+    assert.equal(row.counts.disengagement, 1);
+  });
+
   it("findMatchingPair requires both sides", () => {
     const pairs = [pair({ id: "p1" })];
     assert.equal(findMatchingPair(pairs, "att-1", "par-1")?.id, "p1");

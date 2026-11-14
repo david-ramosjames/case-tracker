@@ -378,7 +378,8 @@ export function PerformanceSettingsView({
         <CardHeader>
           <CardTitle>Attorney–paralegal pairs</CardTitle>
           <CardDescription>
-            Team weekly check rolls up completed Demands / Lawsuits / Discovery / Lit Events by these pairs. Use TBD
+            Team pair check uses these rows for Paralegals (demands / lawsuit / discovery / scheduled lit), Attorneys
+            (depo / mediation / hearing completed), and Closings (disengagement / settlement / disbursement). Use TBD
             labels when a seat is open. Ending a pair keeps history; delete removes it.
           </CardDescription>
         </CardHeader>

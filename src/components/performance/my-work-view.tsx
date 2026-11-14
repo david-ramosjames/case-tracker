@@ -284,16 +284,18 @@ export function MyWorkView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-navy-950">
-            {selectedPerson?.name ?? "My Work"}
+            {selectedPerson?.name ?? "Paralegal"}
             {viewerContactId && selectedPerson?.id === viewerContactId ? " (you)" : ""}
           </h2>
-          <p className="text-sm text-muted-foreground">
-            Week of {weekStart}
-            {viewingAsAttorney ? " · attorney view" : " · paralegal view"}
-          </p>
+          <p className="text-sm text-muted-foreground">Week of {weekStart} · paralegal weekly check</p>
         </div>
         {canBrowsePeople ? (
-          <PersonSwitcher people={people} selectedId={selectedPerson?.id ?? null} basePath="/performance/my-work" />
+          <PersonSwitcher
+            people={people}
+            selectedId={selectedPerson?.id ?? null}
+            basePath="/performance/my-work"
+            label="Paralegal"
+          />
         ) : null}
       </div>
 

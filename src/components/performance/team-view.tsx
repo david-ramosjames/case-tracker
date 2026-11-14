@@ -1,14 +1,44 @@
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { PAIR_CHECK_METRICS, type PairWeekRow } from "@/lib/performance/pair-rollup";
+import {
+  PAIR_ATTORNEY_LIT_GOAL,
+  PAIR_ATTORNEY_METRICS,
+  PAIR_CLOSING_METRICS,
+  PAIR_PARALEGAL_METRICS,
+  goalStatus,
+  type GoalStatus,
+  type PairWeekRow,
+} from "@/lib/performance/pair-rollup";
 import { type FirmWeekRollup } from "@/lib/performance/team-rollup";
 import { cn } from "@/lib/utils";
 
-function cellClass(status: "behind" | "met" | "ahead") {
+function cellClass(status: GoalStatus | "behind" | "met" | "ahead") {
   if (status === "behind") return "bg-rose-50 font-semibold text-rose-800";
   if (status === "ahead") return "bg-emerald-50 text-emerald-900";
+  if (status === "neutral") return "bg-white text-navy-950";
   return "bg-white text-navy-950";
+}
+
+function PairLabel({ row }: { row: PairWeekRow }) {
+  if (row.paralegalContactId) {
+    return (
+      <Link className="text-pink-700 hover:underline" href={`/performance/my-work?person=${row.paralegalContactId}`}>
+        {row.label}
+      </Link>
+    );
+  }
+  return <>{row.label}</>;
+}
+
+function EmptyPairs({ colSpan }: { colSpan: number }) {
+  return (
+    <TableRow>
+      <TableCell colSpan={colSpan} className="text-muted-foreground">
+        No active pairs. Configure them in Settings.
+      </TableCell>
+    </TableRow>
+  );
 }
 
 export function TeamView({
@@ -24,10 +54,10 @@ export function TeamView({
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>This week — pair check</CardTitle>
+          <CardTitle>Pair check — Paralegals</CardTitle>
           <CardDescription>
-            {currentWeek.weekLabel} · attorney–paralegal pairs from Settings. Counts are completed deliverables
-            matching both people (Demands / Lawsuit / Discovery / Lit Events). Weights {PAIR_CHECK_METRICS.map((m) => m.weight).join(" / ")}.
+            {currentWeek.weekLabel} · per pair. Goals: 1 demand sent, 1 lawsuit filed, 2 discovery responses, 3 lit
+            events scheduled (depo / mediation / hearing).
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -35,43 +65,157 @@ export function TeamView({
             <TableHeader>
               <TableRow>
                 <TableHead>Team</TableHead>
-                {PAIR_CHECK_METRICS.map((metric) => (
-                  <TableHead key={metric.key} className="text-center whitespace-nowrap">
+                {PAIR_PARALEGAL_METRICS.map((metric) => (
+                  <TableHead key={metric.key} className="whitespace-nowrap text-center" title={metric.detail}>
                     <div>{metric.label}</div>
-                    <div className="text-[10px] font-normal text-muted-foreground">wt {metric.weight}</div>
+                    <div className="text-[10px] font-normal text-muted-foreground">goal {metric.goal}</div>
                   </TableHead>
                 ))}
               </TableRow>
             </TableHeader>
             <TableBody>
               {pairRows.map((row) => (
-                <TableRow key={row.pairId}>
-                  <TableCell className="font-medium whitespace-nowrap">
-                    {row.paralegalContactId ? (
-                      <Link
-                        className="text-pink-700 hover:underline"
-                        href={`/performance/my-work?person=${row.paralegalContactId}`}
-                      >
-                        {row.label}
-                      </Link>
-                    ) : (
-                      row.label
-                    )}
+                <TableRow key={`para-${row.pairId}`}>
+                  <TableCell className="whitespace-nowrap font-medium">
+                    <PairLabel row={row} />
                   </TableCell>
-                  {PAIR_CHECK_METRICS.map((metric) => (
-                    <TableCell key={metric.key} className="text-center tabular-nums font-semibold">
-                      {row.counts[metric.key]}
-                    </TableCell>
-                  ))}
+                  {PAIR_PARALEGAL_METRICS.map((metric) => {
+                    const actual = row.counts[metric.key];
+                    const status = goalStatus(actual, metric.goal);
+                    return (
+                      <TableCell
+                        key={metric.key}
+                        className={cn("text-center tabular-nums", cellClass(status))}
+                        title={`${metric.detail}: ${actual} / ${metric.goal}`}
+                      >
+                        <div className="font-semibold">{actual}</div>
+                        <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+                      </TableCell>
+                    );
+                  })}
                 </TableRow>
               ))}
+              {pairRows.length === 0 ? <EmptyPairs colSpan={1 + PAIR_PARALEGAL_METRICS.length} /> : null}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Pair check — Attorneys</CardTitle>
+          <CardDescription>
+            {currentWeek.weekLabel} · depositions, mediations, and hearings completed. Combined goal:{" "}
+            {PAIR_ATTORNEY_LIT_GOAL} lit events completed per pair this week.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Team</TableHead>
+                {PAIR_ATTORNEY_METRICS.map((metric) => (
+                  <TableHead key={metric.key} className="whitespace-nowrap text-center" title={metric.detail}>
+                    {metric.label}
+                  </TableHead>
+                ))}
+                <TableHead className="whitespace-nowrap text-center">
+                  <div>LIT TOTAL</div>
+                  <div className="text-[10px] font-normal text-muted-foreground">goal {PAIR_ATTORNEY_LIT_GOAL}</div>
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pairRows.map((row) => {
+                const litStatus = goalStatus(row.attorneyLitTotal, PAIR_ATTORNEY_LIT_GOAL);
+                return (
+                  <TableRow key={`att-${row.pairId}`}>
+                    <TableCell className="whitespace-nowrap font-medium">
+                      {row.attorneyContactId ? (
+                        <Link
+                          className="text-pink-700 hover:underline"
+                          href={`/performance/attorney?person=${row.attorneyContactId}`}
+                        >
+                          {row.label}
+                        </Link>
+                      ) : (
+                        row.label
+                      )}
+                    </TableCell>
+                    {PAIR_ATTORNEY_METRICS.map((metric) => (
+                      <TableCell key={metric.key} className="text-center tabular-nums font-semibold">
+                        {row.counts[metric.key]}
+                      </TableCell>
+                    ))}
+                    <TableCell
+                      className={cn("text-center tabular-nums", cellClass(litStatus))}
+                      title={`Lit completed: ${row.attorneyLitTotal} / ${PAIR_ATTORNEY_LIT_GOAL}`}
+                    >
+                      <div className="font-semibold">{row.attorneyLitTotal}</div>
+                      <div className="text-[10px] font-normal opacity-70">/{PAIR_ATTORNEY_LIT_GOAL}</div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
               {pairRows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={1 + PAIR_CHECK_METRICS.length} className="text-muted-foreground">
-                    No active pairs. Configure them in Settings.
-                  </TableCell>
-                </TableRow>
+                <EmptyPairs colSpan={2 + PAIR_ATTORNEY_METRICS.length} />
               ) : null}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Pair check — Closings</CardTitle>
+          <CardDescription>
+            {currentWeek.weekLabel} · disengagements, settlements (goal 1), disbursements (goal 1) per pair.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Team</TableHead>
+                {PAIR_CLOSING_METRICS.map((metric) => (
+                  <TableHead key={metric.key} className="whitespace-nowrap text-center" title={metric.detail}>
+                    <div>{metric.label}</div>
+                    {metric.goal != null ? (
+                      <div className="text-[10px] font-normal text-muted-foreground">goal {metric.goal}</div>
+                    ) : null}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pairRows.map((row) => (
+                <TableRow key={`close-${row.pairId}`}>
+                  <TableCell className="whitespace-nowrap font-medium">
+                    <PairLabel row={row} />
+                  </TableCell>
+                  {PAIR_CLOSING_METRICS.map((metric) => {
+                    const actual = row.counts[metric.key];
+                    const status = goalStatus(actual, metric.goal);
+                    return (
+                      <TableCell
+                        key={metric.key}
+                        className={cn("text-center tabular-nums", cellClass(status))}
+                        title={
+                          metric.goal != null
+                            ? `${metric.detail}: ${actual} / ${metric.goal}`
+                            : `${metric.detail}: ${actual}`
+                        }
+                      >
+                        <div className="font-semibold">{actual}</div>
+                        {metric.goal != null ? (
+                          <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+                        ) : null}
+                      </TableCell>
+                    );
+                  })}
+                </TableRow>
+              ))}
+              {pairRows.length === 0 ? <EmptyPairs colSpan={1 + PAIR_CLOSING_METRICS.length} /> : null}
             </TableBody>
           </Table>
         </CardContent>

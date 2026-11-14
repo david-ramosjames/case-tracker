@@ -31,7 +31,6 @@ export function PersonSwitcher({
         {people.map((person) => (
           <option key={person.id} value={person.id}>
             {person.name}
-            {person.role ? ` (${person.role.replaceAll("_", " ")})` : ""}
           </option>
         ))}
       </select>
