@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatMetricValue } from "@/lib/performance/client-share";
 import { type ClosingCaseRef, type PairClosingDetails } from "@/lib/performance/closings-types";
-import { type FirmWeekRollup } from "@/lib/performance/firm-metrics";
+import { FIRM_METRIC_GROUPS, type FirmWeekRollup } from "@/lib/performance/firm-metrics";
 import {
   PAIR_ATTORNEY_LIT_GOAL,
   PAIR_ATTORNEY_METRICS,
@@ -64,6 +64,27 @@ function KpiBar({ actual, goal, status }: { actual: number; goal: number; status
         )}
         style={{ width: `${pct}%` }}
       />
+    </div>
+  );
+}
+
+function StatusLegend({ showNotTracked = false }: { showNotTracked?: boolean }) {
+  return (
+    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-3 w-3 rounded-sm bg-amber-50 ring-1 ring-amber-200" /> Behind
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-3 w-3 rounded-sm bg-white ring-1 ring-slate-200" /> Met
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-3 w-3 rounded-sm bg-emerald-50 ring-1 ring-emerald-200" /> Ahead
+      </span>
+      {showNotTracked ? (
+        <span className="inline-flex items-center gap-1.5">
+          <span className="text-sm leading-none">—</span> Not tracked
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -285,6 +306,9 @@ export function TeamView({
                 {pairRows.length === 0 ? <EmptyPairs colSpan={1 + PAIR_PARALEGAL_METRICS.length} /> : null}
               </TableBody>
             </Table>
+            <div className="mt-3">
+              <StatusLegend />
+            </div>
           </CardContent>
         </Card>
       ) : null}
@@ -348,6 +372,9 @@ export function TeamView({
                 {pairRows.length === 0 ? <EmptyPairs colSpan={2 + PAIR_ATTORNEY_METRICS.length} /> : null}
               </TableBody>
             </Table>
+            <div className="mt-3">
+              <StatusLegend />
+            </div>
           </CardContent>
         </Card>
       ) : null}
@@ -431,6 +458,9 @@ export function TeamView({
                 onClose={() => setDrilldown(null)}
               />
             ) : null}
+            <div className="mt-3">
+              <StatusLegend />
+            </div>
           </CardContent>
         </Card>
       ) : null}
@@ -444,30 +474,65 @@ export function TeamView({
                 Sum of team pair results for the selected week versus firm weekly targets.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-                {firmWeek.metrics.map((metric) => (
-                  <div
-                    key={metric.key}
+            <CardContent className="space-y-5">
+              {FIRM_METRIC_GROUPS.map((group, groupIndex) => {
+                const metrics = group.keys
+                  .map((key) => firmWeek.metrics.find((m) => m.key === key))
+                  .filter((m): m is NonNullable<typeof m> => Boolean(m));
+                return (
+                  <section
+                    key={group.id}
                     className={cn(
-                      "rounded-md border px-3 py-2.5",
-                      metric.status === "behind" && "border-amber-200 bg-amber-50/60",
-                      metric.status === "ahead" && "border-emerald-200 bg-emerald-50/40",
-                      metric.status === "met" && "border-slate-200 bg-white",
+                      "space-y-2.5",
+                      groupIndex > 0 && "border-t border-slate-100 pt-5",
                     )}
                   >
-                    <div className="text-xs font-medium text-muted-foreground">{metric.label}</div>
-                    <div className="mt-0.5 flex items-baseline gap-1.5">
-                      <span className="text-xl font-semibold tabular-nums text-navy-950">
-                        {formatMetricValue(metric.actual)}
+                    <button
+                      type="button"
+                      onClick={() => setTab(group.tab)}
+                      className="group flex w-full items-baseline justify-between gap-3 text-left"
+                    >
+                      <span className="text-sm font-semibold tracking-tight text-navy-950 group-hover:text-pink-700">
+                        {group.label}
+                        <span className="ml-1.5 text-xs font-normal text-muted-foreground group-hover:text-pink-600">
+                          View tab →
+                        </span>
                       </span>
-                      <span className="text-xs text-muted-foreground">/ {metric.goal}</span>
+                      <span className="hidden h-px flex-1 bg-slate-100 sm:block" aria-hidden />
+                    </button>
+                    <div
+                      className={cn(
+                        "grid gap-3",
+                        group.keys.length >= 4
+                          ? "sm:grid-cols-2 lg:grid-cols-4"
+                          : "sm:grid-cols-2 lg:grid-cols-3",
+                      )}
+                    >
+                      {metrics.map((metric) => (
+                        <div
+                          key={metric.key}
+                          className={cn(
+                            "rounded-md border px-3 py-2.5",
+                            metric.status === "behind" && "border-amber-200 bg-amber-50/60",
+                            metric.status === "ahead" && "border-emerald-200 bg-emerald-50/40",
+                            metric.status === "met" && "border-slate-200 bg-white",
+                          )}
+                        >
+                          <div className="text-xs font-medium text-muted-foreground">{metric.label}</div>
+                          <div className="mt-0.5 flex items-baseline gap-1.5">
+                            <span className="text-xl font-semibold tabular-nums text-navy-950">
+                              {formatMetricValue(metric.actual)}
+                            </span>
+                            <span className="text-xs text-muted-foreground">/ {metric.goal}</span>
+                          </div>
+                          <KpiBar actual={metric.actual} goal={metric.goal} status={metric.status} />
+                        </div>
+                      ))}
                     </div>
-                    <KpiBar actual={metric.actual} goal={metric.goal} status={metric.status} />
-                  </div>
-                ))}
-              </div>
-              <p className="mt-3 text-sm text-muted-foreground">
+                  </section>
+                );
+              })}
+              <p className="text-sm text-muted-foreground">
                 {firmWeek.behindCount === 0
                   ? "On track across all metrics this week."
                   : `${firmWeek.behindCount} metric${firmWeek.behindCount === 1 ? "" : "s"} behind pace.`}
@@ -504,15 +569,31 @@ export function TeamView({
                 <TableBody>
                   {visibleHistory.map((week) => {
                     const hasTracking = tracked.has(week.weekStart);
+                    const isWip = week.weekStart === weekStart;
                     return (
-                      <TableRow key={week.weekStart}>
-                        <TableCell className="sticky left-0 z-10 whitespace-nowrap bg-white font-medium">
+                      <TableRow key={week.weekStart} className={isWip ? "bg-sky-50/40" : undefined}>
+                        <TableCell
+                          className={cn(
+                            "sticky left-0 z-10 whitespace-nowrap font-medium",
+                            isWip ? "bg-sky-50" : "bg-white",
+                          )}
+                        >
                           <button
                             type="button"
                             className="text-left hover:text-pink-700 hover:underline"
                             onClick={() => goWeek(week.weekStart)}
                           >
-                            {week.weekLabel}
+                            <span className="inline-flex items-center gap-1.5">
+                              {week.weekLabel}
+                              {isWip ? (
+                                <span
+                                  className="rounded px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 ring-1 ring-sky-200 bg-sky-100"
+                                  title="Week still in progress — totals are partial"
+                                >
+                                  WIP
+                                </span>
+                              ) : null}
+                            </span>
                           </button>
                         </TableCell>
                         {week.metrics.map((metric) => (
@@ -520,8 +601,17 @@ export function TeamView({
                             key={metric.key}
                             className={cn(
                               "text-center tabular-nums",
-                              hasTracking ? cellClass(metric.status) : "text-muted-foreground",
+                              !hasTracking
+                                ? "text-muted-foreground"
+                                : isWip
+                                  ? "bg-transparent text-navy-950"
+                                  : cellClass(metric.status),
                             )}
+                            title={
+                              isWip
+                                ? "In progress — not judged against the full-week goal yet"
+                                : undefined
+                            }
                           >
                             {hasTracking ? (
                               <>
@@ -539,18 +629,13 @@ export function TeamView({
                 </TableBody>
               </Table>
               <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="h-3 w-3 rounded-sm bg-amber-50 ring-1 ring-amber-200" /> Behind
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="h-3 w-3 rounded-sm bg-white ring-1 ring-slate-200" /> Met
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="h-3 w-3 rounded-sm bg-emerald-50 ring-1 ring-emerald-200" /> Ahead
-                  </span>
-                  <span className="inline-flex items-center gap-1.5">
-                    <span className="text-sm leading-none">—</span> Not tracked
+                <div className="flex flex-wrap items-center gap-4">
+                  <StatusLegend showNotTracked />
+                  <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <span className="rounded px-1 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 ring-1 ring-sky-200 bg-sky-100">
+                      WIP
+                    </span>
+                    Current week in progress
                   </span>
                 </div>
                 {history.length > HISTORY_DEFAULT ? (

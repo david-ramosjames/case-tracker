@@ -13,6 +13,28 @@ export const FIRM_WEEKLY_METRICS = [
 
 export type FirmWeeklyMetricKey = (typeof FIRM_WEEKLY_METRICS)[number]["key"];
 
+/** Visual groupings on Team → Firm activity; `tab` jumps to the matching Team tab. */
+export const FIRM_METRIC_GROUPS = [
+  {
+    id: "paralegals" as const,
+    label: "Paralegals",
+    tab: "paralegals" as const,
+    keys: ["demand_sent", "lawsuit_filed", "discovery_responses", "lit_event_scheduled"] as const,
+  },
+  {
+    id: "attorneys" as const,
+    label: "Attorneys",
+    tab: "attorneys" as const,
+    keys: ["deposition", "mediation", "hearing"] as const,
+  },
+  {
+    id: "closings" as const,
+    label: "Closings",
+    tab: "closings" as const,
+    keys: ["settlement", "disbursement", "new_case"] as const,
+  },
+];
+
 export function defaultFirmWeeklyTarget(metricKey: string): number {
   return FIRM_WEEKLY_METRICS.find((m) => m.key === metricKey)?.defaultTarget ?? 0;
 }
