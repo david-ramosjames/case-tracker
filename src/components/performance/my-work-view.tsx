@@ -3,37 +3,61 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { PersonSwitcher } from "@/components/performance/person-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
+  DELIVERABLE_TYPE_LABELS,
   PERFORMANCE_DELIVERABLE_TYPES,
   type PerformanceCommitment,
   type PerformanceDeliverable,
   type PerformanceDeliverableType,
 } from "@/lib/performance/types";
-import { weekStartMondayCt } from "@/lib/performance/weeks";
+import { weekEndFromStart } from "@/lib/performance/weeks";
+import { type AppUser } from "@/lib/types";
 
 type Props = {
   initialDeliverables: PerformanceDeliverable[];
   initialCommitments: PerformanceCommitment[];
   weekStart: string;
-  contactId: string | null;
-  canBrowseAll: boolean;
+  lastWeekStart: string;
+  selectedPerson: AppUser | null;
+  viewerContactId: string | null;
+  canBrowsePeople: boolean;
+  people: AppUser[];
+  viewingAsAttorney: boolean;
   caseOptions: Array<{ id: string; caseNumber: string; clientName: string; paralegalId: string; attorneyId: string }>;
+  nameById: Record<string, string>;
 };
+
+function typeLabel(type: PerformanceDeliverableType) {
+  return DELIVERABLE_TYPE_LABELS[type] ?? type;
+}
+
+function inWeek(ymd: string | null | undefined, weekStart: string) {
+  if (!ymd) return false;
+  const day = ymd.slice(0, 10);
+  return day >= weekStart && day <= weekEndFromStart(weekStart);
+}
 
 export function MyWorkView({
   initialDeliverables,
   initialCommitments,
   weekStart,
+  lastWeekStart,
+  selectedPerson,
+  viewerContactId,
+  canBrowsePeople,
+  people,
+  viewingAsAttorney,
   caseOptions,
+  nameById,
 }: Props) {
   const [deliverables, setDeliverables] = useState(initialDeliverables);
   const [commitments, setCommitments] = useState(initialCommitments);
-  const [filter, setFilter] = useState<"backlog" | "committed" | "all">("backlog");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -57,14 +81,37 @@ export function MyWorkView({
     return map;
   }, [commitments]);
 
-  const visible = deliverables.filter((d) => {
-    if (filter === "backlog") return d.workflowStatus === "backlog";
-    if (filter === "committed") return d.workflowStatus === "committed";
-    return d.workflowStatus !== "cancelled";
-  });
+  const finishedLastWeek = useMemo(
+    () =>
+      deliverables
+        .filter((d) => d.workflowStatus === "done" && inWeek(d.completedAt, lastWeekStart))
+        .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? "")),
+    [deliverables, lastWeekStart],
+  );
+
+  const thisWeekCommitted = useMemo(
+    () =>
+      deliverables.filter((d) => {
+        if (d.workflowStatus !== "committed") return false;
+        const commitment = commitmentByDeliverable.get(d.id);
+        return commitment?.weekStart === weekStart;
+      }),
+    [deliverables, commitmentByDeliverable, weekStart],
+  );
+
+  const backlog = useMemo(
+    () => deliverables.filter((d) => d.workflowStatus === "backlog"),
+    [deliverables],
+  );
 
   async function refresh() {
-    const res = await fetch("/api/performance/deliverables?scope=mine");
+    if (!selectedPerson) return;
+    const params = new URLSearchParams({
+      personId: selectedPerson.id,
+      asAttorney: viewingAsAttorney ? "1" : "0",
+      completedSince: lastWeekStart,
+    });
+    const res = await fetch(`/api/performance/deliverables?${params}`);
     const body = (await res.json()) as { deliverables?: PerformanceDeliverable[]; error?: string };
     if (!res.ok) throw new Error(body.error ?? "Refresh failed");
     setDeliverables(body.deliverables ?? []);
@@ -153,14 +200,126 @@ export function MyWorkView({
     }
   }
 
+  function renderWorkTable(
+    rows: PerformanceDeliverable[],
+    mode: "finished" | "thisWeek" | "backlog",
+  ) {
+    return (
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Paralegal</TableHead>
+            <TableHead>Attorney</TableHead>
+            <TableHead>Deliverable</TableHead>
+            <TableHead>Case #</TableHead>
+            <TableHead>Client</TableHead>
+            <TableHead>{mode === "finished" ? "Complete date" : "Status"}</TableHead>
+            <TableHead>Notes</TableHead>
+            {mode !== "finished" ? <TableHead /> : null}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.map((d) => (
+            <TableRow key={d.id}>
+              <TableCell className="whitespace-nowrap">
+                {d.assigneeUserId ? nameById[d.assigneeUserId] ?? "—" : "—"}
+              </TableCell>
+              <TableCell className="whitespace-nowrap">
+                {d.attorneyUserId ? nameById[d.attorneyUserId] ?? "—" : "—"}
+              </TableCell>
+              <TableCell>
+                <div className="font-medium">{typeLabel(d.deliverableType)}</div>
+                <div className="text-xs text-muted-foreground">{d.identityLabel ?? d.identityKey}</div>
+              </TableCell>
+              <TableCell>
+                {d.caseId ? (
+                  <Link className="font-medium text-pink-700 hover:underline" href={`/cases/${d.caseId}`}>
+                    {d.caseNumber}
+                  </Link>
+                ) : (
+                  d.caseNumber
+                )}
+              </TableCell>
+              <TableCell>{d.clientNameSnapshot ?? "—"}</TableCell>
+              <TableCell className="whitespace-nowrap text-xs">
+                {mode === "finished" ? (
+                  d.completedAt?.slice(0, 10) ?? "—"
+                ) : (
+                  <Badge variant="outline">{d.workflowStatus}</Badge>
+                )}
+              </TableCell>
+              <TableCell className="max-w-[16rem] truncate text-xs" title={d.notes ?? undefined}>
+                {d.notes ?? "—"}
+              </TableCell>
+              {mode !== "finished" ? (
+                <TableCell className="space-x-2 whitespace-nowrap">
+                  {d.workflowStatus === "backlog" ? (
+                    <Button size="sm" variant="outline" disabled={busyId === d.id} onClick={() => void commit(d.id)}>
+                      Add to this week
+                    </Button>
+                  ) : null}
+                  {d.workflowStatus === "backlog" || d.workflowStatus === "committed" ? (
+                    <Button size="sm" disabled={busyId === d.id} onClick={() => void complete(d.id)}>
+                      Complete
+                    </Button>
+                  ) : null}
+                </TableCell>
+              ) : null}
+            </TableRow>
+          ))}
+          {rows.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={mode === "finished" ? 7 : 8} className="text-muted-foreground">
+                No items.
+              </TableCell>
+            </TableRow>
+          ) : null}
+        </TableBody>
+      </Table>
+    );
+  }
+
   return (
     <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-navy-950">
+            {selectedPerson?.name ?? "My Work"}
+            {viewerContactId && selectedPerson?.id === viewerContactId ? " (you)" : ""}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Week of {weekStart}
+            {viewingAsAttorney ? " · attorney view" : " · paralegal view"}
+          </p>
+        </div>
+        {canBrowsePeople ? (
+          <PersonSwitcher people={people} selectedId={selectedPerson?.id ?? null} basePath="/performance/my-work" />
+        ) : null}
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Finished last week</CardTitle>
+          <CardDescription>
+            Week of {lastWeekStart} — bring this list to the Monday 9:30 check. Pair totals roll up on Team.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">{renderWorkTable(finishedLastWeek, "finished")}</CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>This week (committed)</CardTitle>
+          <CardDescription>In progress for the current week commitment.</CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">{renderWorkTable(thisWeekCommitted, "thisWeek")}</CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Identify work</CardTitle>
           <CardDescription>
-            New items go to the paralegal backlog. Requested dates are advisory — use Add to this week to commit.
-            Week of {weekStart} (editable anytime; Monday snapshot is a checkpoint only).
+            New items go to backlog, then Add to this week to commit. Completing feeds Team pair totals.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -190,7 +349,7 @@ export function MyWorkView({
             >
               {PERFORMANCE_DELIVERABLE_TYPES.map((t) => (
                 <option key={t} value={t}>
-                  {t}
+                  {typeLabel(t)}
                 </option>
               ))}
             </select>
@@ -233,6 +392,10 @@ export function MyWorkView({
               onChange={(e) => setForm((f) => ({ ...f, requestedCompletionDate: e.target.value }))}
             />
           </label>
+          <label className="space-y-1 text-sm md:col-span-2">
+            <span className="font-medium">Notes</span>
+            <Input value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+          </label>
           <div className="flex items-end">
             <Button disabled={busyId === "create" || !form.caseId} onClick={() => void createItem()}>
               {busyId === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -242,88 +405,15 @@ export function MyWorkView({
         </CardContent>
       </Card>
 
-      <div className="flex flex-wrap gap-2">
-        {(["backlog", "committed", "all"] as const).map((key) => (
-          <Button
-            key={key}
-            size="sm"
-            variant={filter === key ? "default" : "outline"}
-            onClick={() => setFilter(key)}
-          >
-            {key === "backlog" ? "Backlog" : key === "committed" ? "This week" : "All open"}
-          </Button>
-        ))}
-      </div>
-
       {error ? <p className="text-sm text-rose-700">{error}</p> : null}
 
       <Card>
         <CardHeader>
-          <CardTitle>{filter === "backlog" ? "Backlog" : filter === "committed" ? "Weekly commitments" : "Work"}</CardTitle>
+          <CardTitle>Backlog / in progress</CardTitle>
+          <CardDescription>Identified work not yet committed to this week.</CardDescription>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Case</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Identity</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Identified</TableHead>
-                <TableHead />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visible.map((d) => (
-                <TableRow key={d.id}>
-                  <TableCell>
-                    {d.caseId ? (
-                      <Link className="font-medium text-pink-700 hover:underline" href={`/cases/${d.caseId}`}>
-                        {d.caseNumber}
-                      </Link>
-                    ) : (
-                      d.caseNumber
-                    )}
-                    <div className="text-xs text-muted-foreground">{d.clientNameSnapshot}</div>
-                  </TableCell>
-                  <TableCell>{d.deliverableType}</TableCell>
-                  <TableCell>{d.identityLabel ?? d.identityKey}</TableCell>
-                  <TableCell>
-                    <Badge variant="outline">{d.workflowStatus}</Badge>
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-xs">
-                    {d.identifiedAt.slice(0, 10)}
-                    {d.rescheduleCount > 0 ? ` · moved ${d.rescheduleCount}×` : ""}
-                  </TableCell>
-                  <TableCell className="space-x-2 whitespace-nowrap">
-                    {d.workflowStatus === "backlog" ? (
-                      <Button size="sm" variant="outline" disabled={busyId === d.id} onClick={() => void commit(d.id)}>
-                        Add to this week
-                      </Button>
-                    ) : null}
-                    {d.workflowStatus === "backlog" || d.workflowStatus === "committed" ? (
-                      <Button size="sm" disabled={busyId === d.id} onClick={() => void complete(d.id)}>
-                        Complete
-                      </Button>
-                    ) : null}
-                  </TableCell>
-                </TableRow>
-              ))}
-              {visible.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="text-muted-foreground">
-                    No items in this view.
-                  </TableCell>
-                </TableRow>
-              ) : null}
-            </TableBody>
-          </Table>
-        </CardContent>
+        <CardContent className="overflow-x-auto">{renderWorkTable(backlog, "backlog")}</CardContent>
       </Card>
     </div>
   );
-}
-
-export function defaultWeekStart() {
-  return weekStartMondayCt();
 }

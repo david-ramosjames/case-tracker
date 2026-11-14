@@ -116,3 +116,50 @@ export type CreateDeliverableInput = {
   identityLabel?: string | null;
   notes?: string | null;
 };
+
+export type PerformancePair = {
+  id: string;
+  attorneyContactId: string | null;
+  paralegalContactId: string | null;
+  attorneyLabel: string | null;
+  paralegalLabel: string | null;
+  effectiveFrom: string;
+  effectiveTo: string | null;
+  sortOrder: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const ATTORNEY_PLAN_KINDS = ["lit_event", "lawsuit", "settlement"] as const;
+export type AttorneyPlanKind = (typeof ATTORNEY_PLAN_KINDS)[number];
+
+export type AttorneyPlanLine = {
+  id: string;
+  attorneyContactId: string;
+  weekStart: string;
+  kind: AttorneyPlanKind;
+  caseId: string | null;
+  caseNumber: string | null;
+  label: string;
+  sortOrder: number;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const DELIVERABLE_TYPE_LABELS: Record<PerformanceDeliverableType, string> = {
+  demand_sent: "Demand Sent",
+  lawsuit_filed: "Lawsuit Filed",
+  discovery_responses: "Discovery Responses",
+  lit_event_scheduled: "Litigation Event",
+  deposition: "Deposition",
+  mediation: "Mediation",
+  hearing: "Hearing",
+  hearing_trial: "Hearing/Trial",
+  aso: "ASO",
+  settlement: "Settlement",
+  disbursement: "Disbursement",
+  medicals: "Medicals",
+  disengagement: "Disengagement",
+  other: "Other",
+};

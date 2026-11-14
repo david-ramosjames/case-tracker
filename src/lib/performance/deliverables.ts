@@ -337,6 +337,36 @@ export async function listDeliverablesForAssignee(assigneeUserId: string) {
   return ((data ?? []) as UnknownRow[]).map(rowToDeliverable);
 }
 
+export async function listDeliverablesForAttorney(attorneyUserId: string) {
+  const client = await createPerformanceClient();
+  const { data, error } = await client
+    .from("performance_deliverables")
+    .select("*")
+    .eq("attorney_user_id", attorneyUserId)
+    .order("identified_at", { ascending: false });
+  if (error) throw error;
+  return ((data ?? []) as UnknownRow[]).map(rowToDeliverable);
+}
+
+/** Open + recently completed work for a person's My Work page. */
+export async function listDeliverablesForPerson(input: {
+  contactId: string;
+  asAttorney: boolean;
+  completedSince?: string;
+}) {
+  const client = await createPerformanceClient();
+  const column = input.asAttorney ? "attorney_user_id" : "assignee_user_id";
+  let query = client.from("performance_deliverables").select("*").eq(column, input.contactId);
+  if (input.completedSince) {
+    query = query.or(
+      `workflow_status.in.(backlog,committed),and(workflow_status.eq.done,completed_at.gte.${input.completedSince}T00:00:00)`,
+    );
+  }
+  const { data, error } = await query.order("identified_at", { ascending: false }).limit(2000);
+  if (error) throw error;
+  return ((data ?? []) as UnknownRow[]).map(rowToDeliverable);
+}
+
 export async function listAllOpenDeliverables() {
   const client = await createPerformanceClient();
   const { data, error } = await client

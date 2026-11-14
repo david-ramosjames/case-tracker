@@ -27,6 +27,11 @@ export function canViewPerformanceOverview(role: UserRole | null | undefined) {
   return canManagePerformanceTargets(role) || role === "attorney";
 }
 
+/** Firm-wide person switcher on My Work / Attorney tabs. */
+export function canBrowsePerformancePeople(role: UserRole | null | undefined) {
+  return canViewAllParalegalWorkloads(role);
+}
+
 /** Managers/admins → overview; employees → my-work. */
 export function defaultPerformancePath(role: UserRole | null | undefined) {
   if (canManagePerformanceTargets(role)) return "/performance/overview";

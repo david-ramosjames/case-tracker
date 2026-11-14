@@ -1,5 +1,7 @@
+import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PAIR_CHECK_METRICS, type PairWeekRow } from "@/lib/performance/pair-rollup";
 import { type FirmWeekRollup } from "@/lib/performance/team-rollup";
 import { cn } from "@/lib/utils";
 
@@ -12,12 +14,69 @@ function cellClass(status: "behind" | "met" | "ahead") {
 export function TeamView({
   currentWeek,
   history,
+  pairRows,
 }: {
   currentWeek: FirmWeekRollup;
   history: FirmWeekRollup[];
+  pairRows: PairWeekRow[];
 }) {
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>This week — pair check</CardTitle>
+          <CardDescription>
+            {currentWeek.weekLabel} · attorney–paralegal pairs from Settings. Counts are completed deliverables
+            matching both people (Demands / Lawsuit / Discovery / Lit Events). Weights {PAIR_CHECK_METRICS.map((m) => m.weight).join(" / ")}.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Team</TableHead>
+                {PAIR_CHECK_METRICS.map((metric) => (
+                  <TableHead key={metric.key} className="text-center whitespace-nowrap">
+                    <div>{metric.label}</div>
+                    <div className="text-[10px] font-normal text-muted-foreground">wt {metric.weight}</div>
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pairRows.map((row) => (
+                <TableRow key={row.pairId}>
+                  <TableCell className="font-medium whitespace-nowrap">
+                    {row.paralegalContactId ? (
+                      <Link
+                        className="text-pink-700 hover:underline"
+                        href={`/performance/my-work?person=${row.paralegalContactId}`}
+                      >
+                        {row.label}
+                      </Link>
+                    ) : (
+                      row.label
+                    )}
+                  </TableCell>
+                  {PAIR_CHECK_METRICS.map((metric) => (
+                    <TableCell key={metric.key} className="text-center tabular-nums font-semibold">
+                      {row.counts[metric.key]}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}
+              {pairRows.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={1 + PAIR_CHECK_METRICS.length} className="text-muted-foreground">
+                    No active pairs. Configure them in Settings.
+                  </TableCell>
+                </TableRow>
+              ) : null}
+            </TableBody>
+          </Table>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>This week — firm rollup</CardTitle>

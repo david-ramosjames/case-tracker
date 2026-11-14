@@ -9,6 +9,7 @@ import {
   createDeliverable,
   listAllOpenDeliverables,
   listDeliverablesForAssignee,
+  listDeliverablesForPerson,
 } from "@/lib/performance/deliverables";
 import { type CreateDeliverableInput } from "@/lib/performance/types";
 import { getCaseById, getUsers } from "@/lib/supabase/services";
@@ -27,6 +28,22 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const scope = url.searchParams.get("scope") ?? "mine";
     const assigneeId = url.searchParams.get("assigneeId");
+    const personId = url.searchParams.get("personId");
+    const asAttorney = url.searchParams.get("asAttorney") === "1";
+    const completedSince = url.searchParams.get("completedSince") ?? undefined;
+
+    if (personId) {
+      if (!canViewAllParalegalWorkloads(sessionUser.role) && personId !== contact?.id) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      return NextResponse.json({
+        deliverables: await listDeliverablesForPerson({
+          contactId: personId,
+          asAttorney,
+          completedSince,
+        }),
+      });
+    }
 
     if (scope === "all" || assigneeId) {
       if (!canViewAllParalegalWorkloads(sessionUser.role) && assigneeId !== contact?.id) {

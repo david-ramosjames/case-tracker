@@ -8,7 +8,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { FIRM_WEEKLY_METRICS, defaultFirmWeeklyTarget } from "@/lib/performance/firm-metrics";
 import { type PerformanceStaffDates } from "@/lib/performance/staff-dates";
-import { type PerformanceAssumptions, type PerformanceTarget } from "@/lib/performance/types";
+import {
+  type PerformanceAssumptions,
+  type PerformancePair,
+  type PerformanceTarget,
+} from "@/lib/performance/types";
 import { chicagoTodayYmd, weekStartMondayCt } from "@/lib/performance/weeks";
 import { type AppUser } from "@/lib/types";
 
@@ -17,15 +21,29 @@ export function PerformanceSettingsView({
   initialTargets,
   users,
   initialStaffDates,
+  initialPairs,
 }: {
   initialAssumptions: PerformanceAssumptions;
   initialTargets: PerformanceTarget[];
   users: AppUser[];
   initialStaffDates: PerformanceStaffDates[];
+  initialPairs: PerformancePair[];
 }) {
   const [assumptions, setAssumptions] = useState(initialAssumptions);
   const [targets, setTargets] = useState(initialTargets);
   const [staffDates, setStaffDates] = useState(initialStaffDates);
+  const [pairs, setPairs] = useState(initialPairs);
+  const attorneys = users.filter((u) => u.role === "attorney" || u.role === "admin" || u.role === "manager");
+  const paralegals = users.filter(
+    (u) => u.role === "paralegal" || u.role === "paralegal_manager" || u.role === "legal_assistant",
+  );
+  const [pairDraft, setPairDraft] = useState({
+    attorneyContactId: "",
+    paralegalContactId: "",
+    attorneyLabel: "",
+    paralegalLabel: "",
+    effectiveFrom: weekStartMondayCt(),
+  });
   const [signedGoal, setSignedGoal] = useState(() => {
     const hit = initialTargets.find(
       (t) => t.metricKey === "signed_case" && t.periodGrain === "month" && t.scope === "firm" && !t.effectiveTo,
@@ -146,6 +164,80 @@ export function PerformanceSettingsView({
     } finally {
       setBusy(false);
     }
+  }
+
+  async function addPair() {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/performance/pairs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          attorneyContactId: pairDraft.attorneyContactId || null,
+          paralegalContactId: pairDraft.paralegalContactId || null,
+          attorneyLabel: pairDraft.attorneyContactId ? null : pairDraft.attorneyLabel || "TBD",
+          paralegalLabel: pairDraft.paralegalContactId ? null : pairDraft.paralegalLabel || "TBD",
+          effectiveFrom: pairDraft.effectiveFrom,
+          sortOrder: pairs.length,
+        }),
+      });
+      const body = (await res.json()) as { pair?: PerformancePair; error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Save failed");
+      if (body.pair) setPairs((prev) => [...prev, body.pair!]);
+      setPairDraft((d) => ({ ...d, attorneyContactId: "", paralegalContactId: "", attorneyLabel: "", paralegalLabel: "" }));
+      setMessage("Pair saved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function endPair(id: string) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/performance/pairs", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, effectiveTo: chicagoTodayYmd() }),
+      });
+      const body = (await res.json()) as { pair?: PerformancePair; error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Update failed");
+      if (body.pair) {
+        setPairs((prev) => prev.map((p) => (p.id === id ? body.pair! : p)));
+      }
+      setMessage("Pair ended.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removePair(id: string) {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/performance/pairs?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Delete failed");
+      setPairs((prev) => prev.filter((p) => p.id !== id));
+      setMessage("Pair removed.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function contactName(id: string | null, fallback: string | null) {
+    if (id) return users.find((u) => u.id === id)?.name ?? fallback ?? "Unknown";
+    return fallback || "TBD";
   }
 
   async function saveStaff(contactId: string) {
@@ -279,6 +371,105 @@ export function PerformanceSettingsView({
           <Button asChild variant="outline">
             <Link href="/goals">Open Goals</Link>
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Attorney–paralegal pairs</CardTitle>
+          <CardDescription>
+            Team weekly check rolls up completed Demands / Lawsuits / Discovery / Lit Events by these pairs. Use TBD
+            labels when a seat is open. Ending a pair keeps history; delete removes it.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">Paralegal</span>
+              <select
+                className="w-full rounded-md border px-3 py-2"
+                value={pairDraft.paralegalContactId}
+                onChange={(e) => setPairDraft((d) => ({ ...d, paralegalContactId: e.target.value }))}
+              >
+                <option value="">TBD / label</option>
+                {paralegals.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">Attorney</span>
+              <select
+                className="w-full rounded-md border px-3 py-2"
+                value={pairDraft.attorneyContactId}
+                onChange={(e) => setPairDraft((d) => ({ ...d, attorneyContactId: e.target.value }))}
+              >
+                <option value="">TBD / label</option>
+                {attorneys.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {!pairDraft.paralegalContactId ? (
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Paralegal label</span>
+                <Input
+                  value={pairDraft.paralegalLabel}
+                  onChange={(e) => setPairDraft((d) => ({ ...d, paralegalLabel: e.target.value }))}
+                  placeholder="TBD"
+                />
+              </label>
+            ) : null}
+            {!pairDraft.attorneyContactId ? (
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Attorney label</span>
+                <Input
+                  value={pairDraft.attorneyLabel}
+                  onChange={(e) => setPairDraft((d) => ({ ...d, attorneyLabel: e.target.value }))}
+                  placeholder="TBD"
+                />
+              </label>
+            ) : null}
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">Effective from</span>
+              <Input
+                type="date"
+                value={pairDraft.effectiveFrom}
+                onChange={(e) => setPairDraft((d) => ({ ...d, effectiveFrom: e.target.value }))}
+              />
+            </label>
+          </div>
+          <Button disabled={busy} onClick={() => void addPair()}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Add pair
+          </Button>
+          <div className="space-y-2">
+            {pairs.map((pair) => (
+              <div key={pair.id} className="flex flex-wrap items-center gap-2 border-b py-2 text-sm">
+                <span className="min-w-[14rem] font-medium">
+                  {contactName(pair.paralegalContactId, pair.paralegalLabel)} +{" "}
+                  {contactName(pair.attorneyContactId, pair.attorneyLabel)}
+                </span>
+                <span className="text-muted-foreground">
+                  from {pair.effectiveFrom}
+                  {pair.effectiveTo ? ` to ${pair.effectiveTo}` : " · active"}
+                </span>
+                {!pair.effectiveTo ? (
+                  <Button size="sm" variant="outline" disabled={busy} onClick={() => void endPair(pair.id)}>
+                    End
+                  </Button>
+                ) : null}
+                <Button size="sm" variant="ghost" disabled={busy} onClick={() => void removePair(pair.id)}>
+                  Delete
+                </Button>
+              </div>
+            ))}
+            {pairs.length === 0 ? <p className="text-muted-foreground">No pairs configured yet.</p> : null}
+          </div>
         </CardContent>
       </Card>
 
