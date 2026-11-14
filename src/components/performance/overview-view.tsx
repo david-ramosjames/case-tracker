@@ -13,6 +13,17 @@ function pct(n: number | null) {
   return `${Math.round(n * 100)}%`;
 }
 
+function sumFees(rows: SettledUndisbursedCase[]) {
+  return rows.reduce((total, row) => total + row.expectedAttorneyFees, 0);
+}
+
+/** Case Tracker palette — not Excel blue/grey/green. */
+const BAR = {
+  actual: "#0b1f3a", // navy
+  pacing: "#e11d48", // rose/pink
+  goal: "#0f766e", // teal
+} as const;
+
 export function OverviewView({
   signed,
   feeProjection,
@@ -30,52 +41,95 @@ export function OverviewView({
   agingWarnDays: number;
   quarterLabel: string;
 }) {
+  const top5Total = sumFees(top5);
+  const outstandingTotal = sumFees(oldest);
+  const signedProjected = signed.projectedMonthEnd ?? 0;
+
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <Card>
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <Card className="xl:col-span-1">
           <CardHeader className="pb-2">
             <CardDescription>Signed cases</CardDescription>
-            <CardTitle className="text-2xl">
-              {signed.signedMtd} / {signed.monthlyGoal}
+            <CardTitle className="text-base font-semibold text-navy-950">
+              Actual {signed.signedMtd} · Pacing {signedProjected.toFixed(1)} · Goal {signed.monthlyGoal}
             </CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Projected month-end {signed.projectedMonthEnd?.toFixed(1) ?? "—"} ({pct(signed.projectedAttainment)})
-            <div>Variance {signed.variance?.toFixed(1) ?? "—"}</div>
+          <CardContent>
+            <ComparisonBarChart
+              bars={[
+                { label: "Actual", value: signed.signedMtd, color: BAR.actual, format: "number" },
+                {
+                  label: "Pacing",
+                  value: signedProjected,
+                  color: BAR.pacing,
+                  format: "number",
+                },
+                { label: "Goal", value: signed.monthlyGoal, color: BAR.goal, format: "number" },
+              ]}
+            />
+            <p className="mt-3 text-xs text-muted-foreground">
+              Month-end pacing {pct(signed.projectedAttainment)} · variance{" "}
+              {signed.variance != null ? signed.variance.toFixed(1) : "—"}
+            </p>
           </CardContent>
         </Card>
-        <Card>
+
+        <Card className="xl:col-span-1">
           <CardHeader className="pb-2">
             <CardDescription>Attorney fees ({quarterLabel})</CardDescription>
-            <CardTitle className="text-2xl">{money(feeProjection.projectedQuarterlyFees)}</CardTitle>
+            <CardTitle className="text-base font-semibold text-navy-950">
+              Actual {money(feeProjection.feesDisbursedInQuarter)} · Projected{" "}
+              {money(feeProjection.projectedQuarterlyFees)} · Goal {money(feeProjection.quarterlyGoal)}
+            </CardTitle>
           </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Disbursed {money(feeProjection.feesDisbursedInQuarter)} + eligible settled{" "}
-            {money(feeProjection.eligibleSettledUndisbursedFees)}
-            <div>
-              Goal {money(feeProjection.quarterlyGoal)} · {pct(feeProjection.attainment)} · lag{" "}
-              {feeProjection.lagDays}d
-            </div>
-            <div className="mt-1 text-xs">
-              Jon projection (disbursed + eligible settled). Distinct from /goals pipeline plan.
-            </div>
+          <CardContent>
+            <ComparisonBarChart
+              bars={[
+                {
+                  label: "Actual",
+                  value: feeProjection.feesDisbursedInQuarter,
+                  color: BAR.actual,
+                  format: "money",
+                },
+                {
+                  label: "Projected",
+                  value: feeProjection.projectedQuarterlyFees,
+                  color: BAR.pacing,
+                  format: "money",
+                },
+                {
+                  label: "Goal",
+                  value: feeProjection.quarterlyGoal,
+                  color: BAR.goal,
+                  format: "money",
+                },
+              ]}
+            />
+            <p className="mt-3 text-xs text-muted-foreground">
+              Disbursed + eligible settled (lag {feeProjection.lagDays}d) · {pct(feeProjection.attainment)} of goal.
+              Distinct from /goals pipeline plan.
+            </p>
           </CardContent>
         </Card>
+
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Settled, not paid</CardDescription>
-            <CardTitle className="text-2xl">{top5.length ? money(top5[0]!.expectedAttorneyFees) : "—"}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">Largest expected fee still outstanding</CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Disbursement aging</CardDescription>
-            <CardTitle className="text-2xl">{agingTargetDays}d target</CardTitle>
+            <CardDescription>Top 5 settled, undisbursed</CardDescription>
+            <CardTitle className="text-2xl">{money(top5Total)}</CardTitle>
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground">
-            Oldest open: {oldest[0]?.daysOutstanding ?? "—"} days
+            Total expected fees across the top 5 by fee size
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardDescription>Oldest outstanding settlements</CardDescription>
+            <CardTitle className="text-2xl">{money(outstandingTotal)}</CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            Total expected fees still outstanding ({oldest.length} cases · {agingTargetDays}d target)
           </CardContent>
         </Card>
       </div>
@@ -84,7 +138,7 @@ export function OverviewView({
         <Card>
           <CardHeader>
             <CardTitle>Top 5 settled, undisbursed</CardTitle>
-            <CardDescription>By expected attorney fees</CardDescription>
+            <CardDescription>By expected attorney fees · total {money(top5Total)}</CardDescription>
           </CardHeader>
           <CardContent className="overflow-x-auto">
             <OutstandingTable rows={top5} agingTargetDays={agingTargetDays} agingWarnDays={agingWarnDays} />
@@ -93,7 +147,9 @@ export function OverviewView({
         <Card>
           <CardHeader>
             <CardTitle>Oldest outstanding settlements</CardTitle>
-            <CardDescription>30-day operating target</CardDescription>
+            <CardDescription>
+              Sorted by age · {agingTargetDays}-day operating target · total {money(outstandingTotal)}
+            </CardDescription>
           </CardHeader>
           <CardContent className="overflow-x-auto">
             <OutstandingTable
@@ -103,6 +159,49 @@ export function OverviewView({
             />
           </CardContent>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+function ComparisonBarChart({
+  bars,
+}: {
+  bars: Array<{ label: string; value: number; color: string; format: "money" | "number" }>;
+}) {
+  const max = Math.max(...bars.map((b) => b.value), 1);
+  const chartHeight = 140;
+
+  return (
+    <div>
+      <div className="flex h-[160px] items-end justify-around gap-3 px-2">
+        {bars.map((bar) => {
+          const height = Math.max(4, Math.round((bar.value / max) * chartHeight));
+          const label =
+            bar.format === "money"
+              ? money(bar.value)
+              : Number.isInteger(bar.value)
+                ? String(bar.value)
+                : bar.value.toFixed(1);
+          return (
+            <div key={bar.label} className="flex w-full max-w-[5.5rem] flex-col items-center gap-1">
+              <span className="text-xs font-semibold text-navy-950">{label}</span>
+              <div
+                className="w-12 rounded-t-sm transition-all"
+                style={{ height, backgroundColor: bar.color }}
+                title={`${bar.label}: ${label}`}
+              />
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-2 flex justify-around gap-3 px-2">
+        {bars.map((bar) => (
+          <div key={bar.label} className="flex w-full max-w-[5.5rem] flex-col items-center gap-1">
+            <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: bar.color }} />
+            <span className="text-xs text-muted-foreground">{bar.label}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
