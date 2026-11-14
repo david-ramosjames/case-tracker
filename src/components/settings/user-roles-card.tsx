@@ -92,7 +92,8 @@ export function UserRolesCard({ users: initialUsers }: { users: AppUser[] }) {
         <CardTitle>User Roles</CardTitle>
         <CardDescription>
           DocketFlow contacts used for case assignment. Set each person’s Slack user ID and display name for channel
-          topics (`Attorney @Ryan`). Find IDs in Slack → profile → ⋯ → Copy member ID.
+          topics (`Attorney @Ryan`). Find IDs in Slack → profile → ⋯ → Copy member ID. Performance staffing dates live
+          under Performance → Settings (not here).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 overflow-x-auto">

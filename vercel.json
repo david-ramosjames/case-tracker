@@ -63,6 +63,22 @@
     {
       "path": "/api/cron/quo-evidence-enrichment",
       "schedule": "0 6 * * 0"
+    },
+    {
+      "path": "/api/cron/performance-snapshots?kind=monday",
+      "schedule": "30 15 * * 1"
+    },
+    {
+      "path": "/api/cron/performance-snapshots?kind=monday",
+      "schedule": "30 14 * * 1"
+    },
+    {
+      "path": "/api/cron/performance-snapshots?kind=eow",
+      "schedule": "0 5 * * 1"
+    },
+    {
+      "path": "/api/cron/performance-snapshots?kind=eow",
+      "schedule": "0 4 * * 1"
     }
   ],
   "functions": {

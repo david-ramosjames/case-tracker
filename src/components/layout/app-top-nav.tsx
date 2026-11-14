@@ -19,11 +19,12 @@ import {
   Settings,
   Sparkles,
   Target,
+  ClipboardList,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { isAdminRole } from "@/lib/auth/access";
-import { canViewCaseCsvExport, canViewOutputAndGoals } from "@/lib/auth/constants";
+import { canViewCaseCsvExport, canViewOutputAndGoals, canViewPerformance } from "@/lib/auth/constants";
 import { type SessionUser } from "@/lib/auth/types";
 import { cn } from "@/lib/utils";
 
@@ -35,6 +36,7 @@ const navItems = [
   { href: "/litigation", label: "Litigation", icon: Scale },
   { href: "/client-contact", label: "Contact", icon: Phone },
   { href: "/needs-response", label: "Needs response", icon: MessageCircleWarning },
+  { href: "/performance", label: "Performance", icon: ClipboardList, performanceOnly: true },
   { href: "/output", label: "Output", icon: BarChart3, attorneyGoalsOnly: true },
   { href: "/jumbotron", label: "Jumbotron", icon: Presentation, attorneyGoalsOnly: true },
   { href: "/goals", label: "Goals", icon: Target, attorneyGoalsOnly: true },
@@ -47,10 +49,12 @@ const navItems = [
 function visibleNavForSession(sessionUser: SessionUser) {
   const isAdmin = isAdminRole(sessionUser.role);
   const showGoals = canViewOutputAndGoals(sessionUser.role);
+  const showPerformance = canViewPerformance(sessionUser.role);
   const showCaseExport = canViewCaseCsvExport(sessionUser.email);
   return navItems.filter((item) => {
     if (item.adminOnly && !isAdmin) return false;
     if (item.attorneyGoalsOnly && !showGoals) return false;
+    if (item.performanceOnly && !showPerformance) return false;
     if (item.caseExportOnly && !showCaseExport) return false;
     return true;
   });

@@ -59,6 +59,12 @@ export function canViewOutputAndGoals(role: UserRole | null | undefined) {
   return role !== "paralegal" && role !== "paralegal_manager" && role !== "legal_assistant";
 }
 
+export {
+  canViewPerformance,
+  canManagePerformanceTargets,
+  defaultPerformancePath,
+} from "@/lib/performance/access";
+
 export function formatUserRoleLabel(role: UserRole | string | null | undefined) {
   if (role === "legal_assistant") return "legal assistant";
   if (role === "paralegal_manager") return "paralegal manager";

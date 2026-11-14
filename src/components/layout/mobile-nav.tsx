@@ -13,6 +13,7 @@ import {
   Settings,
   Sparkles,
   Target,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +25,7 @@ const navItems = [
   { href: "/litigation", label: "Litigation", icon: Scale },
   { href: "/client-contact", label: "Contact", icon: Phone },
   { href: "/needs-response", label: "Needs response", icon: MessageCircleWarning },
+  { href: "/performance", label: "Performance", icon: ClipboardList },
   { href: "/output", label: "Output", icon: BarChart3 },
   { href: "/goals", label: "Goals", icon: Target },
   { href: "/settings", label: "Settings", icon: Settings },
