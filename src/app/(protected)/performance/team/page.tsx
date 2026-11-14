@@ -1,38 +1,51 @@
 import { TeamView } from "@/components/performance/team-view";
 import { requireSessionUser } from "@/lib/auth/session";
-import { listAllOpenDeliverables } from "@/lib/performance/deliverables";
+import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 import { createPerformanceClient } from "@/lib/performance/db";
 import { rowToDeliverable } from "@/lib/performance/deliverables";
-import { listPerformanceStaffDates, staffDatesByContactId } from "@/lib/performance/staff-dates";
+import { listPerformanceTargets } from "@/lib/performance/targets";
+import {
+  buildFirmWeekHistory,
+  buildFirmWeekRollup,
+  listRecentWeekStarts,
+  shiftWeekStart,
+} from "@/lib/performance/team-rollup";
 import { weekStartMondayCt } from "@/lib/performance/weeks";
-import { getUsers } from "@/lib/supabase/services";
 
 export const dynamic = "force-dynamic";
 
 export default async function PerformanceTeamPage() {
   await requireSessionUser();
-  const [users, staffRows] = await Promise.all([getUsers(), listPerformanceStaffDates()]);
   const weekStart = weekStartMondayCt();
-  const open = await listAllOpenDeliverables();
+  const weekStarts = listRecentWeekStarts(weekStart, 16);
+  const oldestWeek = shiftWeekStart(weekStart, -(weekStarts.length - 1));
 
-  // Also load recently completed for scoring actuals this week.
-  const client = await createPerformanceClient();
+  const [{ records }, targets, client] = await Promise.all([
+    loadViewerCaseBundle(),
+    listPerformanceTargets(),
+    createPerformanceClient(),
+  ]);
+
   const { data } = await client
     .from("performance_deliverables")
     .select("*")
     .eq("workflow_status", "done")
-    .gte("completed_at", `${weekStart}T00:00:00`)
-    .limit(500);
-  const completed = ((data ?? []) as Record<string, unknown>[]).map(rowToDeliverable);
-  const byId = new Map<string, (typeof open)[number]>();
-  for (const d of [...open, ...completed]) byId.set(d.id, d);
+    .gte("completed_at", `${oldestWeek}T00:00:00`)
+    .limit(5000);
+  const deliverables = ((data ?? []) as Record<string, unknown>[]).map(rowToDeliverable);
 
-  return (
-    <TeamView
-      users={users}
-      deliverables={[...byId.values()]}
-      weekStart={weekStart}
-      staffByContactId={staffDatesByContactId(staffRows)}
-    />
-  );
+  const currentWeek = buildFirmWeekRollup({
+    weekStart,
+    deliverables,
+    records,
+    targets,
+  });
+  const history = buildFirmWeekHistory({
+    weekStarts,
+    deliverables,
+    records,
+    targets,
+  });
+
+  return <TeamView currentWeek={currentWeek} history={history} />;
 }

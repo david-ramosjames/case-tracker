@@ -6,9 +6,10 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { FIRM_WEEKLY_METRICS, defaultFirmWeeklyTarget } from "@/lib/performance/firm-metrics";
 import { type PerformanceStaffDates } from "@/lib/performance/staff-dates";
 import { type PerformanceAssumptions, type PerformanceTarget } from "@/lib/performance/types";
-import { chicagoTodayYmd } from "@/lib/performance/weeks";
+import { chicagoTodayYmd, weekStartMondayCt } from "@/lib/performance/weeks";
 import { type AppUser } from "@/lib/types";
 
 export function PerformanceSettingsView({
@@ -45,6 +46,21 @@ export function PerformanceSettingsView({
       }),
     ) as Record<string, { start: string; end: string }>,
   );
+  const [weeklyGoals, setWeeklyGoals] = useState(() =>
+    Object.fromEntries(
+      FIRM_WEEKLY_METRICS.map((metric) => {
+        const open = initialTargets.find(
+          (t) =>
+            t.metricKey === metric.key &&
+            t.periodGrain === "week" &&
+            t.scope === "firm" &&
+            !t.effectiveTo,
+        );
+        return [metric.key, String(open?.targetValue ?? metric.defaultTarget)];
+      }),
+    ) as Record<string, string>,
+  );
+  const [weeklyEffectiveFrom, setWeeklyEffectiveFrom] = useState(weekStartMondayCt());
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -95,6 +111,36 @@ export function PerformanceSettingsView({
       if (!res.ok) throw new Error(body.error ?? "Save failed");
       if (body.target) setTargets((prev) => [body.target!, ...prev]);
       setMessage("Monthly signed-case goal saved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveWeeklyGoals() {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      for (const metric of FIRM_WEEKLY_METRICS) {
+        const value = Number(weeklyGoals[metric.key] ?? defaultFirmWeeklyTarget(metric.key));
+        const res = await fetch("/api/performance/targets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            metricKey: metric.key,
+            periodGrain: "week",
+            targetValue: value,
+            scope: "firm",
+            effectiveFrom: weeklyEffectiveFrom,
+          }),
+        });
+        const body = (await res.json()) as { target?: PerformanceTarget; error?: string };
+        if (!res.ok) throw new Error(body.error ?? `Failed saving ${metric.label}`);
+        if (body.target) setTargets((prev) => [body.target!, ...prev]);
+      }
+      setMessage(`Firm weekly goals saved from ${weeklyEffectiveFrom} forward.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -175,6 +221,49 @@ export function PerformanceSettingsView({
           </label>
           <Button disabled={busy} onClick={() => void saveSignedGoal()}>
             Save signed goal
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Firm weekly activity goals</CardTitle>
+          <CardDescription>
+            Team rollup targets (DS OUT, Lawsuit, Discovery, …). Saving closes prior open goals and applies from the
+            effective Monday forward — past weeks keep their old targets.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <label className="inline-flex flex-col gap-1 text-sm">
+            <span className="font-medium">Effective from (Monday)</span>
+            <Input
+              type="date"
+              className="w-44"
+              value={weeklyEffectiveFrom}
+              onChange={(e) => setWeeklyEffectiveFrom(e.target.value)}
+            />
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {FIRM_WEEKLY_METRICS.map((metric) => (
+              <label key={metric.key} className="space-y-1 text-sm">
+                <span className="font-medium">
+                  {metric.label} <span className="font-normal text-muted-foreground">/wk</span>
+                </span>
+                <Input
+                  value={weeklyGoals[metric.key] ?? String(metric.defaultTarget)}
+                  onChange={(e) =>
+                    setWeeklyGoals((cur) => ({
+                      ...cur,
+                      [metric.key]: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+            ))}
+          </div>
+          <Button disabled={busy} onClick={() => void saveWeeklyGoals()}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Save weekly goals
           </Button>
         </CardContent>
       </Card>

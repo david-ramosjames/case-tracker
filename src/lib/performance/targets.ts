@@ -1,5 +1,6 @@
 import { createPerformanceClient } from "@/lib/performance/db";
 import { DEFAULT_ATTORNEY_TARGETS, DEFAULT_PARALEGAL_TARGETS } from "@/lib/performance/scoring";
+import { defaultFirmWeeklyTarget } from "@/lib/performance/firm-metrics";
 import { type PerformanceTarget } from "@/lib/performance/types";
 
 type UnknownRow = Record<string, unknown>;
@@ -50,12 +51,18 @@ export function resolveTargetValue(input: {
   if (firmHit) return firmHit.targetValue;
 
   if (grain === "week") {
-    if (input.metricKey in DEFAULT_PARALEGAL_TARGETS) {
-      return DEFAULT_PARALEGAL_TARGETS[input.metricKey as keyof typeof DEFAULT_PARALEGAL_TARGETS];
+    if (input.role === "paralegal" || input.role === "paralegal_manager" || input.role === "legal_assistant") {
+      if (input.metricKey in DEFAULT_PARALEGAL_TARGETS) {
+        return DEFAULT_PARALEGAL_TARGETS[input.metricKey as keyof typeof DEFAULT_PARALEGAL_TARGETS];
+      }
     }
-    if (input.metricKey in DEFAULT_ATTORNEY_TARGETS) {
-      return DEFAULT_ATTORNEY_TARGETS[input.metricKey as keyof typeof DEFAULT_ATTORNEY_TARGETS];
+    if (input.role === "attorney") {
+      if (input.metricKey in DEFAULT_ATTORNEY_TARGETS) {
+        return DEFAULT_ATTORNEY_TARGETS[input.metricKey as keyof typeof DEFAULT_ATTORNEY_TARGETS];
+      }
     }
+    const firmDefault = defaultFirmWeeklyTarget(input.metricKey);
+    if (firmDefault > 0) return firmDefault;
   }
   return 0;
 }
