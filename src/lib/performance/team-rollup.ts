@@ -2,38 +2,27 @@ import { isCaseFullyDisbursed } from "@/lib/case-status";
 import { deliverableCredit } from "@/lib/performance/client-share";
 import {
   FIRM_WEEKLY_METRICS,
+  type FirmWeekMetricCell,
+  type FirmWeekRollup,
   type FirmWeeklyMetricKey,
-  defaultFirmWeeklyTarget,
 } from "@/lib/performance/firm-metrics";
 import { resolveTargetValue } from "@/lib/performance/targets";
 import { type PerformanceDeliverable, type PerformanceTarget } from "@/lib/performance/types";
-import { formatYmd, weekEndFromStart, weekStartMondayCt } from "@/lib/performance/weeks";
+import {
+  shiftWeekStart,
+  weekEndFromStart,
+  weekStartMondayCt,
+} from "@/lib/performance/weeks";
 import { type CaseRecord } from "@/lib/types";
 
-export { FIRM_WEEKLY_METRICS, type FirmWeeklyMetricKey, defaultFirmWeeklyTarget };
-
-export type FirmWeekMetricCell = {
-  key: FirmWeeklyMetricKey;
-  label: string;
-  actual: number;
-  goal: number;
-  status: "behind" | "met" | "ahead";
-};
-
-export type FirmWeekRollup = {
-  weekStart: string;
-  weekEnd: string;
-  weekLabel: string;
-  metrics: FirmWeekMetricCell[];
-  behindCount: number;
-};
-
-/** Shift a Monday YYYY-MM-DD by whole weeks. */
-export function shiftWeekStart(weekStartYmd: string, weekDelta: number): string {
-  const [y, m, d] = weekStartYmd.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d + weekDelta * 7));
-  return formatYmd(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
-}
+export {
+  FIRM_WEEKLY_METRICS,
+  type FirmWeeklyMetricKey,
+  defaultFirmWeeklyTarget,
+  type FirmWeekMetricCell,
+  type FirmWeekRollup,
+} from "@/lib/performance/firm-metrics";
+export { shiftWeekStart } from "@/lib/performance/weeks";
 
 export function listRecentWeekStarts(currentWeekStart = weekStartMondayCt(), count = 16): string[] {
   const weeks: string[] = [];

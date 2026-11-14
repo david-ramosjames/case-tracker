@@ -17,6 +17,13 @@ export function weekEndFromStart(weekStartYmd: string): string {
   return formatYmd(end.getUTCFullYear(), end.getUTCMonth() + 1, end.getUTCDate());
 }
 
+/** Shift a Monday YYYY-MM-DD by whole weeks. Client-safe. */
+export function shiftWeekStart(weekStartYmd: string, weekDelta: number): string {
+  const [y, m, d] = weekStartYmd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d + weekDelta * 7));
+  return formatYmd(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+}
+
 /** e.g. "Nov 9–15, 2026" for a Monday week start. */
 export function formatWeekRangeLabel(weekStartYmd: string): string {
   const end = weekEndFromStart(weekStartYmd);

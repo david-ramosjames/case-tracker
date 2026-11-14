@@ -6,8 +6,9 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { type ClosingCaseRef, type PairClosingDetails } from "@/lib/performance/closings-from-cases";
 import { formatMetricValue } from "@/lib/performance/client-share";
+import { type ClosingCaseRef, type PairClosingDetails } from "@/lib/performance/closings-types";
+import { type FirmWeekRollup } from "@/lib/performance/firm-metrics";
 import {
   PAIR_ATTORNEY_LIT_GOAL,
   PAIR_ATTORNEY_METRICS,
@@ -16,8 +17,8 @@ import {
   goalStatus,
   type GoalStatus,
   type PairWeekRow,
-} from "@/lib/performance/pair-rollup";
-import { shiftWeekStart, type FirmWeekRollup } from "@/lib/performance/team-rollup";
+} from "@/lib/performance/pair-metrics";
+import { shiftWeekStart } from "@/lib/performance/weeks";
 import { cn } from "@/lib/utils";
 
 type TeamTab = "paralegals" | "attorneys" | "closings";

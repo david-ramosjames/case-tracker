@@ -16,3 +16,20 @@ export type FirmWeeklyMetricKey = (typeof FIRM_WEEKLY_METRICS)[number]["key"];
 export function defaultFirmWeeklyTarget(metricKey: string): number {
   return FIRM_WEEKLY_METRICS.find((m) => m.key === metricKey)?.defaultTarget ?? 0;
 }
+
+/** Client-safe firm week rollup shapes (computed on the server, rendered on the client). */
+export type FirmWeekMetricCell = {
+  key: FirmWeeklyMetricKey;
+  label: string;
+  actual: number;
+  goal: number;
+  status: "behind" | "met" | "ahead";
+};
+
+export type FirmWeekRollup = {
+  weekStart: string;
+  weekEnd: string;
+  weekLabel: string;
+  metrics: FirmWeekMetricCell[];
+  behindCount: number;
+};

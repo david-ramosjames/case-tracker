@@ -1,23 +1,11 @@
 import { isCaseFullyDisbursed } from "@/lib/case-status";
 import { countClientsInName } from "@/lib/performance/client-share";
-import { type PerformanceWeekPair } from "@/lib/performance/week-pairs";
+import { type PairClosingDetails } from "@/lib/performance/closings-types";
+import { type PerformanceWeekPair } from "@/lib/performance/week-pair-types";
 import { weekEndFromStart } from "@/lib/performance/weeks";
 import { type CaseRecord } from "@/lib/types";
 
-export type ClosingCaseRef = {
-  caseId: string;
-  caseNumber: string;
-  clientName: string;
-  date: string;
-  credit: number;
-  note?: string;
-};
-
-export type PairClosingDetails = {
-  pairId: string;
-  settlements: ClosingCaseRef[];
-  disbursements: ClosingCaseRef[];
-};
+export type { ClosingCaseRef, PairClosingDetails } from "@/lib/performance/closings-types";
 
 /**
  * Closings from Case Tracker financial dates, attributed by *current* case

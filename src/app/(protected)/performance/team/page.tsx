@@ -42,10 +42,10 @@ function parseWeekParam(raw: string | string[] | undefined): string | null {
 export default async function PerformanceTeamPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ week?: string | string[] }> | { week?: string | string[] };
+  searchParams?: Promise<{ week?: string | string[] }>;
 }) {
   const sessionUser = await requireSessionUser();
-  const params = await Promise.resolve(searchParams ?? {});
+  const params = searchParams ? await searchParams : {};
   const currentMonday = weekStartMondayCt();
   const requested = parseWeekParam(params.week);
   const selectedWeek = requested && requested <= currentMonday ? requested : currentMonday;

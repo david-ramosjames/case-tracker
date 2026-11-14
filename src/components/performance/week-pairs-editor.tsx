@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { type PerformanceWeekPair } from "@/lib/performance/week-pairs";
+import { type PerformanceWeekPair } from "@/lib/performance/week-pair-types";
 import { type AppUser } from "@/lib/types";
 
 type SeatDraft = {
