@@ -17,11 +17,10 @@ function sumFees(rows: SettledUndisbursedCase[]) {
   return rows.reduce((total, row) => total + row.expectedAttorneyFees, 0);
 }
 
-/** Case Tracker palette — not Excel blue/grey/green. */
 const BAR = {
-  actual: "#0b1f3a", // navy
-  pacing: "#e11d48", // rose/pink
-  goal: "#0f766e", // teal
+  actual: "#2563eb", // blue
+  projected: "#9ca3af", // gray
+  goal: "#16a34a", // green
 } as const;
 
 export function OverviewView({
@@ -47,41 +46,37 @@ export function OverviewView({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-        <Card className="xl:col-span-1">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
           <CardHeader className="pb-2">
             <CardDescription>Signed cases</CardDescription>
-            <CardTitle className="text-base font-semibold text-navy-950">
-              Actual {signed.signedMtd} · Pacing {signedProjected.toFixed(1)} · Goal {signed.monthlyGoal}
+            <CardTitle className="text-2xl text-navy-950">
+              Month-end pacing {pct(signed.projectedAttainment)}
             </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Variance {signed.variance != null ? signed.variance.toFixed(1) : "—"} vs goal
+            </p>
           </CardHeader>
           <CardContent>
             <ComparisonBarChart
               bars={[
                 { label: "Actual", value: signed.signedMtd, color: BAR.actual, format: "number" },
-                {
-                  label: "Pacing",
-                  value: signedProjected,
-                  color: BAR.pacing,
-                  format: "number",
-                },
+                { label: "Pacing", value: signedProjected, color: BAR.projected, format: "number" },
                 { label: "Goal", value: signed.monthlyGoal, color: BAR.goal, format: "number" },
               ]}
             />
-            <p className="mt-3 text-xs text-muted-foreground">
-              Month-end pacing {pct(signed.projectedAttainment)} · variance{" "}
-              {signed.variance != null ? signed.variance.toFixed(1) : "—"}
-            </p>
           </CardContent>
         </Card>
 
-        <Card className="xl:col-span-1">
+        <Card>
           <CardHeader className="pb-2">
             <CardDescription>Attorney fees ({quarterLabel})</CardDescription>
-            <CardTitle className="text-base font-semibold text-navy-950">
-              Actual {money(feeProjection.feesDisbursedInQuarter)} · Projected{" "}
-              {money(feeProjection.projectedQuarterlyFees)} · Goal {money(feeProjection.quarterlyGoal)}
+            <CardTitle className="text-2xl text-navy-950">
+              Projected attainment {pct(feeProjection.attainment)}
             </CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Disbursed + eligible settled (lag {feeProjection.lagDays}d). Distinct from /goals pipeline plan.
+            </p>
           </CardHeader>
           <CardContent>
             <ComparisonBarChart
@@ -95,7 +90,7 @@ export function OverviewView({
                 {
                   label: "Projected",
                   value: feeProjection.projectedQuarterlyFees,
-                  color: BAR.pacing,
+                  color: BAR.projected,
                   format: "money",
                 },
                 {
@@ -106,30 +101,6 @@ export function OverviewView({
                 },
               ]}
             />
-            <p className="mt-3 text-xs text-muted-foreground">
-              Disbursed + eligible settled (lag {feeProjection.lagDays}d) · {pct(feeProjection.attainment)} of goal.
-              Distinct from /goals pipeline plan.
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Top 5 settled, undisbursed</CardDescription>
-            <CardTitle className="text-2xl">{money(top5Total)}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Total expected fees across the top 5 by fee size
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardDescription>Oldest outstanding settlements</CardDescription>
-            <CardTitle className="text-2xl">{money(outstandingTotal)}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Total expected fees still outstanding ({oldest.length} cases · {agingTargetDays}d target)
           </CardContent>
         </Card>
       </div>
@@ -137,8 +108,9 @@ export function OverviewView({
       <div className="grid gap-6 xl:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Top 5 settled, undisbursed</CardTitle>
-            <CardDescription>By expected attorney fees · total {money(top5Total)}</CardDescription>
+            <CardDescription>Top 5 settled, undisbursed</CardDescription>
+            <CardTitle className="text-2xl">{money(top5Total)}</CardTitle>
+            <p className="text-sm text-muted-foreground">By expected attorney fees</p>
           </CardHeader>
           <CardContent className="overflow-x-auto">
             <OutstandingTable rows={top5} agingTargetDays={agingTargetDays} agingWarnDays={agingWarnDays} />
@@ -146,10 +118,11 @@ export function OverviewView({
         </Card>
         <Card>
           <CardHeader>
-            <CardTitle>Oldest outstanding settlements</CardTitle>
-            <CardDescription>
-              Sorted by age · {agingTargetDays}-day operating target · total {money(outstandingTotal)}
-            </CardDescription>
+            <CardDescription>Oldest outstanding settlements</CardDescription>
+            <CardTitle className="text-2xl">{money(outstandingTotal)}</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              {oldest.length} cases · {agingTargetDays}-day operating target
+            </p>
           </CardHeader>
           <CardContent className="overflow-x-auto">
             <OutstandingTable
@@ -173,36 +146,27 @@ function ComparisonBarChart({
   const chartHeight = 140;
 
   return (
-    <div>
-      <div className="flex h-[160px] items-end justify-around gap-3 px-2">
-        {bars.map((bar) => {
-          const height = Math.max(4, Math.round((bar.value / max) * chartHeight));
-          const label =
-            bar.format === "money"
-              ? money(bar.value)
-              : Number.isInteger(bar.value)
-                ? String(bar.value)
-                : bar.value.toFixed(1);
-          return (
-            <div key={bar.label} className="flex w-full max-w-[5.5rem] flex-col items-center gap-1">
-              <span className="text-xs font-semibold text-navy-950">{label}</span>
-              <div
-                className="w-12 rounded-t-sm transition-all"
-                style={{ height, backgroundColor: bar.color }}
-                title={`${bar.label}: ${label}`}
-              />
-            </div>
-          );
-        })}
-      </div>
-      <div className="mt-2 flex justify-around gap-3 px-2">
-        {bars.map((bar) => (
-          <div key={bar.label} className="flex w-full max-w-[5.5rem] flex-col items-center gap-1">
-            <span className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: bar.color }} />
+    <div className="flex h-[180px] items-end justify-around gap-4 px-2">
+      {bars.map((bar) => {
+        const height = Math.max(4, Math.round((bar.value / max) * chartHeight));
+        const valueLabel =
+          bar.format === "money"
+            ? money(bar.value)
+            : Number.isInteger(bar.value)
+              ? String(bar.value)
+              : bar.value.toFixed(1);
+        return (
+          <div key={bar.label} className="flex w-full max-w-[6rem] flex-col items-center gap-1.5">
+            <span className="text-xs font-semibold text-navy-950">{valueLabel}</span>
+            <div
+              className="w-14 rounded-t-sm"
+              style={{ height, backgroundColor: bar.color }}
+              title={`${bar.label}: ${valueLabel}`}
+            />
             <span className="text-xs text-muted-foreground">{bar.label}</span>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
