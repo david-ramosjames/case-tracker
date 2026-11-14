@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { buildFirmWeekRollup, shiftWeekStart } from "./team-rollup";
+import {
+  buildFirmWeekRollup,
+  buildFirmWeekRollupFromPairRows,
+  shiftWeekStart,
+  sumPairRowsToFirmActuals,
+} from "./team-rollup";
 
 describe("firm weekly rollup", () => {
   it("marks metrics behind when actual < goal", () => {
@@ -32,5 +37,29 @@ describe("firm weekly rollup", () => {
   it("shifts week starts by whole weeks", () => {
     assert.equal(shiftWeekStart("2026-11-10", -1), "2026-11-03");
     assert.equal(shiftWeekStart("2026-11-10", 1), "2026-11-17");
+  });
+
+  it("sums pair rows into firm activity", () => {
+    const actuals = sumPairRowsToFirmActuals([
+      { isVacant: false, counts: { demand_sent: 1, lawsuit_filed: 0.5, settlement: 1 } },
+      { isVacant: false, counts: { demand_sent: 2, lawsuit_filed: 1, settlement: 0 } },
+      { isVacant: true, counts: { demand_sent: 9, lawsuit_filed: 9, settlement: 9 } },
+    ]);
+    assert.equal(actuals.demand_sent, 3);
+    assert.equal(actuals.lawsuit_filed, 1.5);
+    assert.equal(actuals.settlement, 1);
+    assert.equal(actuals.new_case, 0);
+
+    const rollup = buildFirmWeekRollupFromPairRows({
+      weekStart: "2026-11-02",
+      pairRows: [
+        { isVacant: false, counts: { demand_sent: 1 } },
+        { isVacant: false, counts: { demand_sent: 1 } },
+      ],
+      newCaseCount: 3,
+      targets: [],
+    });
+    assert.equal(rollup.metrics.find((m) => m.key === "demand_sent")?.actual, 2);
+    assert.equal(rollup.metrics.find((m) => m.key === "new_case")?.actual, 3);
   });
 });

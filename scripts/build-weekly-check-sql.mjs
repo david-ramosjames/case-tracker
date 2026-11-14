@@ -57,6 +57,8 @@ function toYmdMonday(value) {
   const offset = dow === 0 ? -6 : 1 - dow;
   const monday = new Date(asUtc);
   monday.setUTCDate(monday.getUTCDate() + offset);
+  // Meeting date → prior work week (spreadsheet week # matches work week).
+  monday.setUTCDate(monday.getUTCDate() - 7);
   const yy = monday.getUTCFullYear();
   const mm = String(monday.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(monday.getUTCDate()).padStart(2, "0");
@@ -178,6 +180,11 @@ for (const seat of parsed) {
 }
 
 const latest = weekStarts.at(-1);
+// Clear prior import that used meeting Mondays (one week ahead) plus the corrected work weeks.
+const deleteFrom = weekStarts[0];
+const [ly, lm, ld] = latest.split("-").map(Number);
+const deleteToDate = new Date(Date.UTC(ly, lm - 1, ld + 14)); // cover old meeting Mondays + current carry
+const deleteTo = `${deleteToDate.getUTCFullYear()}-${String(deleteToDate.getUTCMonth() + 1).padStart(2, "0")}-${String(deleteToDate.getUTCDate()).padStart(2, "0")}`;
 const latestSeats = parsed.filter(
   (p) =>
     p.weekStart === latest &&
@@ -188,10 +195,10 @@ const sql = `
 delete from public.performance_week_pair_metrics
 where week_pair_id in (
   select id from public.performance_week_pairs
-  where week_start between ${sqlStr(weekStarts[0])} and ${sqlStr(weekStarts.at(-1))}
+  where week_start between ${sqlStr(deleteFrom)} and ${sqlStr(deleteTo)}
 );
 delete from public.performance_week_pairs
-where week_start between ${sqlStr(weekStarts[0])} and ${sqlStr(weekStarts.at(-1))};
+where week_start between ${sqlStr(deleteFrom)} and ${sqlStr(deleteTo)};
 
 insert into public.performance_week_pairs
   (id, week_start, seat_index, paralegal_contact_id, attorney_contact_id, paralegal_label, attorney_label, is_vacant)

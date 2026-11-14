@@ -69,6 +69,30 @@ function countSignedInWeek(records: CaseRecord[], weekStart: string, weekEnd: st
   }).length;
 }
 
+export function countNewCasesInWeek(records: CaseRecord[], weekStart: string) {
+  return countSignedInWeek(records, weekStart, weekEndFromStart(weekStart));
+}
+
+/** Sum imported/live pair metrics by week_start for firm history. */
+export function sumStoredPairMetricsByWeek(input: {
+  weekPairs: Array<{ id: string; weekStart: string; isVacant: boolean }>;
+  metrics: Array<{ weekPairId: string; metricKey: string; actualValue: number }>;
+}): Map<string, Partial<Record<FirmWeeklyMetricKey, number>>> {
+  const pairWeek = new Map(input.weekPairs.map((p) => [p.id, p]));
+  const byWeek = new Map<string, Partial<Record<FirmWeeklyMetricKey, number>>>();
+  for (const metric of input.metrics) {
+    const pair = pairWeek.get(metric.weekPairId);
+    if (!pair || pair.isVacant) continue;
+    if (!FIRM_WEEKLY_METRICS.some((m) => m.key === metric.metricKey)) continue;
+    const key = metric.metricKey as FirmWeeklyMetricKey;
+    if (key === "new_case") continue;
+    const bucket = byWeek.get(pair.weekStart) ?? {};
+    bucket[key] = (bucket[key] ?? 0) + (Number(metric.actualValue) || 0);
+    byWeek.set(pair.weekStart, bucket);
+  }
+  return byWeek;
+}
+
 function countSettlementsInWeek(records: CaseRecord[], weekStart: string, weekEnd: string) {
   let count = 0;
   for (const record of records) {
@@ -149,14 +173,12 @@ export function computeFirmWeekActuals(input: {
   return fromDeliverables;
 }
 
-export function buildFirmWeekRollup(input: {
+function cellsFromActuals(input: {
   weekStart: string;
-  deliverables: PerformanceDeliverable[];
-  records: CaseRecord[];
+  actuals: Record<FirmWeeklyMetricKey, number>;
   targets: PerformanceTarget[];
 }): FirmWeekRollup {
   const weekEnd = weekEndFromStart(input.weekStart);
-  const actuals = computeFirmWeekActuals(input);
   const metrics: FirmWeekMetricCell[] = FIRM_WEEKLY_METRICS.map((metric) => {
     const goal = resolveTargetValue({
       targets: input.targets,
@@ -164,7 +186,7 @@ export function buildFirmWeekRollup(input: {
       onDate: input.weekStart,
       periodGrain: "week",
     });
-    const actual = actuals[metric.key];
+    const actual = input.actuals[metric.key] ?? 0;
     const status = actual < goal ? "behind" : actual > goal ? "ahead" : "met";
     return {
       key: metric.key,
@@ -182,6 +204,76 @@ export function buildFirmWeekRollup(input: {
     metrics,
     behindCount: metrics.filter((m) => m.status === "behind").length,
   };
+}
+
+export function buildFirmWeekRollup(input: {
+  weekStart: string;
+  deliverables: PerformanceDeliverable[];
+  records: CaseRecord[];
+  targets: PerformanceTarget[];
+}): FirmWeekRollup {
+  return cellsFromActuals({
+    weekStart: input.weekStart,
+    actuals: computeFirmWeekActuals(input),
+    targets: input.targets,
+  });
+}
+
+/** Sum non-vacant pair/team cells into firm actuals (how firm activity is derived). */
+export function sumPairRowsToFirmActuals(
+  pairRows: Array<{ isVacant: boolean; counts: Partial<Record<string, number>> }>,
+): Record<FirmWeeklyMetricKey, number> {
+  const actuals = Object.fromEntries(FIRM_WEEKLY_METRICS.map((m) => [m.key, 0])) as Record<
+    FirmWeeklyMetricKey,
+    number
+  >;
+  for (const row of pairRows) {
+    if (row.isVacant) continue;
+    for (const metric of FIRM_WEEKLY_METRICS) {
+      if (metric.key === "new_case") continue;
+      actuals[metric.key] += Number(row.counts[metric.key]) || 0;
+    }
+  }
+  return actuals;
+}
+
+/** Firm week from summed pair activity + new-case count from Case Tracker. */
+export function buildFirmWeekRollupFromPairActuals(input: {
+  weekStart: string;
+  pairActuals: Partial<Record<FirmWeeklyMetricKey, number>>;
+  newCaseCount: number;
+  targets: PerformanceTarget[];
+}): FirmWeekRollup {
+  const actuals = Object.fromEntries(FIRM_WEEKLY_METRICS.map((m) => [m.key, 0])) as Record<
+    FirmWeeklyMetricKey,
+    number
+  >;
+  for (const metric of FIRM_WEEKLY_METRICS) {
+    if (metric.key === "new_case") {
+      actuals.new_case = input.newCaseCount;
+    } else {
+      actuals[metric.key] = Number(input.pairActuals[metric.key]) || 0;
+    }
+  }
+  return cellsFromActuals({
+    weekStart: input.weekStart,
+    actuals,
+    targets: input.targets,
+  });
+}
+
+export function buildFirmWeekRollupFromPairRows(input: {
+  weekStart: string;
+  pairRows: Array<{ isVacant: boolean; counts: Partial<Record<string, number>> }>;
+  newCaseCount: number;
+  targets: PerformanceTarget[];
+}): FirmWeekRollup {
+  return buildFirmWeekRollupFromPairActuals({
+    weekStart: input.weekStart,
+    pairActuals: sumPairRowsToFirmActuals(input.pairRows),
+    newCaseCount: input.newCaseCount,
+    targets: input.targets,
+  });
 }
 
 export function buildFirmWeekHistory(input: {

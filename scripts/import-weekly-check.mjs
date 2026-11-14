@@ -71,6 +71,8 @@ function toYmdMonday(value) {
   const offset = dow === 0 ? -6 : 1 - dow;
   const monday = new Date(asUtc);
   monday.setUTCDate(monday.getUTCDate() + offset);
+  // Meeting date → prior work week (spreadsheet week # matches work week).
+  monday.setUTCDate(monday.getUTCDate() - 7);
   const yy = monday.getUTCFullYear();
   const mm = String(monday.getUTCMonth() + 1).padStart(2, "0");
   const dd = String(monday.getUTCDate()).padStart(2, "0");

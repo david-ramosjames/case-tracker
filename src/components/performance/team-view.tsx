@@ -21,7 +21,7 @@ import {
 import { shiftWeekStart } from "@/lib/performance/weeks";
 import { cn } from "@/lib/utils";
 
-type TeamTab = "paralegals" | "attorneys" | "closings";
+type TeamTab = "firm" | "paralegals" | "attorneys" | "closings";
 
 const HISTORY_DEFAULT = 5;
 
@@ -146,7 +146,7 @@ export function TeamView({
   closingDetails: PairClosingDetails[];
 }) {
   const router = useRouter();
-  const [tab, setTab] = useState<TeamTab>("paralegals");
+  const [tab, setTab] = useState<TeamTab>("firm");
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [drilldown, setDrilldown] = useState<{
     pairId: string;
@@ -175,6 +175,7 @@ export function TeamView({
         : (detailsByPair.get(drilldown.pairId)?.disbursements ?? []);
 
   const tabs: { id: TeamTab; label: string }[] = [
+    { id: "firm", label: "Firm activity" },
     { id: "paralegals", label: "Paralegals" },
     { id: "attorneys", label: "Attorneys" },
     { id: "closings", label: "Closings" },
@@ -434,128 +435,134 @@ export function TeamView({
         </Card>
       ) : null}
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-lg">Firm activity</CardTitle>
-          <CardDescription>Actual vs weekly targets for the selected week.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            {firmWeek.metrics.map((metric) => (
-              <div
-                key={metric.key}
-                className={cn(
-                  "rounded-md border px-3 py-2.5",
-                  metric.status === "behind" && "border-amber-200 bg-amber-50/60",
-                  metric.status === "ahead" && "border-emerald-200 bg-emerald-50/40",
-                  metric.status === "met" && "border-slate-200 bg-white",
-                )}
-              >
-                <div className="text-xs font-medium text-muted-foreground">{metric.label}</div>
-                <div className="mt-0.5 flex items-baseline gap-1.5">
-                  <span className="text-xl font-semibold tabular-nums text-navy-950">
-                    {formatMetricValue(metric.actual)}
-                  </span>
-                  <span className="text-xs text-muted-foreground">/ {metric.goal}</span>
-                </div>
-                <KpiBar actual={metric.actual} goal={metric.goal} status={metric.status} />
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-sm text-muted-foreground">
-            {firmWeek.behindCount === 0
-              ? "On track across all metrics this week."
-              : `${firmWeek.behindCount} metric${firmWeek.behindCount === 1 ? "" : "s"} behind pace.`}
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <CardTitle className="text-lg">Weekly history</CardTitle>
+      {tab === "firm" ? (
+        <>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">Firm activity</CardTitle>
               <CardDescription>
-                Recent firm rollups. Em dash means tracking data was not recorded for that week.
+                Sum of team pair results for the selected week versus firm weekly targets.
               </CardDescription>
-            </div>
-            <Link href="/performance/history" className="text-sm font-medium text-pink-700 hover:underline">
-              Open History →
-            </Link>
-          </div>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="sticky left-0 z-10 bg-white">Week</TableHead>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
                 {firmWeek.metrics.map((metric) => (
-                  <TableHead key={metric.key} className="whitespace-nowrap text-center">
-                    {metric.label}
-                  </TableHead>
+                  <div
+                    key={metric.key}
+                    className={cn(
+                      "rounded-md border px-3 py-2.5",
+                      metric.status === "behind" && "border-amber-200 bg-amber-50/60",
+                      metric.status === "ahead" && "border-emerald-200 bg-emerald-50/40",
+                      metric.status === "met" && "border-slate-200 bg-white",
+                    )}
+                  >
+                    <div className="text-xs font-medium text-muted-foreground">{metric.label}</div>
+                    <div className="mt-0.5 flex items-baseline gap-1.5">
+                      <span className="text-xl font-semibold tabular-nums text-navy-950">
+                        {formatMetricValue(metric.actual)}
+                      </span>
+                      <span className="text-xs text-muted-foreground">/ {metric.goal}</span>
+                    </div>
+                    <KpiBar actual={metric.actual} goal={metric.goal} status={metric.status} />
+                  </div>
                 ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visibleHistory.map((week) => {
-                const hasTracking = tracked.has(week.weekStart);
-                return (
-                  <TableRow key={week.weekStart}>
-                    <TableCell className="sticky left-0 z-10 whitespace-nowrap bg-white font-medium">
-                      <button
-                        type="button"
-                        className="text-left hover:text-pink-700 hover:underline"
-                        onClick={() => goWeek(week.weekStart)}
-                      >
-                        {week.weekLabel}
-                      </button>
-                    </TableCell>
-                    {week.metrics.map((metric) => (
-                      <TableCell
-                        key={metric.key}
-                        className={cn(
-                          "text-center tabular-nums",
-                          hasTracking ? cellClass(metric.status) : "text-muted-foreground",
-                        )}
-                      >
-                        {hasTracking ? (
-                          <>
-                            <div className="font-semibold">{formatMetricValue(metric.actual)}</div>
-                            <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
-                          </>
-                        ) : (
-                          <span title="Not tracked">—</span>
-                        )}
-                      </TableCell>
+              </div>
+              <p className="mt-3 text-sm text-muted-foreground">
+                {firmWeek.behindCount === 0
+                  ? "On track across all metrics this week."
+                  : `${firmWeek.behindCount} metric${firmWeek.behindCount === 1 ? "" : "s"} behind pace.`}
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <CardTitle className="text-lg">Weekly history</CardTitle>
+                  <CardDescription>
+                    Firm totals summed from team pairs. Em dash means no pair seats for that week.
+                  </CardDescription>
+                </div>
+                <Link href="/performance/history" className="text-sm font-medium text-pink-700 hover:underline">
+                  Open History →
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="sticky left-0 z-10 bg-white">Week</TableHead>
+                    {firmWeek.metrics.map((metric) => (
+                      <TableHead key={metric.key} className="whitespace-nowrap text-center">
+                        {metric.label}
+                      </TableHead>
                     ))}
                   </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-3 w-3 rounded-sm bg-amber-50 ring-1 ring-amber-200" /> Behind
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-3 w-3 rounded-sm bg-white ring-1 ring-slate-200" /> Met
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="h-3 w-3 rounded-sm bg-emerald-50 ring-1 ring-emerald-200" /> Ahead
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="text-sm leading-none">—</span> Not tracked
-              </span>
-            </div>
-            {history.length > HISTORY_DEFAULT ? (
-              <Button type="button" variant="ghost" size="sm" onClick={() => setHistoryExpanded((v) => !v)}>
-                {historyExpanded ? "Show fewer weeks" : `Show more (${history.length} weeks)`}
-              </Button>
-            ) : null}
-          </div>
-        </CardContent>
-      </Card>
+                </TableHeader>
+                <TableBody>
+                  {visibleHistory.map((week) => {
+                    const hasTracking = tracked.has(week.weekStart);
+                    return (
+                      <TableRow key={week.weekStart}>
+                        <TableCell className="sticky left-0 z-10 whitespace-nowrap bg-white font-medium">
+                          <button
+                            type="button"
+                            className="text-left hover:text-pink-700 hover:underline"
+                            onClick={() => goWeek(week.weekStart)}
+                          >
+                            {week.weekLabel}
+                          </button>
+                        </TableCell>
+                        {week.metrics.map((metric) => (
+                          <TableCell
+                            key={metric.key}
+                            className={cn(
+                              "text-center tabular-nums",
+                              hasTracking ? cellClass(metric.status) : "text-muted-foreground",
+                            )}
+                          >
+                            {hasTracking ? (
+                              <>
+                                <div className="font-semibold">{formatMetricValue(metric.actual)}</div>
+                                <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+                              </>
+                            ) : (
+                              <span title="Not tracked">—</span>
+                            )}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-sm bg-amber-50 ring-1 ring-amber-200" /> Behind
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-sm bg-white ring-1 ring-slate-200" /> Met
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="h-3 w-3 rounded-sm bg-emerald-50 ring-1 ring-emerald-200" /> Ahead
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="text-sm leading-none">—</span> Not tracked
+                  </span>
+                </div>
+                {history.length > HISTORY_DEFAULT ? (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setHistoryExpanded((v) => !v)}>
+                    {historyExpanded ? "Show fewer weeks" : `Show more (${history.length} weeks)`}
+                  </Button>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      ) : null}
     </div>
   );
 }

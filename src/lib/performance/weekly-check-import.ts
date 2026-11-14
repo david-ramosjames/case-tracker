@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
-import { weekStartMondayCt } from "@/lib/performance/weeks";
-import { WEEK_PAIR_METRIC_KEYS, type WeekPairMetricKey } from "@/lib/performance/week-pairs";
+import { WEEK_PAIR_METRIC_KEYS, type WeekPairMetricKey } from "@/lib/performance/week-pair-types";
+import { formatYmd, shiftWeekStart } from "@/lib/performance/weeks";
 
 export type ParsedWeeklyCheckRow = {
   weekStart: string;
@@ -42,15 +42,35 @@ function cellText(value: unknown): string {
   return String(value);
 }
 
-function toYmd(value: unknown): string | null {
+/** Monday of the UTC calendar date (Excel serials are date-only, not CT wall-clock). */
+function utcMondayFromDate(d: Date): string {
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth();
+  const day = d.getUTCDate();
+  const asUtc = Date.UTC(y, m, day);
+  const dow = new Date(asUtc).getUTCDay();
+  const offset = dow === 0 ? -6 : 1 - dow;
+  const monday = new Date(asUtc);
+  monday.setUTCDate(monday.getUTCDate() + offset);
+  return formatYmd(monday.getUTCFullYear(), monday.getUTCMonth() + 1, monday.getUTCDate());
+}
+
+/**
+ * Spreadsheet dates are the meeting day (reviewing the prior week's work).
+ * Week labels (e.g. Week 21) match the work week — so store meeting Monday − 1 week.
+ */
+export function meetingDateToWorkWeekStart(value: unknown): string | null {
+  let d: Date | null = null;
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return weekStartMondayCt(value);
+    d = value;
+  } else {
+    const text = cellText(value).trim();
+    if (!text) return null;
+    const parsed = new Date(text);
+    if (!Number.isNaN(parsed.getTime())) d = parsed;
   }
-  const text = cellText(value).trim();
-  if (!text) return null;
-  const d = new Date(text);
-  if (!Number.isNaN(d.getTime())) return weekStartMondayCt(d);
-  return null;
+  if (!d) return null;
+  return shiftWeekStart(utcMondayFromDate(d), -1);
 }
 
 function num(value: unknown): number {
@@ -117,7 +137,7 @@ export async function parseWeeklyCheckWorkbook(filePath: string): Promise<Parsed
     const teamLabel = cellText(row.getCell(3).value).trim();
     if (!weekLabel || !teamLabel) continue;
 
-    const weekStart = toYmd(row.getCell(2).value);
+    const weekStart = meetingDateToWorkWeekStart(row.getCell(2).value);
     if (!weekStart) continue;
 
     const seatIndex = seatByWeek.get(weekStart) ?? 0;

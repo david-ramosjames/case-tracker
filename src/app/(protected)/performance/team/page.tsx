@@ -11,17 +11,20 @@ import { listPerformancePairs } from "@/lib/performance/pairs";
 import { filterAttorneys, filterParalegals } from "@/lib/performance/staff-roles";
 import { listPerformanceTargets } from "@/lib/performance/targets";
 import {
-  buildFirmWeekHistory,
-  buildFirmWeekRollup,
+  buildFirmWeekRollupFromPairActuals,
+  buildFirmWeekRollupFromPairRows,
+  countNewCasesInWeek,
   listRecentWeekStarts,
   shiftWeekStart,
+  sumStoredPairMetricsByWeek,
 } from "@/lib/performance/team-rollup";
 import {
   ensureWeekPairs,
   listWeekPairMetricsForPairs,
   listWeekPairs,
+  listWeekPairsInRange,
 } from "@/lib/performance/week-pairs";
-import { formatWeekRangeLabel, weekEndFromStart, weekStartMondayCt } from "@/lib/performance/weeks";
+import { formatWeekRangeLabel, weekStartMondayCt } from "@/lib/performance/weeks";
 
 export const dynamic = "force-dynamic";
 
@@ -112,43 +115,33 @@ export default async function PerformanceTeamPage({
     };
   });
 
-  const firmWeek = buildFirmWeekRollup({
+  // Firm activity = sum of team/pair cells (not a separate hard-filled rollup).
+  const firmWeek = buildFirmWeekRollupFromPairRows({
     weekStart: selectedWeek,
-    deliverables,
-    records,
-    targets,
-  });
-  const history = buildFirmWeekHistory({
-    weekStarts,
-    deliverables,
-    records,
+    pairRows,
+    newCaseCount: countNewCasesInWeek(records, selectedWeek),
     targets,
   });
 
-  // Weeks with seat rows, deliverable completions, or non-zero firm actuals count as tracked.
-  const { data: seatWeeks } = await client
-    .from("performance_week_pairs")
-    .select("week_start")
-    .gte("week_start", oldestWeek)
-    .lte("week_start", currentMonday);
-  const trackedWeekStarts = new Set<string>([currentMonday, selectedWeek]);
-  for (const row of seatWeeks ?? []) {
-    const ws = typeof row.week_start === "string" ? row.week_start : null;
-    if (ws) trackedWeekStarts.add(ws);
-  }
-  for (const item of deliverables) {
-    if (!item.completedAt) continue;
-    const day = item.completedAt.slice(0, 10);
-    for (const ws of weekStarts) {
-      if (day >= ws && day <= weekEndFromStart(ws)) {
-        trackedWeekStarts.add(ws);
-        break;
-      }
-    }
-  }
-  for (const week of history) {
-    if (week.metrics.some((m) => m.actual > 0)) trackedWeekStarts.add(week.weekStart);
-  }
+  const historyPairs = await listWeekPairsInRange(oldestWeek, currentMonday);
+  const historyMetrics = await listWeekPairMetricsForPairs(historyPairs.map((p) => p.id));
+  const sumsByWeek = sumStoredPairMetricsByWeek({
+    weekPairs: historyPairs,
+    metrics: historyMetrics,
+  });
+  const seatWeekStarts = new Set(historyPairs.map((p) => p.weekStart));
+  seatWeekStarts.add(selectedWeek);
+  seatWeekStarts.add(currentMonday);
+
+  const history = weekStarts.map((ws) => {
+    if (ws === selectedWeek) return firmWeek;
+    return buildFirmWeekRollupFromPairActuals({
+      weekStart: ws,
+      pairActuals: sumsByWeek.get(ws) ?? {},
+      newCaseCount: countNewCasesInWeek(records, ws),
+      targets,
+    });
+  });
 
   const attorneys = filterAttorneys(users);
   const pairParalegals = users
@@ -168,7 +161,7 @@ export default async function PerformanceTeamPage({
         selectedWeek={selectedWeek}
         firmWeek={firmWeek}
         history={history}
-        trackedWeekStarts={[...trackedWeekStarts]}
+        trackedWeekStarts={[...seatWeekStarts]}
         pairRows={pairRows}
         closingDetails={closings.details}
       />
