@@ -71,7 +71,7 @@ export function weekPairDisplayName(
     (pair.paralegalContactId && nameById.get(pair.paralegalContactId)) || pair.paralegalLabel || "TBD";
   const attorney =
     (pair.attorneyContactId && nameById.get(pair.attorneyContactId)) || pair.attorneyLabel || "TBD";
-  return { paralegal, attorney, label: `${paralegal} + ${attorney}`.toUpperCase() };
+  return { paralegal, attorney, label: `${attorney} / ${paralegal}` };
 }
 
 /** One TBD is still a team; both TBD (or explicit vacant) means no work expected. */

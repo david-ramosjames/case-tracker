@@ -17,6 +17,24 @@ export function weekEndFromStart(weekStartYmd: string): string {
   return formatYmd(end.getUTCFullYear(), end.getUTCMonth() + 1, end.getUTCDate());
 }
 
+/** e.g. "Nov 9–15, 2026" for a Monday week start. */
+export function formatWeekRangeLabel(weekStartYmd: string): string {
+  const end = weekEndFromStart(weekStartYmd);
+  const [ys, ms, ds] = weekStartYmd.split("-").map(Number);
+  const [ye, me, de] = end.split("-").map(Number);
+  const startDate = new Date(Date.UTC(ys, ms - 1, ds));
+  const endDate = new Date(Date.UTC(ye, me - 1, de));
+  const monthStart = startDate.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+  const monthEnd = endDate.toLocaleString("en-US", { month: "short", timeZone: "UTC" });
+  if (ys === ye && ms === me) {
+    return `${monthStart} ${ds}–${de}, ${ys}`;
+  }
+  if (ys === ye) {
+    return `${monthStart} ${ds} – ${monthEnd} ${de}, ${ys}`;
+  }
+  return `${monthStart} ${ds}, ${ys} – ${monthEnd} ${de}, ${ye}`;
+}
+
 export function isDateInWeek(ymd: string, weekStart: string) {
   const end = weekEndFromStart(weekStart);
   return ymd >= weekStart && ymd <= end;

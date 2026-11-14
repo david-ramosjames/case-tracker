@@ -1,6 +1,12 @@
+"use client";
+
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { type ClosingCaseRef, type PairClosingDetails } from "@/lib/performance/closings-from-cases";
 import { formatMetricValue } from "@/lib/performance/client-share";
 import {
   PAIR_ATTORNEY_LIT_GOAL,
@@ -11,31 +17,26 @@ import {
   type GoalStatus,
   type PairWeekRow,
 } from "@/lib/performance/pair-rollup";
-import { type FirmWeekRollup } from "@/lib/performance/team-rollup";
+import { shiftWeekStart, type FirmWeekRollup } from "@/lib/performance/team-rollup";
 import { cn } from "@/lib/utils";
 
+type TeamTab = "paralegals" | "attorneys" | "closings";
+
+const HISTORY_DEFAULT = 5;
+
 function cellClass(status: GoalStatus | "behind" | "met" | "ahead") {
-  if (status === "behind") return "bg-rose-50 font-semibold text-rose-800";
+  if (status === "behind") return "bg-amber-50 font-semibold text-amber-900";
   if (status === "ahead") return "bg-emerald-50 text-emerald-900";
-  if (status === "neutral") return "bg-white text-navy-950";
   return "bg-white text-navy-950";
 }
 
-function PairLabel({ row }: { row: PairWeekRow }) {
-  const suffix = row.isVacant ? " · vacant" : "";
-  if (row.paralegalContactId) {
-    return (
-      <Link className="text-pink-700 hover:underline" href={`/performance/my-work?person=${row.paralegalContactId}`}>
-        {row.label}
-        {suffix}
-      </Link>
-    );
-  }
+function TeamLabel({ row }: { row: PairWeekRow }) {
   return (
-    <>
-      {row.label}
-      {suffix}
-    </>
+    <div className="leading-tight">
+      <div className="font-medium text-navy-950">{row.attorneyName}</div>
+      <div className="text-xs text-muted-foreground">{row.paralegalName}</div>
+      {row.isVacant ? <div className="text-[10px] text-slate-400">Vacant</div> : null}
+    </div>
   );
 }
 
@@ -49,260 +50,445 @@ function EmptyPairs({ colSpan }: { colSpan: number }) {
   );
 }
 
-export function TeamView({
-  currentWeek,
-  history,
-  pairRows,
+function KpiBar({ actual, goal, status }: { actual: number; goal: number; status: FirmWeekRollup["metrics"][number]["status"] }) {
+  const pct = goal > 0 ? Math.min(100, Math.round((actual / goal) * 100)) : 0;
+  return (
+    <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100">
+      <div
+        className={cn(
+          "h-full rounded-full transition-all",
+          status === "behind" && "bg-amber-500",
+          status === "met" && "bg-slate-400",
+          status === "ahead" && "bg-emerald-500",
+        )}
+        style={{ width: `${pct}%` }}
+      />
+    </div>
+  );
+}
+
+function ClosingsDrilldown({
+  title,
+  items,
+  onClose,
 }: {
-  currentWeek: FirmWeekRollup;
-  history: FirmWeekRollup[];
-  pairRows: PairWeekRow[];
+  title: string;
+  items: ClosingCaseRef[];
+  onClose: () => void;
 }) {
   return (
+    <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50/80 p-4">
+      <div className="mb-2 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-semibold text-navy-950">{title}</div>
+          <p className="text-xs text-muted-foreground">
+            Attributed by current case assignment. Reassignments can mis-attribute older events.
+          </p>
+        </div>
+        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+          Close
+        </Button>
+      </div>
+      {items.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No cases for this count.</p>
+      ) : (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Case #</TableHead>
+              <TableHead>Client / party</TableHead>
+              <TableHead>Date</TableHead>
+              <TableHead className="text-right">Credit</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {items.map((item) => (
+              <TableRow key={`${item.caseId}-${item.date}-${item.clientName}`}>
+                <TableCell>
+                  <Link className="text-pink-700 hover:underline" href={`/cases/${item.caseId}`}>
+                    {item.caseNumber}
+                  </Link>
+                </TableCell>
+                <TableCell>{item.clientName}</TableCell>
+                <TableCell className="tabular-nums">{item.date}</TableCell>
+                <TableCell className="text-right tabular-nums">{formatMetricValue(item.credit)}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </div>
+  );
+}
+
+export function TeamView({
+  weekStart,
+  weekRangeLabel,
+  weekLabel,
+  isCurrentWeek,
+  selectedWeek,
+  firmWeek,
+  history,
+  trackedWeekStarts,
+  pairRows,
+  closingDetails,
+}: {
+  weekStart: string;
+  weekRangeLabel: string;
+  weekLabel: string;
+  isCurrentWeek: boolean;
+  selectedWeek: string;
+  firmWeek: FirmWeekRollup;
+  history: FirmWeekRollup[];
+  trackedWeekStarts: string[];
+  pairRows: PairWeekRow[];
+  closingDetails: PairClosingDetails[];
+}) {
+  const router = useRouter();
+  const [tab, setTab] = useState<TeamTab>("paralegals");
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [drilldown, setDrilldown] = useState<{
+    pairId: string;
+    kind: "settlement" | "disbursement";
+    teamLabel: string;
+  } | null>(null);
+
+  const tracked = useMemo(() => new Set(trackedWeekStarts), [trackedWeekStarts]);
+  const detailsByPair = useMemo(() => {
+    const map = new Map<string, PairClosingDetails>();
+    for (const d of closingDetails) map.set(d.pairId, d);
+    return map;
+  }, [closingDetails]);
+
+  function goWeek(next: string) {
+    router.push(`/performance/team?week=${next}`);
+  }
+
+  const visibleHistory = historyExpanded ? history : history.slice(0, HISTORY_DEFAULT);
+
+  const drillItems =
+    drilldown == null
+      ? []
+      : drilldown.kind === "settlement"
+        ? (detailsByPair.get(drilldown.pairId)?.settlements ?? [])
+        : (detailsByPair.get(drilldown.pairId)?.disbursements ?? []);
+
+  const tabs: { id: TeamTab; label: string }[] = [
+    { id: "paralegals", label: "Paralegals" },
+    { id: "attorneys", label: "Attorneys" },
+    { id: "closings", label: "Closings" },
+  ];
+
+  return (
     <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-navy-950">Team Performance</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Weekly pair results, firm activity, and recent trends.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label="Previous week"
+            onClick={() => goWeek(shiftWeekStart(selectedWeek, -1))}
+          >
+            ←
+          </Button>
+          <div className="min-w-[11rem] text-center">
+            <div className="text-sm font-semibold text-navy-950">{weekRangeLabel}</div>
+            <div className="text-xs text-muted-foreground">
+              {weekLabel}
+              {isCurrentWeek ? " · Current week" : ""}
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label="Next week"
+            disabled={selectedWeek >= weekStart}
+            onClick={() => goWeek(shiftWeekStart(selectedWeek, 1))}
+          >
+            →
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1 border-b border-slate-200 pb-px">
+        {tabs.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            onClick={() => {
+              setTab(item.id);
+              setDrilldown(null);
+            }}
+            className={cn(
+              "-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors",
+              tab === item.id
+                ? "border-pink-500 text-navy-950"
+                : "border-transparent text-muted-foreground hover:text-navy-900",
+            )}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "paralegals" ? (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg">Paralegals</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Team</TableHead>
+                  {PAIR_PARALEGAL_METRICS.map((metric) => (
+                    <TableHead key={metric.key} className="whitespace-nowrap text-center">
+                      <div>{metric.label}</div>
+                      <div className="text-[10px] font-normal text-muted-foreground">{metric.secondary}</div>
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pairRows.map((row) => (
+                  <TableRow key={`para-${row.pairId}`}>
+                    <TableCell className="min-w-[9rem]">
+                      <TeamLabel row={row} />
+                    </TableCell>
+                    {PAIR_PARALEGAL_METRICS.map((metric) => {
+                      const actual = row.counts[metric.key];
+                      const status = goalStatus(actual, metric.goal, { vacant: row.isVacant });
+                      return (
+                        <TableCell
+                          key={metric.key}
+                          className={cn("text-center tabular-nums", cellClass(status), row.isVacant && "opacity-50")}
+                        >
+                          <div className="font-semibold">{formatMetricValue(actual)}</div>
+                          {!row.isVacant ? (
+                            <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+                          ) : null}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                ))}
+                {pairRows.length === 0 ? <EmptyPairs colSpan={1 + PAIR_PARALEGAL_METRICS.length} /> : null}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {tab === "attorneys" ? (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg">Attorneys</CardTitle>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Team</TableHead>
+                  {PAIR_ATTORNEY_METRICS.map((metric) => (
+                    <TableHead key={metric.key} className="whitespace-nowrap text-center">
+                      {metric.label}
+                    </TableHead>
+                  ))}
+                  <TableHead className="whitespace-nowrap text-center">
+                    <div>Litigation events</div>
+                    <div className="text-[10px] font-normal text-muted-foreground">
+                      Combined goal {PAIR_ATTORNEY_LIT_GOAL}
+                    </div>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pairRows.map((row) => {
+                  const litStatus = goalStatus(row.attorneyLitTotal, PAIR_ATTORNEY_LIT_GOAL, {
+                    vacant: row.isVacant,
+                  });
+                  return (
+                    <TableRow key={`att-${row.pairId}`}>
+                      <TableCell className="min-w-[9rem]">
+                        <TeamLabel row={row} />
+                      </TableCell>
+                      {PAIR_ATTORNEY_METRICS.map((metric) => (
+                        <TableCell
+                          key={metric.key}
+                          className={cn("text-center tabular-nums font-semibold", row.isVacant && "opacity-50")}
+                        >
+                          {formatMetricValue(row.counts[metric.key])}
+                        </TableCell>
+                      ))}
+                      <TableCell
+                        className={cn(
+                          "text-center tabular-nums",
+                          cellClass(litStatus),
+                          row.isVacant && "opacity-50",
+                        )}
+                      >
+                        <div className="font-semibold">{formatMetricValue(row.attorneyLitTotal)}</div>
+                        {!row.isVacant ? (
+                          <div className="text-[10px] font-normal opacity-70">/{PAIR_ATTORNEY_LIT_GOAL}</div>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {pairRows.length === 0 ? <EmptyPairs colSpan={2 + PAIR_ATTORNEY_METRICS.length} /> : null}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {tab === "closings" ? (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-lg">Closings</CardTitle>
+            <CardDescription>
+              Settlements and disbursements from Case Tracker financial records. Click a count to see contributing
+              cases.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Team</TableHead>
+                  {PAIR_CLOSING_METRICS.map((metric) => (
+                    <TableHead key={metric.key} className="whitespace-nowrap text-center">
+                      <div>{metric.label}</div>
+                      {metric.secondary ? (
+                        <div className="text-[10px] font-normal text-muted-foreground">{metric.secondary}</div>
+                      ) : null}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pairRows.map((row) => (
+                  <TableRow key={`close-${row.pairId}`}>
+                    <TableCell className="min-w-[9rem]">
+                      <TeamLabel row={row} />
+                    </TableCell>
+                    {PAIR_CLOSING_METRICS.map((metric) => {
+                      const actual = row.counts[metric.key];
+                      const status = goalStatus(actual, metric.goal, { vacant: row.isVacant });
+                      const clickable = metric.key === "settlement" || metric.key === "disbursement";
+                      return (
+                        <TableCell
+                          key={metric.key}
+                          className={cn("text-center tabular-nums", cellClass(status), row.isVacant && "opacity-50")}
+                        >
+                          {clickable && !row.isVacant ? (
+                            <button
+                              type="button"
+                              className="mx-auto block rounded px-1 hover:bg-white/80 hover:underline"
+                              onClick={() =>
+                                setDrilldown({
+                                  pairId: row.pairId,
+                                  kind: metric.key as "settlement" | "disbursement",
+                                  teamLabel: `${row.attorneyName} / ${row.paralegalName}`,
+                                })
+                              }
+                            >
+                              <div className="font-semibold">{formatMetricValue(actual)}</div>
+                              {metric.goal != null ? (
+                                <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+                              ) : null}
+                            </button>
+                          ) : (
+                            <>
+                              <div className="font-semibold">{formatMetricValue(actual)}</div>
+                              {metric.goal != null && !row.isVacant ? (
+                                <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+                              ) : null}
+                            </>
+                          )}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                ))}
+                {pairRows.length === 0 ? <EmptyPairs colSpan={1 + PAIR_CLOSING_METRICS.length} /> : null}
+              </TableBody>
+            </Table>
+            {drilldown ? (
+              <ClosingsDrilldown
+                title={`${drilldown.kind === "settlement" ? "Settlements" : "Disbursements"} · ${drilldown.teamLabel}`}
+                items={drillItems}
+                onClose={() => setDrilldown(null)}
+              />
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
       <Card>
-        <CardHeader>
-          <CardTitle>This week — firm rollup</CardTitle>
-          <CardDescription>
-            {currentWeek.weekLabel} · whole-staff totals vs weekly goals. Rose = behind goal, green = ahead.
-            Goals are set in Settings with an effective-from date so history keeps the old target.
-          </CardDescription>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg">Firm activity</CardTitle>
+          <CardDescription>Actual vs weekly targets for the selected week.</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
-            {currentWeek.metrics.map((metric) => (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {firmWeek.metrics.map((metric) => (
               <div
                 key={metric.key}
                 className={cn(
-                  "rounded-lg border px-3 py-3",
-                  metric.status === "behind" && "border-rose-200 bg-rose-50",
-                  metric.status === "ahead" && "border-emerald-200 bg-emerald-50",
+                  "rounded-md border px-3 py-2.5",
+                  metric.status === "behind" && "border-amber-200 bg-amber-50/60",
+                  metric.status === "ahead" && "border-emerald-200 bg-emerald-50/40",
                   metric.status === "met" && "border-slate-200 bg-white",
                 )}
               >
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {metric.label}
-                  <span className="ml-1 font-normal normal-case text-slate-500">({metric.goal}/wk)</span>
-                </div>
-                <div className="mt-1 flex items-baseline gap-2">
-                  <span className="text-2xl font-semibold text-navy-950">
+                <div className="text-xs font-medium text-muted-foreground">{metric.label}</div>
+                <div className="mt-0.5 flex items-baseline gap-1.5">
+                  <span className="text-xl font-semibold tabular-nums text-navy-950">
                     {formatMetricValue(metric.actual)}
                   </span>
-                  <span className="text-sm text-muted-foreground">/ {metric.goal}</span>
+                  <span className="text-xs text-muted-foreground">/ {metric.goal}</span>
                 </div>
+                <KpiBar actual={metric.actual} goal={metric.goal} status={metric.status} />
               </div>
             ))}
           </div>
           <p className="mt-3 text-sm text-muted-foreground">
-            {currentWeek.behindCount === 0
+            {firmWeek.behindCount === 0
               ? "On track across all metrics this week."
-              : `${currentWeek.behindCount} metric${currentWeek.behindCount === 1 ? "" : "s"} behind goal this week.`}
+              : `${firmWeek.behindCount} metric${firmWeek.behindCount === 1 ? "" : "s"} behind pace.`}
           </p>
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Pair check — Paralegals</CardTitle>
-          <CardDescription>
-            {currentWeek.weekLabel} · per pair. Goals: 1 demand sent, 1 lawsuit filed, 2 discovery responses, 3 lit
-            events scheduled (depo / mediation / hearing).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Team</TableHead>
-                {PAIR_PARALEGAL_METRICS.map((metric) => (
-                  <TableHead key={metric.key} className="whitespace-nowrap text-center" title={metric.detail}>
-                    <div>{metric.label}</div>
-                    <div className="text-[10px] font-normal text-muted-foreground">goal {metric.goal}</div>
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pairRows.map((row) => (
-                <TableRow key={`para-${row.pairId}`}>
-                  <TableCell className="whitespace-nowrap font-medium">
-                    <PairLabel row={row} />
-                  </TableCell>
-                  {PAIR_PARALEGAL_METRICS.map((metric) => {
-                    const actual = row.counts[metric.key];
-                    const status = goalStatus(actual, metric.goal, { vacant: row.isVacant });
-                    return (
-                      <TableCell
-                        key={metric.key}
-                        className={cn("text-center tabular-nums", cellClass(status), row.isVacant && "opacity-50")}
-                        title={`${metric.detail}: ${actual} / ${metric.goal}`}
-                      >
-                        <div className="font-semibold">{formatMetricValue(actual)}</div>
-                        {!row.isVacant ? (
-                          <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
-                        ) : null}
-                      </TableCell>
-                    );
-                  })}
-                </TableRow>
-              ))}
-              {pairRows.length === 0 ? <EmptyPairs colSpan={1 + PAIR_PARALEGAL_METRICS.length} /> : null}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Pair check — Attorneys</CardTitle>
-          <CardDescription>
-            {currentWeek.weekLabel} · depositions, mediations, and hearings completed. Combined goal:{" "}
-            {PAIR_ATTORNEY_LIT_GOAL} lit events completed per pair this week.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Team</TableHead>
-                {PAIR_ATTORNEY_METRICS.map((metric) => (
-                  <TableHead key={metric.key} className="whitespace-nowrap text-center" title={metric.detail}>
-                    {metric.label}
-                  </TableHead>
-                ))}
-                <TableHead className="whitespace-nowrap text-center">
-                  <div>LIT TOTAL</div>
-                  <div className="text-[10px] font-normal text-muted-foreground">goal {PAIR_ATTORNEY_LIT_GOAL}</div>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pairRows.map((row) => {
-                const litStatus = goalStatus(row.attorneyLitTotal, PAIR_ATTORNEY_LIT_GOAL, {
-                  vacant: row.isVacant,
-                });
-                return (
-                  <TableRow key={`att-${row.pairId}`}>
-                    <TableCell className="whitespace-nowrap font-medium">
-                      {row.attorneyContactId ? (
-                        <Link
-                          className="text-pink-700 hover:underline"
-                          href={`/performance/attorney?person=${row.attorneyContactId}`}
-                        >
-                          {row.label}
-                          {row.isVacant ? " · vacant" : ""}
-                        </Link>
-                      ) : (
-                        <>
-                          {row.label}
-                          {row.isVacant ? " · vacant" : ""}
-                        </>
-                      )}
-                    </TableCell>
-                    {PAIR_ATTORNEY_METRICS.map((metric) => (
-                      <TableCell
-                        key={metric.key}
-                        className={cn(
-                          "text-center tabular-nums font-semibold",
-                          row.isVacant && "opacity-50",
-                        )}
-                      >
-                        {formatMetricValue(row.counts[metric.key])}
-                      </TableCell>
-                    ))}
-                    <TableCell
-                      className={cn(
-                        "text-center tabular-nums",
-                        cellClass(litStatus),
-                        row.isVacant && "opacity-50",
-                      )}
-                      title={`Lit completed: ${row.attorneyLitTotal} / ${PAIR_ATTORNEY_LIT_GOAL}`}
-                    >
-                      <div className="font-semibold">{formatMetricValue(row.attorneyLitTotal)}</div>
-                      {!row.isVacant ? (
-                        <div className="text-[10px] font-normal opacity-70">/{PAIR_ATTORNEY_LIT_GOAL}</div>
-                      ) : null}
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-              {pairRows.length === 0 ? <EmptyPairs colSpan={2 + PAIR_ATTORNEY_METRICS.length} /> : null}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Pair check — Closings</CardTitle>
-          <CardDescription>
-            {currentWeek.weekLabel} · disengagements, settlements (goal 1), disbursements (goal 1) per pair.
-            Multi-client cases count per client (so totals can be fractional, e.g. 1.5).
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Team</TableHead>
-                {PAIR_CLOSING_METRICS.map((metric) => (
-                  <TableHead key={metric.key} className="whitespace-nowrap text-center" title={metric.detail}>
-                    <div>{metric.label}</div>
-                    {metric.goal != null ? (
-                      <div className="text-[10px] font-normal text-muted-foreground">goal {metric.goal}</div>
-                    ) : null}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pairRows.map((row) => (
-                <TableRow key={`close-${row.pairId}`}>
-                  <TableCell className="whitespace-nowrap font-medium">
-                    <PairLabel row={row} />
-                  </TableCell>
-                  {PAIR_CLOSING_METRICS.map((metric) => {
-                    const actual = row.counts[metric.key];
-                    const status = goalStatus(actual, metric.goal, { vacant: row.isVacant });
-                    return (
-                      <TableCell
-                        key={metric.key}
-                        className={cn("text-center tabular-nums", cellClass(status), row.isVacant && "opacity-50")}
-                        title={
-                          metric.goal != null
-                            ? `${metric.detail}: ${actual} / ${metric.goal}`
-                            : `${metric.detail}: ${actual}`
-                        }
-                      >
-                        <div className="font-semibold">{formatMetricValue(actual)}</div>
-                        {metric.goal != null && !row.isVacant ? (
-                          <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
-                        ) : null}
-                      </TableCell>
-                    );
-                  })}
-                </TableRow>
-              ))}
-              {pairRows.length === 0 ? <EmptyPairs colSpan={1 + PAIR_CLOSING_METRICS.length} /> : null}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Weekly history</CardTitle>
-          <CardDescription>
-            Spreadsheet-style firm rollup. Each header shows the goal that applied that week (from Settings effective
-            dates). Cells behind goal are highlighted.
-          </CardDescription>
+        <CardHeader className="pb-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <CardTitle className="text-lg">Weekly history</CardTitle>
+              <CardDescription>
+                Recent firm rollups. Em dash means tracking data was not recorded for that week.
+              </CardDescription>
+            </div>
+            <Link href="/performance/history" className="text-sm font-medium text-pink-700 hover:underline">
+              Open History →
+            </Link>
+          </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
                 <TableHead className="sticky left-0 z-10 bg-white">Week</TableHead>
-                {currentWeek.metrics.map((metric) => (
+                {firmWeek.metrics.map((metric) => (
                   <TableHead key={metric.key} className="whitespace-nowrap text-center">
                     {metric.label}
                   </TableHead>
@@ -310,35 +496,62 @@ export function TeamView({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {history.map((week) => (
-                <TableRow key={week.weekStart}>
-                  <TableCell className="sticky left-0 z-10 whitespace-nowrap bg-white font-medium">
-                    {week.weekLabel}
-                  </TableCell>
-                  {week.metrics.map((metric) => (
-                    <TableCell
-                      key={metric.key}
-                      className={cn("text-center tabular-nums", cellClass(metric.status))}
-                      title={`${metric.label}: ${metric.actual} vs goal ${metric.goal}/wk`}
-                    >
-                      <div className="font-semibold">{formatMetricValue(metric.actual)}</div>
-                      <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+              {visibleHistory.map((week) => {
+                const hasTracking = tracked.has(week.weekStart);
+                return (
+                  <TableRow key={week.weekStart}>
+                    <TableCell className="sticky left-0 z-10 whitespace-nowrap bg-white font-medium">
+                      <button
+                        type="button"
+                        className="text-left hover:text-pink-700 hover:underline"
+                        onClick={() => goWeek(week.weekStart)}
+                      >
+                        {week.weekLabel}
+                      </button>
                     </TableCell>
-                  ))}
-                </TableRow>
-              ))}
+                    {week.metrics.map((metric) => (
+                      <TableCell
+                        key={metric.key}
+                        className={cn(
+                          "text-center tabular-nums",
+                          hasTracking ? cellClass(metric.status) : "text-muted-foreground",
+                        )}
+                      >
+                        {hasTracking ? (
+                          <>
+                            <div className="font-semibold">{formatMetricValue(metric.actual)}</div>
+                            <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+                          </>
+                        ) : (
+                          <span title="Not tracked">—</span>
+                        )}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
-          <div className="mt-3 flex flex-wrap gap-4 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-3 w-3 rounded-sm bg-rose-50 ring-1 ring-rose-200" /> Behind goal
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-3 w-3 rounded-sm bg-white ring-1 ring-slate-200" /> Met goal
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <span className="h-3 w-3 rounded-sm bg-emerald-50 ring-1 ring-emerald-200" /> Ahead of goal
-            </span>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-3 w-3 rounded-sm bg-amber-50 ring-1 ring-amber-200" /> Behind
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-3 w-3 rounded-sm bg-white ring-1 ring-slate-200" /> Met
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="h-3 w-3 rounded-sm bg-emerald-50 ring-1 ring-emerald-200" /> Ahead
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <span className="text-sm leading-none">—</span> Not tracked
+              </span>
+            </div>
+            {history.length > HISTORY_DEFAULT ? (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setHistoryExpanded((v) => !v)}>
+                {historyExpanded ? "Show fewer weeks" : `Show more (${history.length} weeks)`}
+              </Button>
+            ) : null}
           </div>
         </CardContent>
       </Card>

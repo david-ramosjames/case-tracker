@@ -13,52 +13,57 @@ import {
 export const PAIR_PARALEGAL_METRICS = [
   {
     key: "demand_sent" as const,
-    label: "DEMANDS",
-    detail: "1 Demand SENT",
+    label: "Demand sent",
+    secondary: "Goal 1",
     goal: DEFAULT_PARALEGAL_TARGETS.demand_sent,
   },
   {
     key: "lawsuit_filed" as const,
-    label: "LAWSUIT FILED",
-    detail: "1 Lawsuit Drafted and Filed",
+    label: "Lawsuit filed",
+    secondary: "Goal 1",
     goal: DEFAULT_PARALEGAL_TARGETS.lawsuit_filed,
   },
   {
     key: "discovery_responses" as const,
-    label: "DISCOVERY",
-    detail: "2 Set of Discovery Responses Answered",
+    label: "Discovery responses",
+    secondary: "Goal 2",
     goal: DEFAULT_PARALEGAL_TARGETS.discovery_responses,
   },
   {
     key: "lit_event_scheduled" as const,
-    label: "SCHEDULED LIT EVENT",
-    detail: "3 Litigation Events Scheduled (Deposition, Mediation, Hearing)",
+    label: "Events scheduled",
+    secondary: "Goal 3 · depo / mediation / hearing",
     goal: DEFAULT_PARALEGAL_TARGETS.lit_event_scheduled,
   },
 ];
 
 /** Attorney lit completed — depositions, mediations, hearings (combined goal). */
 export const PAIR_ATTORNEY_METRICS = [
-  { key: "deposition" as const, label: "DEPOSITIONS", detail: "Depositions completed" },
-  { key: "mediation" as const, label: "MEDIATIONS", detail: "Mediations completed" },
-  { key: "hearing" as const, label: "HEARINGS", detail: "Hearings / trials completed" },
+  { key: "deposition" as const, label: "Depositions", secondary: null as string | null },
+  { key: "mediation" as const, label: "Mediations", secondary: null as string | null },
+  { key: "hearing" as const, label: "Hearings", secondary: null as string | null },
 ] as const;
 
 export const PAIR_ATTORNEY_LIT_GOAL = DEFAULT_ATTORNEY_TARGETS.lit_completed_combined;
 
 /** Closings per pair. */
 export const PAIR_CLOSING_METRICS = [
-  { key: "disengagement" as const, label: "DISENGAGEMENTS", detail: "Disengagements", goal: null as number | null },
+  {
+    key: "disengagement" as const,
+    label: "Disengagements",
+    secondary: null as string | null,
+    goal: null as number | null,
+  },
   {
     key: "settlement" as const,
-    label: "SETTLEMENTS",
-    detail: "1 Settlement (multi-client cases count per client)",
+    label: "Settlements",
+    secondary: "Goal 1",
     goal: DEFAULT_ATTORNEY_TARGETS.settlement,
   },
   {
     key: "disbursement" as const,
-    label: "DISBURSEMENTS",
-    detail: "1 Disbursement (multi-client cases count per client)",
+    label: "Disbursements",
+    secondary: "Goal 1",
     goal: DEFAULT_ATTORNEY_TARGETS.disbursement,
   },
 ];

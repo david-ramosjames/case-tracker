@@ -34,7 +34,7 @@ export function pairDisplayName(
     (pair.paralegalContactId && nameById.get(pair.paralegalContactId)) ||
     pair.paralegalLabel ||
     "TBD";
-  return { attorney, paralegal, label: `${paralegal} + ${attorney}`.toUpperCase() };
+  return { attorney, paralegal, label: `${attorney} / ${paralegal}` };
 }
 
 /** Pairs active on a given date (inclusive effective window). */
