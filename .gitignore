@@ -12,3 +12,5 @@ tsconfig.tsbuildinfo
 
 .vercel
 .env*
+scripts/data/
+scripts/inspect-book1.mjs

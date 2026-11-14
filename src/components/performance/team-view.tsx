@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { formatMetricValue } from "@/lib/performance/client-share";
 import {
   PAIR_ATTORNEY_LIT_GOAL,
   PAIR_ATTORNEY_METRICS,
@@ -21,14 +22,21 @@ function cellClass(status: GoalStatus | "behind" | "met" | "ahead") {
 }
 
 function PairLabel({ row }: { row: PairWeekRow }) {
+  const suffix = row.isVacant ? " · vacant" : "";
   if (row.paralegalContactId) {
     return (
       <Link className="text-pink-700 hover:underline" href={`/performance/my-work?person=${row.paralegalContactId}`}>
         {row.label}
+        {suffix}
       </Link>
     );
   }
-  return <>{row.label}</>;
+  return (
+    <>
+      {row.label}
+      {suffix}
+    </>
+  );
 }
 
 function EmptyPairs({ colSpan }: { colSpan: number }) {
@@ -52,6 +60,47 @@ export function TeamView({
 }) {
   return (
     <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>This week — firm rollup</CardTitle>
+          <CardDescription>
+            {currentWeek.weekLabel} · whole-staff totals vs weekly goals. Rose = behind goal, green = ahead.
+            Goals are set in Settings with an effective-from date so history keeps the old target.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+            {currentWeek.metrics.map((metric) => (
+              <div
+                key={metric.key}
+                className={cn(
+                  "rounded-lg border px-3 py-3",
+                  metric.status === "behind" && "border-rose-200 bg-rose-50",
+                  metric.status === "ahead" && "border-emerald-200 bg-emerald-50",
+                  metric.status === "met" && "border-slate-200 bg-white",
+                )}
+              >
+                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {metric.label}
+                  <span className="ml-1 font-normal normal-case text-slate-500">({metric.goal}/wk)</span>
+                </div>
+                <div className="mt-1 flex items-baseline gap-2">
+                  <span className="text-2xl font-semibold text-navy-950">
+                    {formatMetricValue(metric.actual)}
+                  </span>
+                  <span className="text-sm text-muted-foreground">/ {metric.goal}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-sm text-muted-foreground">
+            {currentWeek.behindCount === 0
+              ? "On track across all metrics this week."
+              : `${currentWeek.behindCount} metric${currentWeek.behindCount === 1 ? "" : "s"} behind goal this week.`}
+          </p>
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>Pair check — Paralegals</CardTitle>
@@ -81,15 +130,17 @@ export function TeamView({
                   </TableCell>
                   {PAIR_PARALEGAL_METRICS.map((metric) => {
                     const actual = row.counts[metric.key];
-                    const status = goalStatus(actual, metric.goal);
+                    const status = goalStatus(actual, metric.goal, { vacant: row.isVacant });
                     return (
                       <TableCell
                         key={metric.key}
-                        className={cn("text-center tabular-nums", cellClass(status))}
+                        className={cn("text-center tabular-nums", cellClass(status), row.isVacant && "opacity-50")}
                         title={`${metric.detail}: ${actual} / ${metric.goal}`}
                       >
-                        <div className="font-semibold">{actual}</div>
-                        <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+                        <div className="font-semibold">{formatMetricValue(actual)}</div>
+                        {!row.isVacant ? (
+                          <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+                        ) : null}
                       </TableCell>
                     );
                   })}
@@ -127,7 +178,9 @@ export function TeamView({
             </TableHeader>
             <TableBody>
               {pairRows.map((row) => {
-                const litStatus = goalStatus(row.attorneyLitTotal, PAIR_ATTORNEY_LIT_GOAL);
+                const litStatus = goalStatus(row.attorneyLitTotal, PAIR_ATTORNEY_LIT_GOAL, {
+                  vacant: row.isVacant,
+                });
                 return (
                   <TableRow key={`att-${row.pairId}`}>
                     <TableCell className="whitespace-nowrap font-medium">
@@ -137,29 +190,43 @@ export function TeamView({
                           href={`/performance/attorney?person=${row.attorneyContactId}`}
                         >
                           {row.label}
+                          {row.isVacant ? " · vacant" : ""}
                         </Link>
                       ) : (
-                        row.label
+                        <>
+                          {row.label}
+                          {row.isVacant ? " · vacant" : ""}
+                        </>
                       )}
                     </TableCell>
                     {PAIR_ATTORNEY_METRICS.map((metric) => (
-                      <TableCell key={metric.key} className="text-center tabular-nums font-semibold">
-                        {row.counts[metric.key]}
+                      <TableCell
+                        key={metric.key}
+                        className={cn(
+                          "text-center tabular-nums font-semibold",
+                          row.isVacant && "opacity-50",
+                        )}
+                      >
+                        {formatMetricValue(row.counts[metric.key])}
                       </TableCell>
                     ))}
                     <TableCell
-                      className={cn("text-center tabular-nums", cellClass(litStatus))}
+                      className={cn(
+                        "text-center tabular-nums",
+                        cellClass(litStatus),
+                        row.isVacant && "opacity-50",
+                      )}
                       title={`Lit completed: ${row.attorneyLitTotal} / ${PAIR_ATTORNEY_LIT_GOAL}`}
                     >
-                      <div className="font-semibold">{row.attorneyLitTotal}</div>
-                      <div className="text-[10px] font-normal opacity-70">/{PAIR_ATTORNEY_LIT_GOAL}</div>
+                      <div className="font-semibold">{formatMetricValue(row.attorneyLitTotal)}</div>
+                      {!row.isVacant ? (
+                        <div className="text-[10px] font-normal opacity-70">/{PAIR_ATTORNEY_LIT_GOAL}</div>
+                      ) : null}
                     </TableCell>
                   </TableRow>
                 );
               })}
-              {pairRows.length === 0 ? (
-                <EmptyPairs colSpan={2 + PAIR_ATTORNEY_METRICS.length} />
-              ) : null}
+              {pairRows.length === 0 ? <EmptyPairs colSpan={2 + PAIR_ATTORNEY_METRICS.length} /> : null}
             </TableBody>
           </Table>
         </CardContent>
@@ -170,6 +237,7 @@ export function TeamView({
           <CardTitle>Pair check — Closings</CardTitle>
           <CardDescription>
             {currentWeek.weekLabel} · disengagements, settlements (goal 1), disbursements (goal 1) per pair.
+            Multi-client cases count per client (so totals can be fractional, e.g. 1.5).
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -195,19 +263,19 @@ export function TeamView({
                   </TableCell>
                   {PAIR_CLOSING_METRICS.map((metric) => {
                     const actual = row.counts[metric.key];
-                    const status = goalStatus(actual, metric.goal);
+                    const status = goalStatus(actual, metric.goal, { vacant: row.isVacant });
                     return (
                       <TableCell
                         key={metric.key}
-                        className={cn("text-center tabular-nums", cellClass(status))}
+                        className={cn("text-center tabular-nums", cellClass(status), row.isVacant && "opacity-50")}
                         title={
                           metric.goal != null
                             ? `${metric.detail}: ${actual} / ${metric.goal}`
                             : `${metric.detail}: ${actual}`
                         }
                       >
-                        <div className="font-semibold">{actual}</div>
-                        {metric.goal != null ? (
+                        <div className="font-semibold">{formatMetricValue(actual)}</div>
+                        {metric.goal != null && !row.isVacant ? (
                           <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
                         ) : null}
                       </TableCell>
@@ -218,45 +286,6 @@ export function TeamView({
               {pairRows.length === 0 ? <EmptyPairs colSpan={1 + PAIR_CLOSING_METRICS.length} /> : null}
             </TableBody>
           </Table>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>This week — firm rollup</CardTitle>
-          <CardDescription>
-            {currentWeek.weekLabel} · whole-staff totals vs weekly goals. Rose = behind goal, green = ahead.
-            Goals are set in Settings with an effective-from date so history keeps the old target.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
-            {currentWeek.metrics.map((metric) => (
-              <div
-                key={metric.key}
-                className={cn(
-                  "rounded-lg border px-3 py-3",
-                  metric.status === "behind" && "border-rose-200 bg-rose-50",
-                  metric.status === "ahead" && "border-emerald-200 bg-emerald-50",
-                  metric.status === "met" && "border-slate-200 bg-white",
-                )}
-              >
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  {metric.label}
-                  <span className="ml-1 font-normal normal-case text-slate-500">({metric.goal}/wk)</span>
-                </div>
-                <div className="mt-1 flex items-baseline gap-2">
-                  <span className="text-2xl font-semibold text-navy-950">{metric.actual}</span>
-                  <span className="text-sm text-muted-foreground">/ {metric.goal}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-sm text-muted-foreground">
-            {currentWeek.behindCount === 0
-              ? "On track across all metrics this week."
-              : `${currentWeek.behindCount} metric${currentWeek.behindCount === 1 ? "" : "s"} behind goal this week.`}
-          </p>
         </CardContent>
       </Card>
 
@@ -292,7 +321,7 @@ export function TeamView({
                       className={cn("text-center tabular-nums", cellClass(metric.status))}
                       title={`${metric.label}: ${metric.actual} vs goal ${metric.goal}/wk`}
                     >
-                      <div className="font-semibold">{metric.actual}</div>
+                      <div className="font-semibold">{formatMetricValue(metric.actual)}</div>
                       <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
                     </TableCell>
                   ))}

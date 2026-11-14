@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { FIRM_WEEKLY_METRICS, defaultFirmWeeklyTarget } from "@/lib/performance/firm-metrics";
 import { type PerformanceStaffDates } from "@/lib/performance/staff-dates";
+import { filterAttorneys, filterParalegals } from "@/lib/performance/staff-roles";
 import {
   type PerformanceAssumptions,
   type PerformancePair,
@@ -33,10 +34,8 @@ export function PerformanceSettingsView({
   const [targets, setTargets] = useState(initialTargets);
   const [staffDates, setStaffDates] = useState(initialStaffDates);
   const [pairs, setPairs] = useState(initialPairs);
-  const attorneys = users.filter((u) => u.role === "attorney" || u.role === "admin" || u.role === "manager");
-  const paralegals = users.filter(
-    (u) => u.role === "paralegal" || u.role === "paralegal_manager" || u.role === "legal_assistant",
-  );
+  const attorneys = filterAttorneys(users);
+  const paralegals = filterParalegals(users);
   const [pairDraft, setPairDraft] = useState({
     attorneyContactId: "",
     paralegalContactId: "",
@@ -378,9 +377,8 @@ export function PerformanceSettingsView({
         <CardHeader>
           <CardTitle>Attorney–paralegal pairs</CardTitle>
           <CardDescription>
-            Team pair check uses these rows for Paralegals (demands / lawsuit / discovery / scheduled lit), Attorneys
-            (depo / mediation / hearing completed), and Closings (disengagement / settlement / disbursement). Use TBD
-            labels when a seat is open. Ending a pair keeps history; delete removes it.
+            Baseline roster for reference. Day-to-day team changes belong on Team → “This week’s pairs” (copy last
+            week, swap seats). One TBD keeps the seat; TBD + TBD is vacant. Pair check history is stored per week.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

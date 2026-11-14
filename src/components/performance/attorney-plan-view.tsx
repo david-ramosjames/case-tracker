@@ -3,11 +3,13 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { CasePicker } from "@/components/performance/case-picker";
 import { PersonSwitcher } from "@/components/performance/person-switcher";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { sortCasesByNumber } from "@/lib/performance/staff-roles";
 import {
   ATTORNEY_PLAN_KINDS,
   type AttorneyPlanKind,
@@ -30,13 +32,15 @@ const KIND_META: Record<AttorneyPlanKind, { title: string; description: string }
   },
 };
 
+type CaseOption = { id: string; caseNumber: string; clientName: string; attorneyId: string };
+
 type Props = {
   initialLines: AttorneyPlanLine[];
   weekStart: string;
   selectedAttorney: AppUser | null;
   attorneys: AppUser[];
   canBrowsePeople: boolean;
-  caseOptions: Array<{ id: string; caseNumber: string; clientName: string }>;
+  caseOptions: CaseOption[];
 };
 
 export function AttorneyPlanView({
@@ -50,11 +54,18 @@ export function AttorneyPlanView({
   const [lines, setLines] = useState(initialLines);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [coverOthers, setCoverOthers] = useState(false);
   const [drafts, setDrafts] = useState<Record<AttorneyPlanKind, { caseId: string; label: string }>>({
     lit_event: { caseId: "", label: "" },
     lawsuit: { caseId: "", label: "" },
     settlement: { caseId: "", label: "" },
   });
+
+  const sortedCases = useMemo(() => sortCasesByNumber(caseOptions), [caseOptions]);
+  const visibleCases = useMemo(() => {
+    if (coverOthers || !selectedAttorney) return sortedCases;
+    return sortedCases.filter((c) => c.attorneyId === selectedAttorney.id);
+  }, [sortedCases, coverOthers, selectedAttorney]);
 
   const byKind = useMemo(() => {
     const map: Record<AttorneyPlanKind, AttorneyPlanLine[]> = {
@@ -69,6 +80,10 @@ export function AttorneyPlanView({
   async function addLine(kind: AttorneyPlanKind) {
     if (!selectedAttorney) return;
     const draft = drafts[kind];
+    if (!draft.caseId) {
+      setError("Select a case.");
+      return;
+    }
     const selected = caseOptions.find((c) => c.id === draft.caseId);
     setBusy(true);
     setError(null);
@@ -80,7 +95,7 @@ export function AttorneyPlanView({
           attorneyContactId: selectedAttorney.id,
           weekStart,
           kind,
-          caseId: draft.caseId || null,
+          caseId: draft.caseId,
           caseNumber: selected?.caseNumber ?? null,
           label: draft.label || selected?.clientName || "",
           sortOrder: byKind[kind].length,
@@ -191,31 +206,31 @@ export function AttorneyPlanView({
                 </TableBody>
               </Table>
 
-              <div className="flex flex-wrap items-end gap-2">
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium">Case</span>
-                  <select
-                    className="min-w-[14rem] rounded-md border px-3 py-2"
-                    value={draft.caseId}
-                    onChange={(e) =>
-                      setDrafts((cur) => ({
-                        ...cur,
-                        [kind]: { ...draft, caseId: e.target.value },
-                      }))
-                    }
-                  >
-                    <option value="">Optional</option>
-                    {caseOptions.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.caseNumber} — {c.clientName}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                <CasePicker
+                  cases={visibleCases}
+                  value={draft.caseId}
+                  onChange={(caseId) =>
+                    setDrafts((cur) => ({
+                      ...cur,
+                      [kind]: { ...draft, caseId },
+                    }))
+                  }
+                  coverOthers={coverOthers}
+                  onCoverOthersChange={(next) => {
+                    setCoverOthers(next);
+                    setDrafts({
+                      lit_event: { caseId: "", label: drafts.lit_event.label },
+                      lawsuit: { caseId: "", label: drafts.lawsuit.label },
+                      settlement: { caseId: "", label: drafts.settlement.label },
+                    });
+                  }}
+                  mineLabel="Showing my cases"
+                  coverLabel="Showing all cases (cover)"
+                />
                 <label className="space-y-1 text-sm">
                   <span className="font-medium">Label</span>
                   <Input
-                    className="min-w-[14rem]"
                     value={draft.label}
                     onChange={(e) =>
                       setDrafts((cur) => ({
@@ -226,13 +241,12 @@ export function AttorneyPlanView({
                     placeholder="Depo — Dr. Kalra"
                   />
                 </label>
-                <Button
-                  disabled={busy || !selectedAttorney || (!draft.caseId && !draft.label.trim())}
-                  onClick={() => void addLine(kind)}
-                >
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  Add
-                </Button>
+                <div className="flex items-end">
+                  <Button disabled={busy || !selectedAttorney || !draft.caseId} onClick={() => void addLine(kind)}>
+                    {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                    Add
+                  </Button>
+                </div>
               </div>
             </CardContent>
           </Card>

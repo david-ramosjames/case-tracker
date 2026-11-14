@@ -5,7 +5,11 @@ import { describe, it } from "node:test";
 
 describe("performance isolation boundaries", () => {
   it("does not alter contacts or operational tables in performance migration SQL", () => {
-    for (const fileName of ["082_performance_module.sql", "083_performance_pairs_plans.sql"]) {
+    for (const fileName of [
+      "082_performance_module.sql",
+      "083_performance_pairs_plans.sql",
+      "084_performance_week_pairs.sql",
+    ]) {
       const sql = readFileSync(path.join(__dirname, "../../../supabase/sql", fileName), "utf8");
       assert.equal(/alter table public\.contacts/i.test(sql), false, fileName);
       assert.equal(/alter table public\.cases/i.test(sql), false, fileName);
@@ -19,6 +23,12 @@ describe("performance isolation boundaries", () => {
     const pairs = readFileSync(path.join(__dirname, "../../../supabase/sql/083_performance_pairs_plans.sql"), "utf8");
     assert.match(pairs, /create table if not exists public\.performance_pairs/i);
     assert.match(pairs, /create table if not exists public\.performance_attorney_plan_lines/i);
+    const weekPairs = readFileSync(
+      path.join(__dirname, "../../../supabase/sql/084_performance_week_pairs.sql"),
+      "utf8",
+    );
+    assert.match(weekPairs, /create table if not exists public\.performance_week_pairs/i);
+    assert.match(weekPairs, /create table if not exists public\.performance_week_pair_metrics/i);
   });
 
   it("performance write modules never touch case_tracker_activity or tracker updates", () => {

@@ -112,6 +112,7 @@ describe("pair week rollup", () => {
     assert.equal(adrian.counts.lawsuit_filed, 1);
     assert.equal(adrian.counts.discovery_responses, 1);
     assert.equal(adrian.counts.lit_event_scheduled, 1);
+    assert.equal(adrian.isVacant, false);
     const mike = rows.find((r) => r.pairId === "p2")!;
     assert.equal(mike.counts.demand_sent, 1);
     assert.equal(mike.counts.lawsuit_filed, 0);

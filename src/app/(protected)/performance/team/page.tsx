@@ -1,10 +1,13 @@
 import { TeamView } from "@/components/performance/team-view";
+import { WeekPairsEditor } from "@/components/performance/week-pairs-editor";
 import { requireSessionUser } from "@/lib/auth/session";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
+import { canManagePerformanceTargets } from "@/lib/performance/access";
 import { createPerformanceClient } from "@/lib/performance/db";
 import { rowToDeliverable } from "@/lib/performance/deliverables";
-import { buildPairWeekRollup } from "@/lib/performance/pair-rollup";
+import { buildPairWeekRollup, buildWeekSeatRollup } from "@/lib/performance/pair-rollup";
 import { listPerformancePairs } from "@/lib/performance/pairs";
+import { filterAttorneys, filterParalegals } from "@/lib/performance/staff-roles";
 import { listPerformanceTargets } from "@/lib/performance/targets";
 import {
   buildFirmWeekHistory,
@@ -12,22 +15,29 @@ import {
   listRecentWeekStarts,
   shiftWeekStart,
 } from "@/lib/performance/team-rollup";
+import {
+  ensureWeekPairs,
+  listWeekPairMetricsForPairs,
+} from "@/lib/performance/week-pairs";
 import { weekStartMondayCt } from "@/lib/performance/weeks";
 
 export const dynamic = "force-dynamic";
 
 export default async function PerformanceTeamPage() {
-  await requireSessionUser();
+  const sessionUser = await requireSessionUser();
   const weekStart = weekStartMondayCt();
   const weekStarts = listRecentWeekStarts(weekStart, 16);
   const oldestWeek = shiftWeekStart(weekStart, -(weekStarts.length - 1));
+  const canEditPairs = canManagePerformanceTargets(sessionUser.role);
 
-  const [{ records, users }, targets, pairs, client] = await Promise.all([
+  const [{ records, users }, targets, legacyPairs, client] = await Promise.all([
     loadViewerCaseBundle(),
     listPerformanceTargets(),
     listPerformancePairs(),
     createPerformanceClient(),
   ]);
+  // Carry prior week seats forward automatically when this week has none yet.
+  const weekPairs = await ensureWeekPairs(weekStart);
 
   const { data } = await client
     .from("performance_deliverables")
@@ -38,12 +48,23 @@ export default async function PerformanceTeamPage() {
   const deliverables = ((data ?? []) as Record<string, unknown>[]).map(rowToDeliverable);
 
   const nameById = new Map(users.map((u) => [u.id, u.name]));
-  const pairRows = buildPairWeekRollup({
-    weekStart,
-    pairs,
-    deliverables,
-    nameById,
-  });
+  const metrics = await listWeekPairMetricsForPairs(weekPairs.map((p) => p.id));
+
+  const pairRows =
+    weekPairs.length > 0
+      ? buildWeekSeatRollup({
+          weekStart,
+          weekPairs,
+          metrics,
+          deliverables,
+          nameById,
+        })
+      : buildPairWeekRollup({
+          weekStart,
+          pairs: legacyPairs,
+          deliverables,
+          nameById,
+        });
 
   const currentWeek = buildFirmWeekRollup({
     weekStart,
@@ -58,5 +79,23 @@ export default async function PerformanceTeamPage() {
     targets,
   });
 
-  return <TeamView currentWeek={currentWeek} history={history} pairRows={pairRows} />;
+  const attorneys = filterAttorneys(users);
+  // Pair seats can include legal assistants historically (e.g. Valeria).
+  const pairParalegals = users
+    .filter((u) => u.role === "paralegal" || u.role === "legal_assistant")
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return (
+    <div className="space-y-6">
+      <TeamView currentWeek={currentWeek} history={history} pairRows={pairRows} />
+      {canEditPairs ? (
+        <WeekPairsEditor
+          weekStart={weekStart}
+          initialPairs={weekPairs}
+          paralegals={pairParalegals.length ? pairParalegals : filterParalegals(users)}
+          attorneys={attorneys}
+        />
+      ) : null}
+    </div>
+  );
 }

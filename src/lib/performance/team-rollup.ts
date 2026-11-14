@@ -1,4 +1,5 @@
 import { isCaseFullyDisbursed } from "@/lib/case-status";
+import { deliverableCredit } from "@/lib/performance/client-share";
 import {
   FIRM_WEEKLY_METRICS,
   type FirmWeeklyMetricKey,
@@ -61,12 +62,15 @@ function countDeliverableType(
   weekStart: string,
   weekEnd: string,
 ) {
-  return deliverables.filter((item) => {
-    if (item.workflowStatus !== "done" || !item.completedAt) return false;
-    if (!types.includes(item.deliverableType)) return false;
+  let total = 0;
+  for (const item of deliverables) {
+    if (item.workflowStatus !== "done" || !item.completedAt) continue;
+    if (!types.includes(item.deliverableType)) continue;
     const day = item.completedAt.slice(0, 10);
-    return day >= weekStart && day <= weekEnd;
-  }).length;
+    if (day < weekStart || day > weekEnd) continue;
+    total += deliverableCredit(item.deliverableType, item.clientNameSnapshot);
+  }
+  return total;
 }
 
 function countSignedInWeek(records: CaseRecord[], weekStart: string, weekEnd: string) {

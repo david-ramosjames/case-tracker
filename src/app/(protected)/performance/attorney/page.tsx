@@ -4,7 +4,7 @@ import { AttorneyPlanView } from "@/components/performance/attorney-plan-view";
 import { ConfirmEventsPanel, type ConfirmEventRow } from "@/components/performance/confirm-events-panel";
 import { canBrowsePerformancePeople } from "@/lib/performance/access";
 import { listAttorneyPlanLines } from "@/lib/performance/attorney-plans";
-import { filterAttorneys, isAttorneyRole } from "@/lib/performance/staff-roles";
+import { filterAttorneys, isAttorneyRole, sortCasesByNumber } from "@/lib/performance/staff-roles";
 import { weekStartMondayCt } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 import { getNextScheduledDocketFlowEvents } from "@/lib/supabase/services";
@@ -35,14 +35,14 @@ export default async function PerformanceAttorneysPage({
     ? await listAttorneyPlanLines({ attorneyContactId: selectedAttorney.id, weekStart })
     : [];
 
-  const caseOptions = records
-    .filter((r) => !selectedAttorney || r.shared.attorneyId === selectedAttorney.id)
-    .slice(0, 400)
-    .map((r) => ({
+  const caseOptions = sortCasesByNumber(
+    records.map((r) => ({
       id: r.shared.id,
       caseNumber: r.shared.caseNumber,
       clientName: r.shared.clientName,
-    }));
+      attorneyId: r.shared.attorneyId,
+    })),
+  );
 
   const confirmRows: ConfirmEventRow[] = [];
   if (selectedAttorney) {

@@ -1,7 +1,13 @@
+import { deliverableCredit } from "@/lib/performance/client-share";
 import { pairDisplayName, pairsActiveOn } from "@/lib/performance/pairs";
 import { DEFAULT_ATTORNEY_TARGETS, DEFAULT_PARALEGAL_TARGETS } from "@/lib/performance/scoring";
 import { type PerformanceDeliverable, type PerformancePair } from "@/lib/performance/types";
 import { weekEndFromStart } from "@/lib/performance/weeks";
+import {
+  weekPairDisplayName,
+  type PerformanceWeekPair,
+  type PerformanceWeekPairMetric,
+} from "@/lib/performance/week-pairs";
 
 /** Paralegal weekly check metrics (pair row). */
 export const PAIR_PARALEGAL_METRICS = [
@@ -46,13 +52,13 @@ export const PAIR_CLOSING_METRICS = [
   {
     key: "settlement" as const,
     label: "SETTLEMENTS",
-    detail: "1 Settlement",
+    detail: "1 Settlement (multi-client cases count per client)",
     goal: DEFAULT_ATTORNEY_TARGETS.settlement,
   },
   {
     key: "disbursement" as const,
     label: "DISBURSEMENTS",
-    detail: "1 Disbursement",
+    detail: "1 Disbursement (multi-client cases count per client)",
     goal: DEFAULT_ATTORNEY_TARGETS.disbursement,
   },
 ];
@@ -75,6 +81,8 @@ export type PairWeekRow = {
   paralegalContactId: string | null;
   counts: PairWeekCounts;
   attorneyLitTotal: number;
+  isVacant: boolean;
+  countsSource: "import" | "live" | "mixed";
 };
 
 /** @deprecated use PAIR_PARALEGAL_METRICS */
@@ -82,7 +90,12 @@ export const PAIR_CHECK_METRICS = PAIR_PARALEGAL_METRICS;
 
 export type GoalStatus = "behind" | "met" | "ahead" | "neutral";
 
-export function goalStatus(actual: number, goal: number | null | undefined): GoalStatus {
+export function goalStatus(
+  actual: number,
+  goal: number | null | undefined,
+  options?: { vacant?: boolean },
+): GoalStatus {
+  if (options?.vacant) return "neutral";
   if (goal == null || goal <= 0) return "neutral";
   if (actual < goal) return "behind";
   if (actual > goal) return "ahead";
@@ -142,6 +155,23 @@ export function findMatchingPair(
   );
 }
 
+function findMatchingWeekPair(
+  pairs: PerformanceWeekPair[],
+  attorneyContactId: string | null,
+  paralegalContactId: string | null,
+): PerformanceWeekPair | null {
+  if (!attorneyContactId || !paralegalContactId) return null;
+  return (
+    pairs.find(
+      (pair) =>
+        !pair.isVacant &&
+        pair.attorneyContactId === attorneyContactId &&
+        pair.paralegalContactId === paralegalContactId,
+    ) ?? null
+  );
+}
+
+/** Legacy effective-dated pairs rollup (still used when no week seats exist). */
 export function buildPairWeekRollup(input: {
   weekStart: string;
   pairs: PerformancePair[];
@@ -162,6 +192,8 @@ export function buildPairWeekRollup(input: {
       paralegalContactId: pair.paralegalContactId,
       counts,
       attorneyLitTotal: 0,
+      isVacant: false,
+      countsSource: "live" as const,
     } satisfies PairWeekRow;
   });
   const byId = new Map(rows.map((row) => [row.pairId, row]));
@@ -174,7 +206,72 @@ export function buildPairWeekRollup(input: {
     if (!pair) continue;
     const row = byId.get(pair.id);
     if (!row) continue;
-    row.counts[metric] += 1;
+    row.counts[metric] += deliverableCredit(item.deliverableType, item.clientNameSnapshot);
+  }
+
+  for (const row of rows) {
+    row.attorneyLitTotal = row.counts.deposition + row.counts.mediation + row.counts.hearing;
+  }
+
+  return rows;
+}
+
+/**
+ * Preferred rollup: per-week seats. Stored metrics (import/manual) win when present;
+ * otherwise live deliverable completions fill the cells.
+ */
+export function buildWeekSeatRollup(input: {
+  weekStart: string;
+  weekPairs: PerformanceWeekPair[];
+  metrics: PerformanceWeekPairMetric[];
+  deliverables: PerformanceDeliverable[];
+  nameById: Map<string, string>;
+}): PairWeekRow[] {
+  const weekEnd = weekEndFromStart(input.weekStart);
+  const metricsByPair = new Map<string, Map<string, number>>();
+  for (const metric of input.metrics) {
+    if (!metricsByPair.has(metric.weekPairId)) metricsByPair.set(metric.weekPairId, new Map());
+    metricsByPair.get(metric.weekPairId)!.set(metric.metricKey, metric.actualValue);
+  }
+
+  const rows = input.weekPairs.map((pair) => {
+    const names = weekPairDisplayName(pair, input.nameById);
+    const counts = emptyCounts();
+    const stored = metricsByPair.get(pair.id);
+    let countsSource: PairWeekRow["countsSource"] = stored && stored.size > 0 ? "import" : "live";
+    if (stored) {
+      for (const key of Object.keys(counts) as Array<keyof PairWeekCounts>) {
+        if (stored.has(key)) counts[key] = stored.get(key) ?? 0;
+      }
+    }
+    return {
+      pairId: pair.id,
+      label: names.label,
+      attorneyName: names.attorney,
+      paralegalName: names.paralegal,
+      attorneyContactId: pair.attorneyContactId,
+      paralegalContactId: pair.paralegalContactId,
+      counts,
+      attorneyLitTotal: 0,
+      isVacant: pair.isVacant,
+      countsSource,
+    } satisfies PairWeekRow;
+  });
+
+  const byId = new Map(rows.map((row) => [row.pairId, row]));
+  const needsLive = rows.some((row) => row.countsSource === "live" && !row.isVacant);
+
+  if (needsLive) {
+    for (const item of input.deliverables) {
+      if (!completedInWeek(item, input.weekStart, weekEnd)) continue;
+      const metric = metricKeyForType(item.deliverableType);
+      if (!metric) continue;
+      const pair = findMatchingWeekPair(input.weekPairs, item.attorneyUserId, item.assigneeUserId);
+      if (!pair) continue;
+      const row = byId.get(pair.id);
+      if (!row || row.countsSource !== "live") continue;
+      row.counts[metric] += deliverableCredit(item.deliverableType, item.clientNameSnapshot);
+    }
   }
 
   for (const row of rows) {

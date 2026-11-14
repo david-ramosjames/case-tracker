@@ -3,12 +3,14 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { CasePicker } from "@/components/performance/case-picker";
 import { PersonSwitcher } from "@/components/performance/person-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { sortCasesByNumber } from "@/lib/performance/staff-roles";
 import {
   DELIVERABLE_TYPE_LABELS,
   PERFORMANCE_DELIVERABLE_TYPES,
@@ -19,6 +21,14 @@ import {
 import { weekEndFromStart } from "@/lib/performance/weeks";
 import { type AppUser } from "@/lib/types";
 
+type CaseOption = {
+  id: string;
+  caseNumber: string;
+  clientName: string;
+  paralegalId: string;
+  attorneyId: string;
+};
+
 type Props = {
   initialDeliverables: PerformanceDeliverable[];
   initialCommitments: PerformanceCommitment[];
@@ -28,10 +38,11 @@ type Props = {
   viewerContactId: string | null;
   canBrowsePeople: boolean;
   people: AppUser[];
-  viewingAsAttorney: boolean;
-  caseOptions: Array<{ id: string; caseNumber: string; clientName: string; paralegalId: string; attorneyId: string }>;
+  caseOptions: CaseOption[];
   nameById: Record<string, string>;
 };
+
+type CreateDestination = "backlog" | "this_week" | "last_week";
 
 function typeLabel(type: PerformanceDeliverableType) {
   return DELIVERABLE_TYPE_LABELS[type] ?? type;
@@ -43,6 +54,10 @@ function inWeek(ymd: string | null | undefined, weekStart: string) {
   return day >= weekStart && day <= weekEndFromStart(weekStart);
 }
 
+function lastWeekCompletedAt(lastWeekStart: string) {
+  return `${weekEndFromStart(lastWeekStart)}T18:00:00.000Z`;
+}
+
 export function MyWorkView({
   initialDeliverables,
   initialCommitments,
@@ -52,7 +67,6 @@ export function MyWorkView({
   viewerContactId,
   canBrowsePeople,
   people,
-  viewingAsAttorney,
   caseOptions,
   nameById,
 }: Props) {
@@ -60,6 +74,7 @@ export function MyWorkView({
   const [commitments, setCommitments] = useState(initialCommitments);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [coverOthers, setCoverOthers] = useState(false);
   const [form, setForm] = useState({
     caseId: "",
     deliverableType: "demand_sent" as PerformanceDeliverableType,
@@ -70,6 +85,12 @@ export function MyWorkView({
     requestedCompletionDate: "",
     notes: "",
   });
+
+  const sortedCases = useMemo(() => sortCasesByNumber(caseOptions), [caseOptions]);
+  const visibleCases = useMemo(() => {
+    if (coverOthers || !selectedPerson) return sortedCases;
+    return sortedCases.filter((c) => c.paralegalId === selectedPerson.id);
+  }, [sortedCases, coverOthers, selectedPerson]);
 
   const commitmentByDeliverable = useMemo(() => {
     const map = new Map<string, PerformanceCommitment>();
@@ -108,7 +129,7 @@ export function MyWorkView({
     if (!selectedPerson) return;
     const params = new URLSearchParams({
       personId: selectedPerson.id,
-      asAttorney: viewingAsAttorney ? "1" : "0",
+      asAttorney: "0",
       completedSince: lastWeekStart,
     });
     const res = await fetch(`/api/performance/deliverables?${params}`);
@@ -117,16 +138,17 @@ export function MyWorkView({
     setDeliverables(body.deliverables ?? []);
   }
 
-  async function createItem() {
+  async function createItem(destination: CreateDestination) {
     setError(null);
-    setBusyId("create");
+    setBusyId(`create:${destination}`);
     try {
+      if (!form.caseId) throw new Error("Select a case.");
       const selected = caseOptions.find((c) => c.id === form.caseId);
       const res = await fetch("/api/performance/deliverables", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          caseId: form.caseId || null,
+          caseId: form.caseId,
           caseNumber: selected?.caseNumber ?? "TBD",
           clientNameSnapshot: selected?.clientName,
           deliverableType: form.deliverableType,
@@ -137,13 +159,55 @@ export function MyWorkView({
           requestedCompletionDate: form.requestedCompletionDate || null,
           notes: form.notes || null,
           attorneyUserId: selected?.attorneyId,
-          assigneeUserId: selected?.paralegalId,
+          assigneeUserId: selectedPerson?.id ?? selected?.paralegalId,
         }),
       });
       const body = (await res.json()) as { deliverable?: PerformanceDeliverable; error?: string };
       if (!res.ok) throw new Error(body.error ?? "Create failed");
-      if (body.deliverable) setDeliverables((prev) => [body.deliverable!, ...prev]);
-      setForm((f) => ({ ...f, documentLabel: "", roundNumber: "", litPersonName: "", hearingType: "", notes: "" }));
+      let deliverable = body.deliverable;
+      if (!deliverable) throw new Error("Create failed");
+
+      if (destination === "this_week") {
+        const commitRes = await fetch(`/api/performance/deliverables/${deliverable.id}/commit`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ weekStart }),
+        });
+        const commitBody = (await commitRes.json()) as {
+          deliverable?: PerformanceDeliverable;
+          commitment?: PerformanceCommitment;
+          error?: string;
+        };
+        if (!commitRes.ok) throw new Error(commitBody.error ?? "Commit failed");
+        if (commitBody.deliverable) deliverable = commitBody.deliverable;
+        if (commitBody.commitment) setCommitments((prev) => [...prev, commitBody.commitment!]);
+      }
+
+      if (destination === "last_week") {
+        const completeRes = await fetch(`/api/performance/deliverables/${deliverable.id}/complete`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ completedAt: lastWeekCompletedAt(lastWeekStart) }),
+        });
+        const completeBody = (await completeRes.json()) as {
+          deliverable?: PerformanceDeliverable;
+          error?: string;
+        };
+        if (!completeRes.ok) throw new Error(completeBody.error ?? "Complete failed");
+        if (completeBody.deliverable) deliverable = completeBody.deliverable;
+      }
+
+      setDeliverables((prev) => [deliverable!, ...prev.filter((d) => d.id !== deliverable!.id)]);
+      setForm((f) => ({
+        ...f,
+        caseId: "",
+        documentLabel: "",
+        roundNumber: "",
+        litPersonName: "",
+        hearingType: "",
+        notes: "",
+      }));
+      if (destination === "last_week") await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Create failed");
     } finally {
@@ -177,7 +241,7 @@ export function MyWorkView({
     }
   }
 
-  async function complete(id: string) {
+  async function complete(id: string, asLastWeek = false) {
     setBusyId(id);
     setError(null);
     try {
@@ -185,7 +249,10 @@ export function MyWorkView({
       const res = await fetch(`/api/performance/deliverables/${id}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ commitmentId: commitment?.id ?? null }),
+        body: JSON.stringify({
+          commitmentId: commitment?.id ?? null,
+          completedAt: asLastWeek ? lastWeekCompletedAt(lastWeekStart) : null,
+        }),
       });
       const body = (await res.json()) as { deliverable?: PerformanceDeliverable; error?: string };
       if (!res.ok) throw new Error(body.error ?? "Complete failed");
@@ -254,9 +321,19 @@ export function MyWorkView({
               {mode !== "finished" ? (
                 <TableCell className="space-x-2 whitespace-nowrap">
                   {d.workflowStatus === "backlog" ? (
-                    <Button size="sm" variant="outline" disabled={busyId === d.id} onClick={() => void commit(d.id)}>
-                      Add to this week
-                    </Button>
+                    <>
+                      <Button size="sm" variant="outline" disabled={busyId === d.id} onClick={() => void commit(d.id)}>
+                        Add to this week
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyId === d.id}
+                        onClick={() => void complete(d.id, true)}
+                      >
+                        Finished last week
+                      </Button>
+                    </>
                   ) : null}
                   {d.workflowStatus === "backlog" || d.workflowStatus === "committed" ? (
                     <Button size="sm" disabled={busyId === d.id} onClick={() => void complete(d.id)}>
@@ -278,6 +355,8 @@ export function MyWorkView({
       </Table>
     );
   }
+
+  const creating = busyId?.startsWith("create:") ?? false;
 
   return (
     <div className="space-y-6">
@@ -321,25 +400,25 @@ export function MyWorkView({
         <CardHeader>
           <CardTitle>Identify work</CardTitle>
           <CardDescription>
-            New items go to backlog, then Add to this week to commit. Completing feeds Team pair totals.
+            Pick a case (yours by default, ordered by case #). Add to backlog, commit to this week, or log as finished
+            last week. Backlog items can still be moved up later.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          <label className="space-y-1 text-sm">
-            <span className="font-medium">Case</span>
-            <select
-              className="w-full rounded-md border px-3 py-2"
+          <div className="md:col-span-2 lg:col-span-1">
+            <CasePicker
+              cases={visibleCases}
               value={form.caseId}
-              onChange={(e) => setForm((f) => ({ ...f, caseId: e.target.value }))}
-            >
-              <option value="">Select case</option>
-              {caseOptions.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.caseNumber} — {c.clientName}
-                </option>
-              ))}
-            </select>
-          </label>
+              onChange={(caseId) => setForm((f) => ({ ...f, caseId }))}
+              coverOthers={coverOthers}
+              onCoverOthersChange={(next) => {
+                setCoverOthers(next);
+                setForm((f) => ({ ...f, caseId: "" }));
+              }}
+              mineLabel="Showing my cases"
+              coverLabel="Showing all cases (cover)"
+            />
+          </div>
           <label className="space-y-1 text-sm">
             <span className="font-medium">Type</span>
             <select
@@ -398,10 +477,26 @@ export function MyWorkView({
             <span className="font-medium">Notes</span>
             <Input value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
           </label>
-          <div className="flex items-end">
-            <Button disabled={busyId === "create" || !form.caseId} onClick={() => void createItem()}>
-              {busyId === "create" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-3">
+            <Button
+              variant="outline"
+              disabled={creating || !form.caseId}
+              onClick={() => void createItem("backlog")}
+            >
+              {busyId === "create:backlog" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Add to backlog
+            </Button>
+            <Button disabled={creating || !form.caseId} onClick={() => void createItem("this_week")}>
+              {busyId === "create:this_week" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Add to this week
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={creating || !form.caseId}
+              onClick={() => void createItem("last_week")}
+            >
+              {busyId === "create:last_week" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Add to finished last week
             </Button>
           </div>
         </CardContent>
@@ -411,8 +506,10 @@ export function MyWorkView({
 
       <Card>
         <CardHeader>
-          <CardTitle>Backlog / in progress</CardTitle>
-          <CardDescription>Identified work not yet committed to this week.</CardDescription>
+          <CardTitle>Backlog</CardTitle>
+          <CardDescription>
+            Identified work waiting to move to this week or finished last week.
+          </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">{renderWorkTable(backlog, "backlog")}</CardContent>
       </Card>

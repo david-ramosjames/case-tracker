@@ -257,9 +257,12 @@ export async function completeDeliverable(input: {
   commitmentId?: string | null;
   actorUserId?: string | null;
   completionSource?: "manual" | "confirmed_event" | "system";
+  /** ISO timestamp; defaults to now. Use to attribute completions to a prior week. */
+  completedAt?: string | null;
 }): Promise<PerformanceDeliverable> {
   const client = await createPerformanceClient();
-  const completedAt = new Date().toISOString();
+  const completedAt = input.completedAt?.trim() || new Date().toISOString();
+  const updatedAt = new Date().toISOString();
 
   if (input.commitmentId) {
     await client
@@ -274,7 +277,7 @@ export async function completeDeliverable(input: {
       workflow_status: "done",
       completed_at: completedAt,
       completion_source: input.completionSource ?? "manual",
-      updated_at: completedAt,
+      updated_at: updatedAt,
     })
     .eq("id", input.deliverableId)
     .select("*")
@@ -287,7 +290,10 @@ export async function completeDeliverable(input: {
     commitmentId: input.commitmentId,
     actorUserId: input.actorUserId,
     eventType: "completed",
-    payload: { completionSource: input.completionSource ?? "manual" },
+    payload: {
+      completionSource: input.completionSource ?? "manual",
+      completedAt,
+    },
   });
   return deliverable;
 }

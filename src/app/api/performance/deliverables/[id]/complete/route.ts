@@ -17,6 +17,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const body = (await request.json().catch(() => ({}))) as {
       commitmentId?: string | null;
       completionSource?: "manual" | "confirmed_event" | "system";
+      completedAt?: string | null;
     };
     const users = await getUsers();
     const contact = findContactForSession(users, sessionUser);
@@ -24,6 +25,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       deliverableId: id,
       commitmentId: body.commitmentId,
       completionSource: body.completionSource ?? "manual",
+      completedAt: body.completedAt ?? null,
       actorUserId: contact?.id ?? sessionUser.id,
     });
     return NextResponse.json({ deliverable });
