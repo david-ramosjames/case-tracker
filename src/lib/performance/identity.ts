@@ -26,19 +26,23 @@ export function buildIdentityKey(input: {
   }
 
   switch (input.deliverableType) {
-    case "deposition": {
-      const person = input.litPersonName?.trim();
-      if (!person) throw new Error("Depositions require the person's name.");
-      return { identityKey: `person:${slug(person)}`, identityLabel: person };
-    }
     case "hearing":
     case "hearing_trial": {
-      const hearingType = input.hearingType?.trim();
-      if (!hearingType) throw new Error("Hearings require a hearing type.");
+      const hearingType = input.hearingType?.trim() || input.notes?.trim();
+      if (!hearingType) throw new Error("Hearings require a hearing type or notes.");
       const key = `type:${slug(hearingType)}`;
       return { identityKey: key, identityLabel: hearingType };
     }
-    case "mediation":
+    case "mediation": {
+      if (input.docketEventId?.trim()) {
+        return {
+          identityKey: `docket:${input.docketEventId.trim()}`,
+          identityLabel: input.documentLabel?.trim() || "Calendar event",
+        };
+      }
+      const label = input.documentLabel?.trim() || input.notes?.trim() || "mediation";
+      return { identityKey: `event:${slug(label)}`, identityLabel: label };
+    }
     case "lit_event_scheduled": {
       if (input.docketEventId?.trim()) {
         return {
@@ -46,8 +50,23 @@ export function buildIdentityKey(input: {
           identityLabel: input.documentLabel?.trim() || "Calendar event",
         };
       }
-      const label = input.documentLabel?.trim() || input.notes?.trim() || "lit-event";
-      return { identityKey: `event:${slug(label)}`, identityLabel: label };
+      const kind = input.hearingType?.trim() || "event";
+      const party = input.documentLabel?.trim();
+      const notes = input.notes?.trim();
+      const parts = [kind, party, notes].filter(Boolean) as string[];
+      if (!input.hearingType?.trim()) {
+        throw new Error("Schedule Litigation Event needs an event type.");
+      }
+      if (!party && !notes) {
+        throw new Error("Add a deposition party role or notes with further details.");
+      }
+      const identityLabel = parts
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" · ");
+      return {
+        identityKey: `lit:${parts.map(slug).join(":")}`,
+        identityLabel,
+      };
     }
     case "demand_sent":
     case "lawsuit_filed":
@@ -67,6 +86,10 @@ export function buildIdentityKey(input: {
         const recipient = input.recipientLabel.trim();
         return { identityKey: `recipient:${slug(recipient)}`, identityLabel: recipient };
       }
+      if (input.notes?.trim()) {
+        const notes = input.notes.trim();
+        return { identityKey: `notes:${slug(notes)}`, identityLabel: notes };
+      }
       if (input.docketEventId?.trim()) {
         return {
           identityKey: `docket:${input.docketEventId.trim()}`,
@@ -74,8 +97,30 @@ export function buildIdentityKey(input: {
         };
       }
       throw new Error(
-        "Repeatable deliverables need a document label, round number, recipient, or source event id.",
+        "Add notes (or a document label / round) so this item can be distinguished from others.",
       );
+    }
+    case "deposition": {
+      const role = input.hearingType?.trim() || input.documentLabel?.trim();
+      const person = input.litPersonName?.trim();
+      const notes = input.notes?.trim();
+      if (person) {
+        const label = role ? `${role}: ${person}` : person;
+        return { identityKey: `person:${slug(person)}`, identityLabel: label };
+      }
+      if (role && notes) {
+        return {
+          identityKey: `depo:${slug(role)}:${slug(notes)}`,
+          identityLabel: `${role} · ${notes}`,
+        };
+      }
+      if (role) {
+        return { identityKey: `depo:${slug(role)}`, identityLabel: role };
+      }
+      if (notes) {
+        return { identityKey: `depo:${slug(notes)}`, identityLabel: notes };
+      }
+      throw new Error("Depositions need a party role, person name, or notes.");
     }
     case "settlement":
     case "disbursement":

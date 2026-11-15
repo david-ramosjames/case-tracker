@@ -6,6 +6,7 @@ export const FIRM_WEEKLY_METRICS = [
   { key: "deposition", label: "DEPOSITIONS", defaultTarget: 4 },
   { key: "mediation", label: "MEDIATIONS", defaultTarget: 4 },
   { key: "hearing", label: "HEARINGS/TRIAL", defaultTarget: 4 },
+  { key: "disengagement", label: "DISENGAGE", defaultTarget: 0 },
   { key: "settlement", label: "SETTLEMENTS", defaultTarget: 4 },
   { key: "disbursement", label: "DISBURSEMENTS", defaultTarget: 4 },
   { key: "new_case", label: "NEW CASES", defaultTarget: 10 },
@@ -31,7 +32,7 @@ export const FIRM_METRIC_GROUPS = [
     id: "closings" as const,
     label: "Closings",
     tab: "closings" as const,
-    keys: ["settlement", "disbursement", "new_case"] as const,
+    keys: ["disengagement", "settlement", "disbursement"] as const,
   },
 ];
 

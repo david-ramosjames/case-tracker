@@ -508,26 +508,33 @@ export function TeamView({
                           : "sm:grid-cols-2 lg:grid-cols-3",
                       )}
                     >
-                      {metrics.map((metric) => (
-                        <div
-                          key={metric.key}
-                          className={cn(
-                            "rounded-md border px-3 py-2.5",
-                            metric.status === "behind" && "border-amber-200 bg-amber-50/60",
-                            metric.status === "ahead" && "border-emerald-200 bg-emerald-50/40",
-                            metric.status === "met" && "border-slate-200 bg-white",
-                          )}
-                        >
-                          <div className="text-xs font-medium text-muted-foreground">{metric.label}</div>
-                          <div className="mt-0.5 flex items-baseline gap-1.5">
-                            <span className="text-xl font-semibold tabular-nums text-navy-950">
-                              {formatMetricValue(metric.actual)}
-                            </span>
-                            <span className="text-xs text-muted-foreground">/ {metric.goal}</span>
+                      {metrics.map((metric) => {
+                        const hasGoal = metric.goal > 0;
+                        return (
+                          <div
+                            key={metric.key}
+                            className={cn(
+                              "rounded-md border px-3 py-2.5",
+                              hasGoal && metric.status === "behind" && "border-amber-200 bg-amber-50/60",
+                              hasGoal && metric.status === "ahead" && "border-emerald-200 bg-emerald-50/40",
+                              (!hasGoal || metric.status === "met") && "border-slate-200 bg-white",
+                            )}
+                          >
+                            <div className="text-xs font-medium text-muted-foreground">{metric.label}</div>
+                            <div className="mt-0.5 flex items-baseline gap-1.5">
+                              <span className="text-xl font-semibold tabular-nums text-navy-950">
+                                {formatMetricValue(metric.actual)}
+                              </span>
+                              {hasGoal ? (
+                                <span className="text-xs text-muted-foreground">/ {metric.goal}</span>
+                              ) : null}
+                            </div>
+                            {hasGoal ? (
+                              <KpiBar actual={metric.actual} goal={metric.goal} status={metric.status} />
+                            ) : null}
                           </div>
-                          <KpiBar actual={metric.actual} goal={metric.goal} status={metric.status} />
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </section>
                 );
@@ -616,7 +623,9 @@ export function TeamView({
                             {hasTracking ? (
                               <>
                                 <div className="font-semibold">{formatMetricValue(metric.actual)}</div>
-                                <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+                                {metric.goal > 0 ? (
+                                  <div className="text-[10px] font-normal opacity-70">/{metric.goal}</div>
+                                ) : null}
                               </>
                             ) : (
                               <span title="Not tracked">—</span>

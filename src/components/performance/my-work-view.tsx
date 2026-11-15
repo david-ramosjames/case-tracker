@@ -10,10 +10,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  ATTORNEY_OUTPUT_TYPES,
+  DEPOSITION_PARTY_ROLES,
+  LIT_EVENT_KINDS,
+  PARALEGAL_CATEGORIES,
+  litEventKindLabel,
+  type LitEventKind,
+  type ParalegalCategoryKey,
+} from "@/lib/performance/deliverable-categories";
 import { sortCasesByNumber } from "@/lib/performance/staff-roles";
 import {
   DELIVERABLE_TYPE_LABELS,
-  PERFORMANCE_DELIVERABLE_TYPES,
   type PerformanceCommitment,
   type PerformanceDeliverable,
   type PerformanceDeliverableType,
@@ -30,6 +38,7 @@ type CaseOption = {
 };
 
 type Props = {
+  mode?: "paralegal" | "attorney";
   initialDeliverables: PerformanceDeliverable[];
   initialCommitments: PerformanceCommitment[];
   weekStart: string;
@@ -59,6 +68,7 @@ function lastWeekCompletedAt(lastWeekStart: string) {
 }
 
 export function MyWorkView({
+  mode = "paralegal",
   initialDeliverables,
   initialCommitments,
   weekStart,
@@ -70,6 +80,7 @@ export function MyWorkView({
   caseOptions,
   nameById,
 }: Props) {
+  const isAttorney = mode === "attorney";
   const [deliverables, setDeliverables] = useState(initialDeliverables);
   const [commitments, setCommitments] = useState(initialCommitments);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -77,6 +88,9 @@ export function MyWorkView({
   const [coverOthers, setCoverOthers] = useState(false);
   const [form, setForm] = useState({
     caseId: "",
+    category: "demand_sent" as ParalegalCategoryKey | PerformanceDeliverableType,
+    litEventKind: "" as LitEventKind | "",
+    depoParty: "",
     deliverableType: "demand_sent" as PerformanceDeliverableType,
     documentLabel: "",
     roundNumber: "",
@@ -89,8 +103,10 @@ export function MyWorkView({
   const sortedCases = useMemo(() => sortCasesByNumber(caseOptions), [caseOptions]);
   const visibleCases = useMemo(() => {
     if (coverOthers || !selectedPerson) return sortedCases;
-    return sortedCases.filter((c) => c.paralegalId === selectedPerson.id);
-  }, [sortedCases, coverOthers, selectedPerson]);
+    return sortedCases.filter((c) =>
+      isAttorney ? c.attorneyId === selectedPerson.id : c.paralegalId === selectedPerson.id,
+    );
+  }, [sortedCases, coverOthers, selectedPerson, isAttorney]);
 
   const commitmentByDeliverable = useMemo(() => {
     const map = new Map<string, PerformanceCommitment>();
@@ -129,7 +145,7 @@ export function MyWorkView({
     if (!selectedPerson) return;
     const params = new URLSearchParams({
       personId: selectedPerson.id,
-      asAttorney: "0",
+      asAttorney: isAttorney ? "1" : "0",
       completedSince: lastWeekStart,
     });
     const res = await fetch(`/api/performance/deliverables?${params}`);
@@ -138,12 +154,63 @@ export function MyWorkView({
     setDeliverables(body.deliverables ?? []);
   }
 
+  function resolveCreateFields() {
+    if (isAttorney) {
+      if (!form.notes.trim()) throw new Error("Add notes with further details.");
+      const type = form.deliverableType;
+      return {
+        deliverableType: type,
+        documentLabel: form.documentLabel || null,
+        hearingType:
+          type === "hearing" || type === "hearing_trial"
+            ? form.hearingType.trim() || form.notes.trim()
+            : form.hearingType || null,
+        litPersonName: form.litPersonName || null,
+        roundNumber: form.roundNumber ? Number(form.roundNumber) : null,
+        notes: form.notes.trim(),
+      };
+    }
+
+    const category = form.category as ParalegalCategoryKey;
+    if (category === "lit_event_scheduled") {
+      if (!form.litEventKind) throw new Error("Select a litigation event type.");
+      if (form.litEventKind === "deposition" && !form.depoParty) {
+        throw new Error("Select a deposition party role.");
+      }
+      if (!form.notes.trim() && form.litEventKind !== "deposition") {
+        throw new Error("Add notes with further details.");
+      }
+      if (form.litEventKind === "deposition" && !form.notes.trim() && !form.depoParty) {
+        throw new Error("Add notes with further details.");
+      }
+      return {
+        deliverableType: "lit_event_scheduled" as const,
+        hearingType: form.litEventKind,
+        documentLabel: form.litEventKind === "deposition" ? form.depoParty || null : null,
+        litPersonName: null,
+        roundNumber: null,
+        notes: form.notes.trim() || null,
+      };
+    }
+
+    if (!form.notes.trim()) throw new Error("Add notes with further details.");
+    return {
+      deliverableType: category,
+      documentLabel: null,
+      hearingType: null,
+      litPersonName: null,
+      roundNumber: null,
+      notes: form.notes.trim(),
+    };
+  }
+
   async function createItem(destination: CreateDestination) {
     setError(null);
     setBusyId(`create:${destination}`);
     try {
       if (!form.caseId) throw new Error("Select a case.");
       const selected = caseOptions.find((c) => c.id === form.caseId);
+      const fields = resolveCreateFields();
       const res = await fetch("/api/performance/deliverables", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -151,15 +218,17 @@ export function MyWorkView({
           caseId: form.caseId,
           caseNumber: selected?.caseNumber ?? "TBD",
           clientNameSnapshot: selected?.clientName,
-          deliverableType: form.deliverableType,
-          documentLabel: form.documentLabel || null,
-          roundNumber: form.roundNumber ? Number(form.roundNumber) : null,
-          litPersonName: form.litPersonName || null,
-          hearingType: form.hearingType || null,
+          deliverableType: fields.deliverableType,
+          documentLabel: fields.documentLabel,
+          roundNumber: fields.roundNumber,
+          litPersonName: fields.litPersonName,
+          hearingType: fields.hearingType,
           requestedCompletionDate: form.requestedCompletionDate || null,
-          notes: form.notes || null,
-          attorneyUserId: selected?.attorneyId,
-          assigneeUserId: selectedPerson?.id ?? selected?.paralegalId,
+          notes: fields.notes,
+          attorneyUserId: isAttorney ? selectedPerson?.id ?? selected?.attorneyId : selected?.attorneyId,
+          assigneeUserId: isAttorney
+            ? selected?.paralegalId
+            : selectedPerson?.id ?? selected?.paralegalId,
         }),
       });
       const body = (await res.json()) as { deliverable?: PerformanceDeliverable; error?: string };
@@ -201,6 +270,8 @@ export function MyWorkView({
       setForm((f) => ({
         ...f,
         caseId: "",
+        litEventKind: "",
+        depoParty: "",
         documentLabel: "",
         roundNumber: "",
         litPersonName: "",
@@ -295,8 +366,16 @@ export function MyWorkView({
                 {d.attorneyUserId ? nameById[d.attorneyUserId] ?? "—" : "—"}
               </TableCell>
               <TableCell>
-                <div className="font-medium">{typeLabel(d.deliverableType)}</div>
-                <div className="text-xs text-muted-foreground">{d.identityLabel ?? d.identityKey}</div>
+                <div className="font-medium">
+                  {d.deliverableType === "lit_event_scheduled"
+                    ? `Schedule Litigation Event${
+                        d.hearingType ? ` · ${litEventKindLabel(d.hearingType) ?? d.hearingType}` : ""
+                      }${d.documentLabel ? ` · ${d.documentLabel}` : ""}`
+                    : typeLabel(d.deliverableType)}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {d.notes || d.identityLabel || d.identityKey}
+                </div>
               </TableCell>
               <TableCell>
                 {d.caseId ? (
@@ -312,7 +391,13 @@ export function MyWorkView({
                 {mode === "finished" ? (
                   d.completedAt?.slice(0, 10) ?? "—"
                 ) : (
-                  <Badge variant="outline">{d.workflowStatus}</Badge>
+                  <Badge variant="outline">
+                    {d.workflowStatus === "backlog"
+                      ? "In progress"
+                      : d.workflowStatus === "committed"
+                        ? "This week"
+                        : d.workflowStatus}
+                  </Badge>
                 )}
               </TableCell>
               <TableCell className="max-w-[16rem] truncate text-xs" title={d.notes ?? undefined}>
@@ -363,24 +448,26 @@ export function MyWorkView({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-lg font-semibold text-navy-950">
-            {selectedPerson?.name ?? "Paralegal"}
+            {selectedPerson?.name ?? (isAttorney ? "Attorney" : "Paralegal")}
             {viewerContactId && selectedPerson?.id === viewerContactId ? " (you)" : ""}
           </h2>
-          <p className="text-sm text-muted-foreground">Week of {weekStart} · paralegal weekly check</p>
+          <p className="text-sm text-muted-foreground">
+            Week of {weekStart} · {isAttorney ? "attorney output" : "paralegal weekly check"}
+          </p>
         </div>
         {canBrowsePeople ? (
           <PersonSwitcher
             people={people}
             selectedId={selectedPerson?.id ?? null}
-            basePath="/performance/my-work"
-            label="Paralegal"
+            basePath={isAttorney ? "/performance/attorney" : "/performance/my-work"}
+            label={isAttorney ? "Attorney" : "Paralegal"}
           />
         ) : null}
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Finished last week</CardTitle>
+          <CardTitle>Completed last week</CardTitle>
           <CardDescription>
             Week of {lastWeekStart} — bring this list to the Monday 9:30 check. Pair totals roll up on Team.
           </CardDescription>
@@ -390,8 +477,8 @@ export function MyWorkView({
 
       <Card>
         <CardHeader>
-          <CardTitle>This week (committed)</CardTitle>
-          <CardDescription>In progress for the current week commitment.</CardDescription>
+          <CardTitle>Committed for this week</CardTitle>
+          <CardDescription>Work expected to finish in the current week.</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">{renderWorkTable(thisWeekCommitted, "thisWeek")}</CardContent>
       </Card>
@@ -400,8 +487,8 @@ export function MyWorkView({
         <CardHeader>
           <CardTitle>Identify work</CardTitle>
           <CardDescription>
-            Pick a case (yours by default, ordered by case #). Add to backlog, commit to this week, or log as finished
-            last week. Backlog items can still be moved up later.
+            Pick a case (yours by default, ordered by case #). Add to in progress for future weeks, commit for this
+            week, or log as completed last week.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
@@ -419,52 +506,91 @@ export function MyWorkView({
               coverLabel="Showing all cases (cover)"
             />
           </div>
-          <label className="space-y-1 text-sm">
-            <span className="font-medium">Type</span>
-            <select
-              className="w-full rounded-md border px-3 py-2"
-              value={form.deliverableType}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, deliverableType: e.target.value as PerformanceDeliverableType }))
-              }
-            >
-              {PERFORMANCE_DELIVERABLE_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {typeLabel(t)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="space-y-1 text-sm">
-            <span className="font-medium">Document / label</span>
-            <Input
-              value={form.documentLabel}
-              onChange={(e) => setForm((f) => ({ ...f, documentLabel: e.target.value }))}
-              placeholder="Supplemental demand"
-            />
-          </label>
-          <label className="space-y-1 text-sm">
-            <span className="font-medium">Round #</span>
-            <Input
-              value={form.roundNumber}
-              onChange={(e) => setForm((f) => ({ ...f, roundNumber: e.target.value }))}
-              placeholder="2"
-            />
-          </label>
-          <label className="space-y-1 text-sm">
-            <span className="font-medium">Deponent</span>
-            <Input
-              value={form.litPersonName}
-              onChange={(e) => setForm((f) => ({ ...f, litPersonName: e.target.value }))}
-            />
-          </label>
-          <label className="space-y-1 text-sm">
-            <span className="font-medium">Hearing type</span>
-            <Input
-              value={form.hearingType}
-              onChange={(e) => setForm((f) => ({ ...f, hearingType: e.target.value }))}
-            />
-          </label>
+          {isAttorney ? (
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">Type</span>
+              <select
+                className="w-full rounded-md border px-3 py-2"
+                value={form.deliverableType}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    deliverableType: e.target.value as PerformanceDeliverableType,
+                  }))
+                }
+              >
+                {ATTORNEY_OUTPUT_TYPES.map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <>
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Category</span>
+                <select
+                  className="w-full rounded-md border px-3 py-2"
+                  value={form.category}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      category: e.target.value as ParalegalCategoryKey,
+                      litEventKind: "",
+                      depoParty: "",
+                    }))
+                  }
+                >
+                  {PARALEGAL_CATEGORIES.map((t) => (
+                    <option key={t.key} value={t.key}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {form.category === "lit_event_scheduled" ? (
+                <label className="space-y-1 text-sm">
+                  <span className="font-medium">Litigation event</span>
+                  <select
+                    className="w-full rounded-md border px-3 py-2"
+                    value={form.litEventKind}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        litEventKind: e.target.value as LitEventKind | "",
+                        depoParty: "",
+                      }))
+                    }
+                  >
+                    <option value="">Select…</option>
+                    {LIT_EVENT_KINDS.map((t) => (
+                      <option key={t.key} value={t.key}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {form.category === "lit_event_scheduled" && form.litEventKind === "deposition" ? (
+                <label className="space-y-1 text-sm">
+                  <span className="font-medium">Deposition party</span>
+                  <select
+                    className="w-full rounded-md border px-3 py-2"
+                    value={form.depoParty}
+                    onChange={(e) => setForm((f) => ({ ...f, depoParty: e.target.value }))}
+                  >
+                    <option value="">Select…</option>
+                    {DEPOSITION_PARTY_ROLES.map((role) => (
+                      <option key={role} value={role}>
+                        {role}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+            </>
+          )}
           <label className="space-y-1 text-sm">
             <span className="font-medium">Requested date</span>
             <Input
@@ -473,9 +599,13 @@ export function MyWorkView({
               onChange={(e) => setForm((f) => ({ ...f, requestedCompletionDate: e.target.value }))}
             />
           </label>
-          <label className="space-y-1 text-sm md:col-span-2">
+          <label className="space-y-1 text-sm md:col-span-2 lg:col-span-3">
             <span className="font-medium">Notes</span>
-            <Input value={form.notes} onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))} />
+            <Input
+              value={form.notes}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              placeholder="Further details"
+            />
           </label>
           <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-3">
             <Button
@@ -484,7 +614,7 @@ export function MyWorkView({
               onClick={() => void createItem("backlog")}
             >
               {busyId === "create:backlog" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Add to backlog
+              Add to in progress
             </Button>
             <Button disabled={creating || !form.caseId} onClick={() => void createItem("this_week")}>
               {busyId === "create:this_week" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -496,7 +626,7 @@ export function MyWorkView({
               onClick={() => void createItem("last_week")}
             >
               {busyId === "create:last_week" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Add to finished last week
+              Add to completed last week
             </Button>
           </div>
         </CardContent>
@@ -506,9 +636,10 @@ export function MyWorkView({
 
       <Card>
         <CardHeader>
-          <CardTitle>Backlog</CardTitle>
+          <CardTitle>In progress for future weeks</CardTitle>
           <CardDescription>
-            Identified work waiting to move to this week or finished last week.
+            Active work that will not finish this week. Move items to this week when they are ready to complete, or
+            mark them completed last week when appropriate.
           </CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto">{renderWorkTable(backlog, "backlog")}</CardContent>

@@ -157,6 +157,12 @@ export function computeFirmWeekActuals(input: {
       input.weekStart,
       weekEnd,
     ),
+    disengagement: countDeliverableType(
+      input.deliverables,
+      ["disengagement"],
+      input.weekStart,
+      weekEnd,
+    ),
     settlement: countDeliverableType(input.deliverables, ["settlement"], input.weekStart, weekEnd),
     disbursement: countDeliverableType(input.deliverables, ["disbursement"], input.weekStart, weekEnd),
     new_case: countSignedInWeek(input.records, input.weekStart, weekEnd),
@@ -187,7 +193,9 @@ function cellsFromActuals(input: {
       periodGrain: "week",
     });
     const actual = input.actuals[metric.key] ?? 0;
-    const status = actual < goal ? "behind" : actual > goal ? "ahead" : "met";
+    // Metrics with no weekly target (e.g. disengagements) are informational only.
+    const status =
+      goal <= 0 ? "met" : actual < goal ? "behind" : actual > goal ? "ahead" : "met";
     return {
       key: metric.key,
       label: metric.label,

@@ -148,14 +148,14 @@ export type AttorneyPlanLine = {
 };
 
 export const DELIVERABLE_TYPE_LABELS: Record<PerformanceDeliverableType, string> = {
-  demand_sent: "Demand Sent",
-  lawsuit_filed: "Lawsuit Filed",
+  demand_sent: "Send Demand",
+  lawsuit_filed: "File Lawsuit",
   discovery_responses: "Discovery Responses",
-  lit_event_scheduled: "Litigation Event",
+  lit_event_scheduled: "Schedule Litigation Event",
   deposition: "Deposition",
   mediation: "Mediation",
   hearing: "Hearing",
-  hearing_trial: "Hearing/Trial",
+  hearing_trial: "Trial",
   aso: "ASO",
   settlement: "Settlement",
   disbursement: "Disbursement",
