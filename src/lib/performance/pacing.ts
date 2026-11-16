@@ -47,6 +47,8 @@ export type SettledUndisbursedCase = {
   expectedAttorneyFees: number;
   settlementDate: string;
   daysOutstanding: number;
+  /** Party/disbursement row id when outstanding is tracked per individual. */
+  disbursementId?: string | null;
 };
 
 export type QuarterlyFeeProjection = {

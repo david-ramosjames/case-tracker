@@ -1,4 +1,5 @@
 import { isCaseFullyDisbursed } from "@/lib/case-status";
+import { getDisbursementAttorneyFees } from "@/lib/disbursements";
 import {
   computeJonQuarterlyFeeProjection,
   computeSignedCasePacing,
@@ -6,20 +7,21 @@ import {
 } from "@/lib/performance/pacing";
 import { rankTopOutstandingByFees, sortOutstandingByAge, withDaysOutstanding } from "@/lib/performance/outstanding";
 import { chicagoDateParts, chicagoTodayYmd } from "@/lib/performance/weeks";
-import { type AttorneyGoal, type CaseRecord } from "@/lib/types";
-
-function settlementDateOf(record: CaseRecord): string | null {
-  return (
-    record.tracker.result.settlementDate ??
-    record.tracker.disbursements.find((d) => d.settlementDate)?.settlementDate ??
-    null
-  );
-}
+import { type AttorneyGoal, type CaseDisbursement, type CaseRecord } from "@/lib/types";
 
 function expectedAttorneyFees(record: CaseRecord): number {
   return record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue ?? 0;
 }
 
+function isPartyDisbursed(party: CaseDisbursement): boolean {
+  return Boolean(party.disburseDate?.trim()) && !party.pendingRemaining;
+}
+
+/**
+ * Outstanding aging is per individual/party, not case-level.
+ * A co-party without their own settlement date does not get days (and does not
+ * keep the matter on the list via the case settlement date).
+ */
 export function collectSettledUndisbursed(
   records: CaseRecord[],
   usersById: Map<string, string>,
@@ -27,17 +29,37 @@ export function collectSettledUndisbursed(
 ): SettledUndisbursedCase[] {
   const rows: Omit<SettledUndisbursedCase, "daysOutstanding">[] = [];
   for (const record of records) {
+    const attorneyName = usersById.get(record.shared.attorneyId) ?? "—";
+
+    if (record.tracker.disbursements.length > 0) {
+      for (const party of record.tracker.disbursements) {
+        if (!party.settlementDate) continue;
+        if (isPartyDisbursed(party)) continue;
+        rows.push({
+          caseId: record.shared.id,
+          caseNumber: record.shared.caseNumber,
+          clientName: party.partyLabel?.trim() || record.shared.clientName,
+          attorneyName,
+          expectedAttorneyFees: getDisbursementAttorneyFees(party, record),
+          settlementDate: party.settlementDate,
+          disbursementId: party.id,
+        });
+      }
+      continue;
+    }
+
     if (record.tracker.caseStage !== "Settled") continue;
     if (isCaseFullyDisbursed(record.tracker.result)) continue;
-    const settlementDate = settlementDateOf(record);
+    const settlementDate = record.tracker.result.settlementDate;
     if (!settlementDate) continue;
     rows.push({
       caseId: record.shared.id,
       caseNumber: record.shared.caseNumber,
       clientName: record.shared.clientName,
-      attorneyName: usersById.get(record.shared.attorneyId) ?? "—",
+      attorneyName,
       expectedAttorneyFees: expectedAttorneyFees(record),
       settlementDate,
+      disbursementId: null,
     });
   }
   return withDaysOutstanding(rows, asOfYmd);

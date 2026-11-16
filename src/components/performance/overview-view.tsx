@@ -121,7 +121,7 @@ export function OverviewView({
             <CardDescription>Oldest outstanding settlements</CardDescription>
             <CardTitle className="text-2xl">{money(outstandingTotal)}</CardTitle>
             <p className="text-sm text-muted-foreground">
-              {oldest.length} cases · {agingTargetDays}-day operating target
+              {oldest.length} settlements · {agingTargetDays}-day operating target
             </p>
           </CardHeader>
           <CardContent className="overflow-x-auto">
@@ -195,7 +195,7 @@ function OutstandingTable({
         {rows.map((row) => {
           const status = agingStatus(row.daysOutstanding, agingTargetDays, agingWarnDays);
           return (
-            <TableRow key={row.caseId}>
+            <TableRow key={row.disbursementId ?? row.caseId}>
               <TableCell>
                 <Link href={`/cases/${row.caseId}`} className="font-medium text-pink-700 hover:underline">
                   {row.caseNumber}
