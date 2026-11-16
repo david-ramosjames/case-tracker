@@ -5,7 +5,7 @@ import {
   scoreAttorneyWeek,
   scoreParalegalWeek,
 } from "@/lib/performance/scoring";
-import { resolveTargetValue } from "@/lib/performance/targets";
+import { resolveTargetValue } from "@/lib/performance/target-resolve";
 import {
   type PerformanceCommitment,
   type PerformanceDeliverable,

@@ -17,7 +17,7 @@ import {
 } from "@/lib/performance/scoring";
 import { type PerformanceStaffDates } from "@/lib/performance/staff-dates";
 import { filterAttorneys, filterParalegals } from "@/lib/performance/staff-roles";
-import { resolveTargetValue } from "@/lib/performance/targets";
+import { resolveTargetValue } from "@/lib/performance/target-resolve";
 import {
   type PerformanceAssumptions,
   type PerformancePair,

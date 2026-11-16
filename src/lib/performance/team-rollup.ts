@@ -6,7 +6,7 @@ import {
   type FirmWeekRollup,
   type FirmWeeklyMetricKey,
 } from "@/lib/performance/firm-metrics";
-import { resolveTargetValue } from "@/lib/performance/targets";
+import { resolveTargetValue } from "@/lib/performance/target-resolve";
 import { type PerformanceDeliverable, type PerformanceTarget } from "@/lib/performance/types";
 import {
   shiftWeekStart,
