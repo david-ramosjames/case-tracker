@@ -5,6 +5,7 @@ import { AttorneyPlanView } from "@/components/performance/attorney-plan-view";
 import { ConfirmEventsPanel, type ConfirmEventRow } from "@/components/performance/confirm-events-panel";
 import { MyWorkView } from "@/components/performance/my-work-view";
 import { cn } from "@/lib/utils";
+import { type PersonScorecardBundle } from "@/lib/performance/person-scorecard";
 import {
   type AttorneyPlanLine,
   type PerformanceCommitment,
@@ -35,6 +36,7 @@ export function AttorneyView({
   nameById,
   viewerContactId,
   confirmRows,
+  scorecard = null,
 }: {
   initialDeliverables: PerformanceDeliverable[];
   initialCommitments: PerformanceCommitment[];
@@ -48,6 +50,7 @@ export function AttorneyView({
   nameById: Record<string, string>;
   viewerContactId: string | null;
   confirmRows: ConfirmEventRow[];
+  scorecard?: PersonScorecardBundle | null;
 }) {
   const [tab, setTab] = useState<Tab>("output");
 
@@ -92,6 +95,7 @@ export function AttorneyView({
           nameById={nameById}
           basePath="/performance/attorney"
           personSwitcherLabel="Attorney"
+          scorecard={scorecard}
         />
       ) : (
         <div className="space-y-6">

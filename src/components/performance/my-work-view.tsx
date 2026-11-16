@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
 import { CasePicker } from "@/components/performance/case-picker";
+import { PersonScorecardView } from "@/components/performance/person-scorecard-view";
 import { PersonSwitcher } from "@/components/performance/person-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import {
   type LitEventKind,
   type ParalegalCategoryKey,
 } from "@/lib/performance/deliverable-categories";
+import { type PersonScorecardBundle } from "@/lib/performance/person-scorecard";
 import { sortCasesByNumber } from "@/lib/performance/staff-roles";
 import {
   DELIVERABLE_TYPE_LABELS,
@@ -53,6 +55,7 @@ type Props = {
   nameById: Record<string, string>;
   basePath?: string;
   personSwitcherLabel?: string;
+  scorecard?: PersonScorecardBundle | null;
 };
 
 type CreateDestination = "backlog" | "this_week" | "last_week";
@@ -86,6 +89,7 @@ export function MyWorkView({
   nameById,
   basePath,
   personSwitcherLabel,
+  scorecard = null,
 }: Props) {
   const isAttorney = mode === "attorney";
   const switcherPath = basePath ?? (isAttorney ? "/performance/attorney" : "/performance/my-work");
@@ -661,6 +665,10 @@ export function MyWorkView({
         </>
       ) : (
         <>
+          {scorecard && selectedPerson ? (
+            <PersonScorecardView bundle={scorecard} personName={selectedPerson.name} />
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle>Finished last week</CardTitle>

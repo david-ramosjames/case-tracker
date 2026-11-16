@@ -6,7 +6,9 @@ import {
   listCommitmentsForWeek,
   listDeliverablesForPerson,
 } from "@/lib/performance/deliverables";
+import { buildPersonScorecardBundle } from "@/lib/performance/person-scorecard";
 import { filterParalegals, isParalegalRole, sortCasesByNumber } from "@/lib/performance/staff-roles";
+import { listPerformanceTargets } from "@/lib/performance/targets";
 import { shiftWeekStart } from "@/lib/performance/team-rollup";
 import { weekStartMondayCt } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
@@ -25,6 +27,7 @@ export default async function PerformanceParalegalsPage({
   const contact = findContactForSession(users, sessionUser);
   const weekStart = weekStartMondayCt();
   const lastWeekStart = shiftWeekStart(weekStart, -1);
+  const trendSince = shiftWeekStart(weekStart, -13);
   const canBrowsePeople = canBrowsePerformancePeople(sessionUser.role);
 
   const paralegals = filterParalegals(users);
@@ -34,14 +37,29 @@ export default async function PerformanceParalegalsPage({
     selectedPerson = paralegals.find((u) => u.id === params.person) ?? selectedPerson;
   }
 
-  const deliverables = selectedPerson
-    ? await listDeliverablesForPerson({
-        contactId: selectedPerson.id,
-        asAttorney: false,
-        completedSince: lastWeekStart,
+  const [deliverables, commitments, targets] = await Promise.all([
+    selectedPerson
+      ? listDeliverablesForPerson({
+          contactId: selectedPerson.id,
+          asAttorney: false,
+          completedSince: trendSince,
+        })
+      : Promise.resolve([]),
+    listCommitmentsForWeek(weekStart),
+    listPerformanceTargets(),
+  ]);
+
+  const scorecard = selectedPerson
+    ? buildPersonScorecardBundle({
+        role: "paralegal",
+        personId: selectedPerson.id,
+        weekStart,
+        lastWeekStart,
+        deliverables,
+        commitments,
+        targets,
       })
-    : [];
-  const commitments = await listCommitmentsForWeek(weekStart);
+    : null;
 
   const caseOptions = sortCasesByNumber(
     records.map((r) => ({
@@ -71,6 +89,7 @@ export default async function PerformanceParalegalsPage({
       nameById={nameById}
       basePath="/performance/my-work"
       personSwitcherLabel="Paralegal"
+      scorecard={scorecard}
     />
   );
 }

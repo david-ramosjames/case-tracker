@@ -7,8 +7,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { FIRM_WEEKLY_METRICS, defaultFirmWeeklyTarget } from "@/lib/performance/firm-metrics";
+import {
+  ATTORNEY_SCORE_METRICS,
+  PARALEGAL_SCORE_METRICS,
+} from "@/lib/performance/person-scorecard";
+import {
+  DEFAULT_ATTORNEY_TARGETS,
+  DEFAULT_PARALEGAL_TARGETS,
+} from "@/lib/performance/scoring";
 import { type PerformanceStaffDates } from "@/lib/performance/staff-dates";
 import { filterAttorneys, filterParalegals } from "@/lib/performance/staff-roles";
+import { resolveTargetValue } from "@/lib/performance/targets";
 import {
   type PerformanceAssumptions,
   type PerformancePair,
@@ -78,9 +87,111 @@ export function PerformanceSettingsView({
     ) as Record<string, string>,
   );
   const [weeklyEffectiveFrom, setWeeklyEffectiveFrom] = useState(weekStartMondayCt());
+  const [roleEffectiveFrom, setRoleEffectiveFrom] = useState(weekStartMondayCt());
+  const [paralegalRoleGoals, setParalegalRoleGoals] = useState(() =>
+    Object.fromEntries(
+      PARALEGAL_SCORE_METRICS.map((m) => {
+        const open = initialTargets.find(
+          (t) =>
+            t.metricKey === m.key &&
+            t.periodGrain === "week" &&
+            t.scope === "role" &&
+            t.scopeRole === "paralegal" &&
+            !t.effectiveTo,
+        );
+        return [m.key, String(open?.targetValue ?? DEFAULT_PARALEGAL_TARGETS[m.key])];
+      }),
+    ) as Record<string, string>,
+  );
+  const [attorneyRoleGoals, setAttorneyRoleGoals] = useState(() =>
+    Object.fromEntries(
+      ATTORNEY_SCORE_METRICS.map((m) => {
+        const open = initialTargets.find(
+          (t) =>
+            t.metricKey === m.key &&
+            t.periodGrain === "week" &&
+            t.scope === "role" &&
+            t.scopeRole === "attorney" &&
+            !t.effectiveTo,
+        );
+        const fallback =
+          DEFAULT_ATTORNEY_TARGETS[m.key as keyof typeof DEFAULT_ATTORNEY_TARGETS] ?? 0;
+        return [m.key, String(open?.targetValue ?? fallback)];
+      }),
+    ) as Record<string, string>,
+  );
+  const [individualPersonId, setIndividualPersonId] = useState(
+    () => paralegals[0]?.id ?? attorneys[0]?.id ?? "",
+  );
+  const [individualEffectiveFrom, setIndividualEffectiveFrom] = useState(weekStartMondayCt());
+  const [individualGoals, setIndividualGoals] = useState<Record<string, string>>(() => {
+    const personId = paralegals[0]?.id ?? attorneys[0]?.id ?? "";
+    const person =
+      paralegals.find((u) => u.id === personId) ?? attorneys.find((u) => u.id === personId) ?? null;
+    if (!person) return {};
+    const isAtty = person.role === "attorney";
+    const metrics = isAtty ? ATTORNEY_SCORE_METRICS : PARALEGAL_SCORE_METRICS;
+    const role = isAtty ? "attorney" : "paralegal";
+    const onDate = weekStartMondayCt();
+    return Object.fromEntries(
+      metrics.map((m) => [
+        m.key,
+        String(
+          resolveTargetValue({
+            targets: initialTargets,
+            metricKey: m.key,
+            onDate,
+            userId: person.id,
+            role,
+            periodGrain: "week",
+          }),
+        ),
+      ]),
+    );
+  });
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const individualPerson =
+    paralegals.find((u) => u.id === individualPersonId) ??
+    attorneys.find((u) => u.id === individualPersonId) ??
+    null;
+  const individualIsAttorney = individualPerson?.role === "attorney";
+  const individualMetrics = individualIsAttorney ? ATTORNEY_SCORE_METRICS : PARALEGAL_SCORE_METRICS;
+
+  function loadIndividualDraft(
+    personId: string,
+    onDate: string = individualEffectiveFrom,
+    sourceTargets: PerformanceTarget[] = targets,
+  ) {
+    const person =
+      paralegals.find((u) => u.id === personId) ?? attorneys.find((u) => u.id === personId) ?? null;
+    if (!person) {
+      setIndividualGoals({});
+      return;
+    }
+    const isAtty = person.role === "attorney";
+    const metrics = isAtty ? ATTORNEY_SCORE_METRICS : PARALEGAL_SCORE_METRICS;
+    const role = isAtty ? "attorney" : "paralegal";
+    setIndividualGoals(
+      Object.fromEntries(
+        metrics.map((m) => [
+          m.key,
+          String(
+            resolveTargetValue({
+              targets: sourceTargets,
+              metricKey: m.key,
+              onDate,
+              userId: person.id,
+              role,
+              periodGrain: "week",
+            }),
+          ),
+        ]),
+      ),
+    );
+  }
 
   async function saveAssumptions() {
     setBusy(true);
@@ -158,6 +269,75 @@ export function PerformanceSettingsView({
         if (body.target) setTargets((prev) => [body.target!, ...prev]);
       }
       setMessage(`Firm weekly goals saved from ${weeklyEffectiveFrom} forward.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveRoleGoals(kind: "paralegal" | "attorney") {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const metrics = kind === "paralegal" ? PARALEGAL_SCORE_METRICS : ATTORNEY_SCORE_METRICS;
+      const draft = kind === "paralegal" ? paralegalRoleGoals : attorneyRoleGoals;
+      let nextTargets = targets;
+      for (const metric of metrics) {
+        const value = Number(draft[metric.key] ?? 0);
+        const res = await fetch("/api/performance/targets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            metricKey: metric.key,
+            periodGrain: "week",
+            targetValue: value,
+            scope: "role",
+            scopeRole: kind,
+            effectiveFrom: roleEffectiveFrom,
+          }),
+        });
+        const body = (await res.json()) as { target?: PerformanceTarget; error?: string };
+        if (!res.ok) throw new Error(body.error ?? `Failed saving ${metric.label}`);
+        if (body.target) nextTargets = [body.target, ...nextTargets];
+      }
+      setTargets(nextTargets);
+      setMessage(`${kind === "paralegal" ? "Paralegal" : "Attorney"} role weekly targets saved.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveIndividualGoals() {
+    if (!individualPerson) return;
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      let nextTargets = targets;
+      for (const metric of individualMetrics) {
+        const value = Number(individualGoals[metric.key] ?? 0);
+        const res = await fetch("/api/performance/targets", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            metricKey: metric.key,
+            periodGrain: "week",
+            targetValue: value,
+            scope: "user",
+            scopeUserId: individualPerson.id,
+            effectiveFrom: individualEffectiveFrom,
+          }),
+        });
+        const body = (await res.json()) as { target?: PerformanceTarget; error?: string };
+        if (!res.ok) throw new Error(body.error ?? `Failed saving ${metric.label}`);
+        if (body.target) nextTargets = [body.target, ...nextTargets];
+      }
+      setTargets(nextTargets);
+      setMessage(`Individual weekly targets saved for ${individualPerson.name}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -356,6 +536,140 @@ export function PerformanceSettingsView({
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Save weekly goals
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Individual / role weekly scorecard targets</CardTitle>
+          <CardDescription>
+            These drive Paralegal and Attorney board scorecards (last week, expected this week, 13-week trend).
+            Resolution order: person override → role default → workbook defaults (para 1/1/2/3). Firm Team goals
+            above stay separate.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-8">
+          <label className="inline-flex flex-col gap-1 text-sm">
+            <span className="font-medium">Role defaults effective from (Monday)</span>
+            <Input
+              type="date"
+              className="w-44"
+              value={roleEffectiveFrom}
+              onChange={(e) => setRoleEffectiveFrom(e.target.value)}
+            />
+          </label>
+
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-navy-950">Paralegal role defaults</h3>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {PARALEGAL_SCORE_METRICS.map((metric) => (
+                <label key={metric.key} className="space-y-1 text-sm">
+                  <span className="font-medium">{metric.label}</span>
+                  <Input
+                    value={paralegalRoleGoals[metric.key] ?? ""}
+                    onChange={(e) =>
+                      setParalegalRoleGoals((cur) => ({ ...cur, [metric.key]: e.target.value }))
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+            <Button disabled={busy} variant="outline" onClick={() => void saveRoleGoals("paralegal")}>
+              Save paralegal role targets
+            </Button>
+          </div>
+
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-navy-950">Attorney role defaults</h3>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {ATTORNEY_SCORE_METRICS.map((metric) => (
+                <label key={metric.key} className="space-y-1 text-sm">
+                  <span className="font-medium">{metric.label}</span>
+                  <Input
+                    value={attorneyRoleGoals[metric.key] ?? ""}
+                    onChange={(e) =>
+                      setAttorneyRoleGoals((cur) => ({ ...cur, [metric.key]: e.target.value }))
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+            <Button disabled={busy} variant="outline" onClick={() => void saveRoleGoals("attorney")}>
+              Save attorney role targets
+            </Button>
+          </div>
+
+          <div className="space-y-3 border-t pt-6">
+            <h3 className="text-sm font-semibold text-navy-950">Per-person overrides</h3>
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Person</span>
+                <select
+                  className="block min-w-[14rem] rounded-md border px-3 py-2"
+                  value={individualPersonId}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    setIndividualPersonId(id);
+                    loadIndividualDraft(id);
+                  }}
+                >
+                  <optgroup label="Paralegals">
+                    {paralegals.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Attorneys">
+                    {attorneys.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </label>
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Effective from</span>
+                <Input
+                  type="date"
+                  className="w-44"
+                  value={individualEffectiveFrom}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    setIndividualEffectiveFrom(next);
+                    if (individualPersonId) loadIndividualDraft(individualPersonId, next);
+                  }}
+                />
+              </label>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() =>
+                  individualPersonId && loadIndividualDraft(individualPersonId, individualEffectiveFrom)
+                }
+              >
+                Reload resolved values
+              </Button>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {individualMetrics.map((metric) => (
+                <label key={metric.key} className="space-y-1 text-sm">
+                  <span className="font-medium">{metric.label}</span>
+                  <Input
+                    value={individualGoals[metric.key] ?? ""}
+                    onChange={(e) =>
+                      setIndividualGoals((cur) => ({ ...cur, [metric.key]: e.target.value }))
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+            <Button disabled={busy || !individualPerson} onClick={() => void saveIndividualGoals()}>
+              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              Save {individualPerson?.name ?? "person"} targets
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

@@ -92,15 +92,18 @@ export async function upsertPerformanceTarget(input: {
 }) {
   const client = await createPerformanceClient();
   if (input.closePrevious) {
-    await client
+    let closeQuery = client
       .from("performance_targets")
       .update({ effective_to: input.effectiveFrom })
       .eq("metric_key", input.metricKey)
       .eq("period_grain", input.periodGrain)
       .eq("scope", input.scope)
-      .is("effective_to", null)
-      .eq("scope_role", input.scopeRole ?? null)
-      .eq("scope_user_id", input.scopeUserId ?? null);
+      .is("effective_to", null);
+    if (input.scopeRole) closeQuery = closeQuery.eq("scope_role", input.scopeRole);
+    else closeQuery = closeQuery.is("scope_role", null);
+    if (input.scopeUserId) closeQuery = closeQuery.eq("scope_user_id", input.scopeUserId);
+    else closeQuery = closeQuery.is("scope_user_id", null);
+    await closeQuery;
   }
 
   const { data, error } = await client

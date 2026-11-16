@@ -8,7 +8,9 @@ import {
   listCommitmentsForWeek,
   listDeliverablesForPerson,
 } from "@/lib/performance/deliverables";
+import { buildPersonScorecardBundle } from "@/lib/performance/person-scorecard";
 import { filterAttorneys, isAttorneyRole, sortCasesByNumber } from "@/lib/performance/staff-roles";
+import { listPerformanceTargets } from "@/lib/performance/targets";
 import { shiftWeekStart } from "@/lib/performance/team-rollup";
 import { weekStartMondayCt } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
@@ -28,6 +30,7 @@ export default async function PerformanceAttorneysPage({
   const contact = findContactForSession(users, sessionUser);
   const weekStart = weekStartMondayCt();
   const lastWeekStart = shiftWeekStart(weekStart, -1);
+  const trendSince = shiftWeekStart(weekStart, -13);
   const canBrowsePeople = canBrowsePerformancePeople(sessionUser.role);
 
   const attorneys = filterAttorneys(users);
@@ -37,7 +40,7 @@ export default async function PerformanceAttorneysPage({
     selectedAttorney = attorneys.find((u) => u.id === params.person) ?? selectedAttorney;
   }
 
-  const [lines, deliverables, commitments] = await Promise.all([
+  const [lines, deliverables, commitments, targets] = await Promise.all([
     selectedAttorney
       ? listAttorneyPlanLines({ attorneyContactId: selectedAttorney.id, weekStart })
       : Promise.resolve([]),
@@ -45,11 +48,24 @@ export default async function PerformanceAttorneysPage({
       ? listDeliverablesForPerson({
           contactId: selectedAttorney.id,
           asAttorney: true,
-          completedSince: lastWeekStart,
+          completedSince: trendSince,
         })
       : Promise.resolve([]),
     listCommitmentsForWeek(weekStart),
+    listPerformanceTargets(),
   ]);
+
+  const scorecard = selectedAttorney
+    ? buildPersonScorecardBundle({
+        role: "attorney",
+        personId: selectedAttorney.id,
+        weekStart,
+        lastWeekStart,
+        deliverables,
+        commitments,
+        targets,
+      })
+    : null;
 
   const caseOptions = sortCasesByNumber(
     records.map((r) => ({
@@ -99,6 +115,7 @@ export default async function PerformanceAttorneysPage({
       nameById={nameById}
       viewerContactId={contact?.id ?? null}
       confirmRows={confirmRows}
+      scorecard={scorecard}
     />
   );
 }
