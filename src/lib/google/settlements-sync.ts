@@ -149,7 +149,10 @@ function buildSettlementCasePayload(caseNumber: string, caseRows: ParsedSettleme
     sheetRowKey: row.sheetRowKey,
     partyLabel: row.partyLabel,
     disburseDate: row.disburseDate,
-    settlementDate: row.settlementDate ?? settlementDate,
+    // Keep blank sheet H dates blank per party. Do not copy another party's settlement
+    // date onto an unsettled co-client (inflates disbursement lag). Case-level settlement
+    // date / Settled stage still use `settlementDate` below when column G is Y.
+    settlementDate: row.settlementDate,
     settlementAmount: row.settlementAmount,
     attorneyFees: row.attorneyFees,
     pendingRemaining: row.pendingRemaining,
