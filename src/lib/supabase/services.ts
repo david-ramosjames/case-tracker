@@ -983,7 +983,7 @@ export async function importSettlementFinancialBackfillRows(
             .from("case_tracker_results")
             .update({
               disbursed_status: "No",
-              check_status: "No",
+              check_status: "Not Issued",
               check_disbursed_at: null,
               disburse_date: null,
               settlement_date: null,
@@ -1234,11 +1234,11 @@ export async function resetSettlementFinancialBackfill(): Promise<SettlementFina
           disburse_date: null,
           check_disbursed_at: null,
           disbursed_status: "No",
-          check_status: "No",
+          check_status: "Not Issued",
           result_quarter: null,
           release_status: "Not Received",
-          closing_status: "No",
-          reductions_status: "Not Complete",
+          closing_status: "Not Drafted",
+          reductions_status: "Not Started",
         })
         .or(filter);
       if (resultError) throw new Error(resultError.message);
@@ -1742,8 +1742,8 @@ async function recomputeCaseResultFromDisbursements(
       case_id: linkedDocketFlowCaseId(trackerRow),
       tracker_entry_id: input.trackerEntryId,
       release_status: "Not Received",
-      closing_status: "No",
-      check_status: "No",
+      closing_status: "Not Drafted",
+      check_status: "Not Issued",
       ...resultPayload,
     });
     if (error) throw new Error(error.message);
@@ -2537,8 +2537,8 @@ export async function syncSettlementsFromSheet(
       ...(openCaseFromSheet
         ? {
             release_status: "Not Received" as const,
-            closing_status: "No" as const,
-            check_status: "No" as const,
+            closing_status: "Not Drafted" as const,
+            check_status: "Not Issued" as const,
             release_signed_at: null,
             closing_signed_at: null,
             check_deposited_at: null,
@@ -4108,13 +4108,33 @@ function normalizeReleaseStatus(value: string | null | undefined, signedAt: stri
 }
 
 function normalizeClosingStatus(value: string | null | undefined, signedAt: string | null): ClosingStatus {
-  if (value === "Drafted" || value === "Approved" || value === "Signed") return value;
-  return signedAt ? "Signed" : "No";
+  if (
+    value === "Not Drafted" ||
+    value === "Drafted" ||
+    value === "Approved" ||
+    value === "Sent to Client" ||
+    value === "Signed"
+  ) {
+    return value;
+  }
+  if (value === "Signed" || Boolean(signedAt)) return "Signed";
+  if (value === "No" || !value) return "Not Drafted";
+  return "Not Drafted";
 }
 
 function normalizeCheckStatus(value: string | null | undefined, depositedAt: string | null): CheckStatus {
-  if (value === "Deposited" || value === "Sent") return value;
-  return depositedAt ? "Deposited" : "No";
+  if (
+    value === "Not Issued" ||
+    value === "Issued" ||
+    value === "Mailed" ||
+    value === "Received" ||
+    value === "Deposited"
+  ) {
+    return value;
+  }
+  if (value === "Sent") return "Mailed";
+  if (depositedAt || value === "Deposited") return "Deposited";
+  return "Not Issued";
 }
 
 function normalizeDisbursedStatus(

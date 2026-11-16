@@ -522,14 +522,14 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="w-32 align-top">
+                <TableHead className="w-36 align-top">
                   <HeaderFilter
-                    label="Closing"
-                    value={closing}
-                    onChange={setClosing}
+                    label="Reductions"
+                    value={reductions}
+                    onChange={setReductions}
                     options={[
                       { value: "all", label: "All" },
-                      ...CLOSING_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
+                      ...REDUCTIONS_MANUAL_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
                     ]}
                   />
                 </TableHead>
@@ -544,14 +544,14 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="w-36 align-top">
+                <TableHead className="w-32 align-top">
                   <HeaderFilter
-                    label="Reductions"
-                    value={reductions}
-                    onChange={setReductions}
+                    label="Closing"
+                    value={closing}
+                    onChange={setClosing}
                     options={[
                       { value: "all", label: "All" },
-                      ...REDUCTIONS_MANUAL_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
+                      ...CLOSING_STATUS_OPTIONS.map((item) => ({ value: item, label: item })),
                     ]}
                   />
                 </TableHead>
@@ -657,16 +657,6 @@ export function ResultsTable({
                         {RELEASE_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                       </InlineSelect>
                     </TableCell>
-                    <TableCell className="w-32">
-                      <InlineSelect value={result.closingStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "closingStatus", value as ClosingStatus)}>
-                        {CLOSING_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-                      </InlineSelect>
-                    </TableCell>
-                    <TableCell className="w-32">
-                      <InlineSelect value={result.checkStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "checkStatus", value as CheckStatus)}>
-                        {CHECK_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-                      </InlineSelect>
-                    </TableCell>
                     <TableCell className="w-36">
                       <InlineSelect
                         value={coerceReductionsStatus(result.reductionsStatus)}
@@ -682,6 +672,16 @@ export function ResultsTable({
                             {option}
                           </option>
                         ))}
+                      </InlineSelect>
+                    </TableCell>
+                    <TableCell className="w-32">
+                      <InlineSelect value={result.checkStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "checkStatus", value as CheckStatus)}>
+                        {CHECK_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                      </InlineSelect>
+                    </TableCell>
+                    <TableCell className="w-32">
+                      <InlineSelect value={result.closingStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "closingStatus", value as ClosingStatus)}>
+                        {CLOSING_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                       </InlineSelect>
                     </TableCell>
                     <TableCell className="w-32">

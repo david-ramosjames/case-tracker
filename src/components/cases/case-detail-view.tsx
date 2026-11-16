@@ -1784,7 +1784,7 @@ export function CaseDetailView({
             <ResultStep
               label="Reductions"
               value={coerceReductionsStatus(tracker.result.reductionsStatus)}
-              complete={coerceReductionsStatus(tracker.result.reductionsStatus) === "Approved"}
+              complete={coerceReductionsStatus(tracker.result.reductionsStatus) === "Reductions Approved"}
             />
           </CardContent>
         </Card>

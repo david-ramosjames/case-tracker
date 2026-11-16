@@ -323,17 +323,22 @@ function normalizeReleaseStatus(value: string): ReleaseStatus {
 
 function normalizeClosingStatus(value: string): ClosingStatus {
   const normalized = value.trim().toLowerCase();
+  if (normalized === "not drafted" || normalized === "no") return "Not Drafted";
   if (normalized === "drafted") return "Drafted";
   if (normalized === "approved") return "Approved";
+  if (normalized === "sent to client" || normalized === "sent") return "Sent to Client";
   if (normalized === "signed" || normalized === "yes") return "Signed";
-  return "No";
+  return "Not Drafted";
 }
 
 function normalizeCheckStatus(value: string): CheckStatus {
   const normalized = value.trim().toLowerCase();
+  if (normalized === "not issued" || normalized === "no") return "Not Issued";
+  if (normalized === "issued") return "Issued";
+  if (normalized === "mailed" || normalized === "sent") return "Mailed";
+  if (normalized === "received") return "Received";
   if (normalized === "deposited") return "Deposited";
-  if (normalized === "sent") return "Sent";
-  return "No";
+  return "Not Issued";
 }
 
 function normalizeDisbursedStatus(value: string): DisbursedStatus {
@@ -343,15 +348,14 @@ function normalizeDisbursedStatus(value: string): DisbursedStatus {
 
 function normalizeReductionsStatus(value: string): ReductionsStatus {
   const normalized = value.trim().toLowerCase();
-  if (normalized === "approved") return "Approved";
-  if (
-    normalized === "sent, not approved" ||
-    normalized === "sent not approved" ||
-    normalized === "sent"
-  ) {
-    return "Sent, Not Approved";
+  if (normalized === "not started") return "Not Started";
+  if (normalized === "gathering bills") return "Gathering Bills";
+  if (normalized === "reductions proposed" || normalized === "proposed") return "Reductions Proposed";
+  if (normalized === "reductions sent" || normalized === "sent, not approved" || normalized === "sent not approved" || normalized === "sent") {
+    return "Reductions Sent";
   }
-  if (normalized === "to be sent") return "To Be Sent";
+  if (normalized === "reductions approved" || normalized === "approved") return "Reductions Approved";
+  if (normalized === "to be sent") return "Reductions Proposed";
   if (
     normalized === "not complete" ||
     normalized === "deposited" ||
@@ -359,7 +363,7 @@ function normalizeReductionsStatus(value: string): ReductionsStatus {
     normalized === "na" ||
     normalized === "not applicable"
   ) {
-    return "Not Complete";
+    return "Not Started";
   }
   return coerceReductionsStatus(value);
 }

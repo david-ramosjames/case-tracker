@@ -227,14 +227,61 @@ export const RELEASE_STATUS_OPTIONS = [
 export function isReleaseSignedStage(status: ReleaseStatus | null | undefined) {
   return status === "Signed by Client" || status === "Returned";
 }
-export const CLOSING_STATUS_OPTIONS = ["No", "Drafted", "Approved", "Signed"] satisfies ClosingStatus[];
-export const CHECK_STATUS_OPTIONS = ["Deposited", "No", "Sent"] satisfies CheckStatus[];
+export const CLOSING_STATUS_OPTIONS = [
+  "Not Drafted",
+  "Drafted",
+  "Approved",
+  "Sent to Client",
+  "Signed",
+] satisfies ClosingStatus[];
+
+/** Map stored values (including legacy labels) to a selectable closing status. */
+export function coerceClosingStatus(value: string | null | undefined): ClosingStatus {
+  const trimmed = value?.trim() ?? "";
+  if (
+    trimmed === "Not Drafted" ||
+    trimmed === "Drafted" ||
+    trimmed === "Approved" ||
+    trimmed === "Sent to Client" ||
+    trimmed === "Signed"
+  ) {
+    return trimmed;
+  }
+  if (trimmed === "No" || !trimmed) return "Not Drafted";
+  return "Not Drafted";
+}
+export const CHECK_STATUS_OPTIONS = [
+  "Not Issued",
+  "Issued",
+  "Mailed",
+  "Received",
+  "Deposited",
+] satisfies CheckStatus[];
+
+/** Map stored values (including legacy labels) to a selectable check status. */
+export function coerceCheckStatus(value: string | null | undefined): CheckStatus {
+  const trimmed = value?.trim() ?? "";
+  if (
+    trimmed === "Not Issued" ||
+    trimmed === "Issued" ||
+    trimmed === "Mailed" ||
+    trimmed === "Received" ||
+    trimmed === "Deposited"
+  ) {
+    return trimmed;
+  }
+  // Legacy labels → new workflow stages.
+  if (trimmed === "Sent") return "Mailed";
+  if (trimmed === "No" || !trimmed) return "Not Issued";
+  return "Not Issued";
+}
 export const DISBURSED_STATUS_OPTIONS = ["No", "Yes"] satisfies DisbursedStatus[];
 export const REDUCTIONS_MANUAL_STATUS_OPTIONS = [
-  "Not Complete",
-  "To Be Sent",
-  "Sent, Not Approved",
-  "Approved",
+  "Not Started",
+  "Gathering Bills",
+  "Reductions Proposed",
+  "Reductions Sent",
+  "Reductions Approved",
 ] satisfies ReductionsStatus[];
 
 /** @deprecated Use REDUCTIONS_MANUAL_STATUS_OPTIONS */
@@ -244,16 +291,26 @@ export const REDUCTIONS_STATUS_OPTIONS = REDUCTIONS_MANUAL_STATUS_OPTIONS;
 export function coerceReductionsStatus(value: string | null | undefined): ReductionsStatus {
   const trimmed = value?.trim() ?? "";
   if (
-    trimmed === "Not Complete" ||
-    trimmed === "To Be Sent" ||
-    trimmed === "Sent, Not Approved" ||
-    trimmed === "Approved"
+    trimmed === "Not Started" ||
+    trimmed === "Gathering Bills" ||
+    trimmed === "Reductions Proposed" ||
+    trimmed === "Reductions Sent" ||
+    trimmed === "Reductions Approved"
   ) {
     return trimmed;
   }
-  if (trimmed === "Sent") return "Sent, Not Approved";
-  if (trimmed === "Deposited" || trimmed === "N/A" || !trimmed) return "Not Complete";
-  return "Not Complete";
+  // Legacy labels → new workflow stages.
+  if (trimmed === "Approved") return "Reductions Approved";
+  if (trimmed === "Sent, Not Approved" || trimmed === "Sent") return "Reductions Sent";
+  if (trimmed === "To Be Sent") return "Reductions Proposed";
+  if (trimmed === "Not Complete" || trimmed === "Deposited" || trimmed === "N/A" || !trimmed) {
+    return "Not Started";
+  }
+  return "Not Started";
+}
+
+export function isReductionsApproved(status: ReductionsStatus | null | undefined) {
+  return coerceReductionsStatus(status) === "Reductions Approved";
 }
 
 /** Forecast quarter when the case is expected to disburse (planning field on the tracker). */
@@ -382,7 +439,7 @@ export function applyDerivedWorkflowFromDisburseDate<T extends SettlementResult>
     releaseStatus: "Returned",
     closingStatus: "Signed",
     checkStatus: "Deposited",
-    reductionsStatus: "Approved",
+    reductionsStatus: "Reductions Approved",
     disbursedStatus: "Yes",
     checkDisbursedAt,
   };

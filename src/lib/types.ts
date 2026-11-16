@@ -31,10 +31,20 @@ export type ReleaseStatus =
   | "Sent to Client"
   | "Signed by Client"
   | "Returned";
-export type ClosingStatus = "No" | "Drafted" | "Approved" | "Signed";
-export type CheckStatus = "Deposited" | "No" | "Sent";
+export type ClosingStatus =
+  | "Not Drafted"
+  | "Drafted"
+  | "Approved"
+  | "Sent to Client"
+  | "Signed";
+export type CheckStatus = "Not Issued" | "Issued" | "Mailed" | "Received" | "Deposited";
 export type DisbursedStatus = "No" | "Yes";
-export type ReductionsStatus = "Not Complete" | "To Be Sent" | "Sent, Not Approved" | "Approved";
+export type ReductionsStatus =
+  | "Not Started"
+  | "Gathering Bills"
+  | "Reductions Proposed"
+  | "Reductions Sent"
+  | "Reductions Approved";
 
 export type LitigationEventStatus = "To Schedule" | "Scheduled" | "Complete";
 

@@ -221,7 +221,7 @@ function buildGroupedBackfillRow(
       tracker.multipleDisbursementsEnabled = claims.length > 1;
     } else {
       result.disbursedStatus = "No";
-      result.checkStatus = "No";
+      result.checkStatus = "Not Issued";
       result.checkDisbursedAt = null;
       result.disburseDate = null;
       result.resultQuarter = null;
