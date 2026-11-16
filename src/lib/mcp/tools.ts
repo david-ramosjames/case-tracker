@@ -29,6 +29,8 @@ import {
 } from "@/lib/evidence-photos/types";
 import { type McpCaller } from "@/lib/mcp/identity";
 import { getCaseIntakeSummary } from "@/lib/mcp/intake";
+import { policyCoverageCompletenessOk } from "@/lib/policy-coverage";
+import { buildPolicyCoverageConfirmPatch } from "@/lib/policy-coverage-actions";
 import { getSlackChannelForCaseNumber } from "@/lib/slack/channels";
 import { confirmStageSuggestionById, dismissStageSuggestionById } from "@/lib/supabase/stage-suggestions";
 import {
@@ -772,8 +774,18 @@ export const MCP_TOOLS: McpToolDefinition[] = [
           if (tracker.minimumValue != null) patch.minimumValue = tracker.minimumValue;
           else missing.push("minimum_value");
         } else if (field === "policy_limits") {
-          if (tracker.policyLimits != null) patch.policyLimits = tracker.policyLimits;
-          else missing.push("policy_limits");
+          if (!policyCoverageCompletenessOk(tracker) && tracker.policyLimits == null) {
+            missing.push("policy_limits");
+          } else {
+            Object.assign(
+              patch,
+              buildPolicyCoverageConfirmPatch({
+                status: tracker.policyCoverage,
+                actorContactId: null,
+                notes: tracker.policyVerificationNotes,
+              }),
+            );
+          }
         } else {
           throw new McpToolError(`Unknown field "${field}". Use: ${VALIDATION_INPUT_KEYS.join(", ")}.`);
         }

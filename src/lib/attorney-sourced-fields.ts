@@ -8,6 +8,7 @@ import {
   isValidationFieldFresh,
   type ValidationFieldId,
 } from "@/lib/attorney-score";
+import { policyCoverageCompletenessOk } from "@/lib/policy-coverage";
 import { daysSince } from "@/lib/utils";
 import type { CaseRecord } from "@/lib/types";
 
@@ -50,8 +51,8 @@ export const ATTORNEY_SOURCED_FIELDS: AttorneySourcedFieldMeta[] = [
   { id: "referralFee", label: "Referral fee", shortLabel: "Referral fee", reviewKind: "none" },
   {
     id: "policyLimits",
-    label: "Policy limits",
-    shortLabel: "Policy limits",
+    label: "Policy coverage / limits",
+    shortLabel: "Policy",
     reviewKind: "validation_90d",
     validationFieldId: "policyLimits",
   },
@@ -83,7 +84,7 @@ function hasAttorneyFieldValue(record: CaseRecord, fieldId: AttorneySourcedField
     case "referralFee":
       return tracker.referralFee != null;
     case "policyLimits":
-      return isNumericFieldSet(tracker.policyLimits);
+      return policyCoverageCompletenessOk(tracker);
     case "policyInfoSource":
       return Boolean(tracker.policyInfoSource?.trim());
     case "injuries":

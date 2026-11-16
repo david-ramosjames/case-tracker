@@ -313,7 +313,12 @@ function normalizeExpectedLitigation(value: string, stage: CaseStage): ExpectedL
 
 function normalizeReleaseStatus(value: string): ReleaseStatus {
   const normalized = value.trim().toLowerCase();
-  return normalized === "signed" || normalized === "yes" ? "Signed" : "No";
+  if (normalized === "not received" || normalized === "no") return "Not Received";
+  if (normalized === "pending edits or review" || normalized === "pending") return "Pending Edits or Review";
+  if (normalized === "sent to client" || normalized === "sent") return "Sent to Client";
+  if (normalized === "signed by client" || normalized === "signed" || normalized === "yes") return "Signed by Client";
+  if (normalized === "returned") return "Returned";
+  return "Not Received";
 }
 
 function normalizeClosingStatus(value: string): ClosingStatus {

@@ -359,7 +359,7 @@ export function LitigationTable({
             <div className="pointer-events-none absolute right-0 top-0 z-30 h-full w-12 bg-gradient-to-l from-white to-transparent" />
             <div
               ref={tableScrollRef}
-              className="max-h-[calc(100vh-23rem)] min-h-[28rem] overflow-auto"
+              className="table-main-scroll max-h-[calc(100vh-23rem)] min-h-[28rem]"
               onScroll={(event) => syncScroll(event, topScrollRef)}
             >
               <Table ref={tableRef} className="min-w-[1200px]">

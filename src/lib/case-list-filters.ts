@@ -1,6 +1,7 @@
 import { getOutdatedValidationFields } from "@/lib/attorney-score";
 import { isMissingInfo, isStale, needsQuarterlyCheckIn } from "@/lib/calculations";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
+import { matchesPolicyRevalidationFilter } from "@/lib/policy-coverage";
 import { type CaseRecord, type CaseTrackerSettings } from "@/lib/types";
 
 export const CASE_LIST_QUALITY_FILTERS = [
@@ -8,6 +9,7 @@ export const CASE_LIST_QUALITY_FILTERS = [
   "stale-review",
   "quarterly-check-in",
   "validation-overdue",
+  "policy-revalidation",
   "settled-not-disbursed",
 ] as const;
 
@@ -30,6 +32,8 @@ export function getCaseListQualityFilterLabel(filter: CaseListQualityFilter) {
       return "Quarterly check-ins due";
     case "validation-overdue":
       return "Validation overdue";
+    case "policy-revalidation":
+      return "Policy coverage revalidation due";
     case "settled-not-disbursed":
       return "Settled not disbursed";
   }
@@ -50,6 +54,8 @@ export function matchesCaseListQualityFilter(
       return needsQuarterlyCheckIn(record);
     case "validation-overdue":
       return getOutdatedValidationFields(record).length > 0;
+    case "policy-revalidation":
+      return caseRequiresOngoingUpdates(record) && matchesPolicyRevalidationFilter(record.tracker);
     case "settled-not-disbursed":
       return record.tracker.caseStage === "Settled" && !record.tracker.result.checkDisbursedAt;
   }

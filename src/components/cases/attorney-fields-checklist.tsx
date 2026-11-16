@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { attorneyFieldShellClass } from "@/components/cases/attorney-field-hint";
+import { PolicyCoverageFields } from "@/components/cases/policy-coverage-fields";
 import {
   ATTORNEY_SOURCED_FIELDS,
   getAttorneySourcedFieldStatus,
@@ -16,7 +17,7 @@ import {
   type AttorneySourcedFieldId,
 } from "@/lib/attorney-sourced-fields";
 import { liabilitySelectOptions } from "@/lib/case-options";
-import type { CaseRecord, TrackerEntry } from "@/lib/types";
+import type { CaseRecord, TrackerEntry, TrackerUpdateInput } from "@/lib/types";
 import { formatDate } from "@/lib/utils";
 
 function statusBadge(status: AttorneyFieldStatus) {
@@ -30,6 +31,8 @@ export function AttorneyFieldsChecklist({
   quarterOptions,
   onUpdateField,
   onMinimumValueChange,
+  onPolicyPatch,
+  actorContactId,
   onSave,
   isSaving,
   savedAt,
@@ -39,6 +42,8 @@ export function AttorneyFieldsChecklist({
   quarterOptions: string[];
   onUpdateField: <K extends keyof TrackerEntry>(key: K, value: TrackerEntry[K]) => void;
   onMinimumValueChange: (value: number | null) => void;
+  onPolicyPatch: (patch: TrackerUpdateInput) => void;
+  actorContactId?: string | null;
   onSave: () => void;
   isSaving: boolean;
   savedAt: string | null;
@@ -90,6 +95,8 @@ export function AttorneyFieldsChecklist({
               quarterOptions={quarterOptions}
               onUpdateField={onUpdateField}
               onMinimumValueChange={onMinimumValueChange}
+              onPolicyPatch={onPolicyPatch}
+              actorContactId={actorContactId}
             />
           </div>
         ))}
@@ -118,12 +125,16 @@ function AttorneyFieldInput({
   quarterOptions,
   onUpdateField,
   onMinimumValueChange,
+  onPolicyPatch,
+  actorContactId,
 }: {
   fieldId: AttorneySourcedFieldId;
   record: CaseRecord;
   quarterOptions: string[];
   onUpdateField: <K extends keyof TrackerEntry>(key: K, value: TrackerEntry[K]) => void;
   onMinimumValueChange: (value: number | null) => void;
+  onPolicyPatch: (patch: TrackerUpdateInput) => void;
+  actorContactId?: string | null;
 }) {
   const { tracker } = record;
 
@@ -171,10 +182,11 @@ function AttorneyFieldInput({
       );
     case "policyLimits":
       return (
-        <CompactFormattedNumberInput
-          prefix="$"
-          value={tracker.policyLimits}
-          onValueChange={(value) => onUpdateField("policyLimits", value)}
+        <PolicyCoverageFields
+          compact
+          tracker={tracker}
+          actorContactId={actorContactId}
+          onPatch={onPolicyPatch}
         />
       );
     case "policyInfoSource":

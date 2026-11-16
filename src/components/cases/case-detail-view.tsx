@@ -11,7 +11,9 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { AttorneyFieldLabel, AttorneyFieldLegend, attorneyFieldShellClass } from "@/components/cases/attorney-field-hint";
 import { AttorneyFieldsChecklist } from "@/components/cases/attorney-fields-checklist";
+import { PolicyCoverageFields } from "@/components/cases/policy-coverage-fields";
 import { ConfidenceBadge, DerivedCaseStatusBadge, StageBadge } from "@/components/cases/case-status-badge";
+import { policyCoverageLabel } from "@/lib/policy-coverage";
 import { NextScheduledEventsCard } from "@/components/cases/next-scheduled-events-card";
 import type { AttorneySourcedFieldId } from "@/lib/attorney-sourced-fields";
 import { applyOpenSettledTrackerFallback, deriveCaseStatusFromTracker } from "@/lib/case-status";
@@ -411,7 +413,12 @@ export function CaseDetailView({
     value: SettlementResult[K],
   ) {
     setTracker((current) => {
+      const now = new Date().toISOString();
       const result = { ...current.result, [key]: value };
+      if (key === "releaseStatus") {
+        result.releaseSignedAt =
+          value === "Signed by Client" || value === "Returned" ? (result.releaseSignedAt ?? now) : null;
+      }
       if (key === "disbursedStatus" && value === "No") {
         result.checkDisbursedAt = null;
       }
@@ -1094,7 +1101,11 @@ export function CaseDetailView({
                     <AttorneyInfo fieldId="targetResolutionQuarter" record={record} value={tracker.targetResolutionQuarter ?? "Not set"} />
                     <AttorneyInfo fieldId="minimumValue" record={record} value={formatCurrency(tracker.minimumValue)} />
                     <AttorneyInfo fieldId="referralFee" record={record} value={formatPercentValue(tracker.referralFee, 2)} />
-                    <AttorneyInfo fieldId="policyLimits" record={record} value={formatCurrency(tracker.policyLimits)} />
+                    <AttorneyInfo
+                      fieldId="policyLimits"
+                      record={record}
+                      value={`${tracker.policyCoverage ? policyCoverageLabel(tracker.policyCoverage) : "Unclassified"} · ${formatCurrency(tracker.policyLimits)}`}
+                    />
                   </div>
                 </div>
               </>
@@ -1268,8 +1279,14 @@ export function CaseDetailView({
                         onValueChange={(value) => updateField("referralFee", value)}
                       />
                     </AttorneyField>
-                    <AttorneyField fieldId="policyLimits" record={record}>
-                      <FormattedNumberInput prefix="$" value={tracker.policyLimits} onValueChange={(value) => updateField("policyLimits", value)} />
+                    <AttorneyField fieldId="policyLimits" record={record} className="md:col-span-2">
+                      <PolicyCoverageFields
+                        tracker={tracker}
+                        actorContactId={sessionUser.id}
+                        onPatch={(patch) => {
+                          setTracker((current) => ({ ...current, ...patch }));
+                        }}
+                      />
                     </AttorneyField>
                   </div>
                 </div>
@@ -1704,6 +1721,10 @@ export function CaseDetailView({
             updateField("minimumValue", value);
             updateField("caseSize", deriveCaseSizeFromMinimumValue(value));
           }}
+          onPolicyPatch={(patch) => {
+            setTracker((current) => ({ ...current, ...patch }));
+          }}
+          actorContactId={sessionUser.id}
           onSave={() => saveTracker()}
           isSaving={isSaving}
           savedAt={savedAt}
@@ -1716,7 +1737,10 @@ export function CaseDetailView({
           </CardHeader>
           <CardContent className="space-y-4">
             <Info label="Minimum Value" value={formatCurrency(tracker.minimumValue)} />
-            <Info label="Policy Limits" value={formatCurrency(tracker.policyLimits)} />
+            <Info
+              label="Policy"
+              value={`${tracker.policyCoverage ? policyCoverageLabel(tracker.policyCoverage) : "Unclassified"} · ${formatCurrency(tracker.policyLimits)}`}
+            />
             <Info label="Fee Percent" value={`${Math.round(getFeePercent(record) * 100)}%`} />
             <Info label="Projected Firm Fee" value={formatCurrency(getProjectedFeeValue(record))} />
             <Info label="Expected disbursement quarter" value={tracker.targetResolutionQuarter ?? "Not set"} />
@@ -1746,7 +1770,14 @@ export function CaseDetailView({
             <CardTitle>Result Status</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <ResultStep label="Release" value={tracker.result.releaseStatus} complete={tracker.result.releaseStatus === "Signed"} />
+            <ResultStep
+              label="Release"
+              value={tracker.result.releaseStatus}
+              complete={
+                tracker.result.releaseStatus === "Signed by Client" ||
+                tracker.result.releaseStatus === "Returned"
+              }
+            />
             <ResultStep label="Closing" value={tracker.result.closingStatus} complete={tracker.result.closingStatus === "Signed"} />
             <ResultStep label="Check" value={tracker.result.checkStatus} complete={tracker.result.checkStatus === "Deposited"} />
             <ResultStep label="Disbursed" value={tracker.result.disbursedStatus} complete={tracker.result.disbursedStatus === "Yes"} />

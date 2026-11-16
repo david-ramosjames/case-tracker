@@ -408,7 +408,10 @@ export function ResultsTable({
     const now = new Date().toISOString();
     updateResult(recordId, (current) => {
       const result = { ...current, [key]: value };
-      if (key === "releaseStatus") result.releaseSignedAt = value === "Signed" ? (result.releaseSignedAt ?? now) : null;
+      if (key === "releaseStatus") {
+        result.releaseSignedAt =
+          value === "Signed by Client" || value === "Returned" ? (result.releaseSignedAt ?? now) : null;
+      }
       if (key === "closingStatus") result.closingSignedAt = value === "Signed" ? (result.closingSignedAt ?? now) : null;
       if (key === "checkStatus") result.checkDepositedAt = value === "Deposited" ? (result.checkDepositedAt ?? now) : null;
       if (key === "disbursedStatus") result.checkDisbursedAt = value === "Yes" ? (result.checkDisbursedAt ?? now) : null;
@@ -456,7 +459,7 @@ export function ResultsTable({
             <div className="pointer-events-none absolute right-0 top-0 z-30 h-full w-12 bg-gradient-to-l from-white to-transparent" />
             <div
               ref={tableScrollRef}
-              className="max-h-[calc(100vh-23rem)] min-h-[28rem] overflow-auto"
+              className="table-main-scroll max-h-[calc(100vh-23rem)] min-h-[28rem]"
               onScroll={(event) => syncScroll(event, topScrollRef)}
             >
           <Table ref={tableRef} className="min-w-[2380px] table-fixed">
@@ -508,7 +511,7 @@ export function ResultsTable({
                   onSort={requestSort}
                   className="w-36"
                 />
-                <TableHead className="w-32 align-top">
+                <TableHead className="w-48 align-top">
                   <HeaderFilter
                     label="Release"
                     value={release}
@@ -649,7 +652,7 @@ export function ResultsTable({
                         ) : null}
                       </div>
                     </TableCell>
-                    <TableCell className="w-32">
+                    <TableCell className="w-48">
                       <InlineSelect value={result.releaseStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "releaseStatus", value as ReleaseStatus)}>
                         {RELEASE_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
                       </InlineSelect>

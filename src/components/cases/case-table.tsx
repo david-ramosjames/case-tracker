@@ -29,6 +29,7 @@ import {
 } from "@/lib/case-options";
 import { CaseAttorneyScoreCell } from "@/components/attorney-score/attorney-score";
 import { getCaseAttorneyScore, isInlineValidationConfirmField } from "@/lib/attorney-score";
+import { PolicyCoverageFields } from "@/components/cases/policy-coverage-fields";
 import { deriveResultFeePercent, getCaseCompletionScore } from "@/lib/calculations";
 import { getCasePipelineFilter, isActivePipelineCase, type CasePipelineFilter, type ViewerContext } from "@/lib/auth/access";
 import {
@@ -93,6 +94,9 @@ function assertTrackerPatchApplied(tracker: TrackerEntry, patch: CaseTablePersis
   }
   if (t.policyLimits !== undefined && tracker.policyLimits !== t.policyLimits) {
     throw new Error("Policy limits did not save.");
+  }
+  if (t.policyCoverage !== undefined && tracker.policyCoverage !== t.policyCoverage) {
+    throw new Error("Policy coverage did not save.");
   }
 }
 
@@ -646,7 +650,6 @@ export function CaseTable({
       ...(key === "liability" ? { liabilityValidatedAt: now } : {}),
       ...(key === "targetResolutionQuarter" ? { targetResolutionQuarterValidatedAt: now } : {}),
       ...(key === "minimumValue" ? { minimumValueValidatedAt: now } : {}),
-      ...(key === "policyLimits" ? { policyLimitsValidatedAt: now } : {}),
     };
 
     if (key === "caseStage" || key === "referralFee" || key === "minimumValue") {
@@ -675,6 +678,27 @@ export function CaseTable({
     );
 
     queuePersist(recordId, persistPatch, { skipMarkSaving: true });
+  }
+
+  function applyTrackerPatch(recordId: string, patch: TrackerUpdateInput) {
+    const record = recordsRef.current.find((entry) => entry.shared.id === recordId);
+    if (!record) return;
+    const tracker: TrackerEntry = { ...record.tracker, ...patch };
+    markRowSaving(recordId);
+    setWorkingRecords((current) =>
+      current.map((entry) => {
+        if (entry.shared.id !== recordId) return entry;
+        return {
+          ...entry,
+          tracker,
+          shared: {
+            ...entry.shared,
+            status: deriveCaseStatusFromTracker(tracker.caseStage, tracker.result),
+          },
+        };
+      }),
+    );
+    queuePersist(recordId, { tracker: patch }, { skipMarkSaving: true });
   }
 
   function buildTrackerPersistPatch<K extends "caseStage" | "targetResolutionQuarter" | "liability" | "minimumValue" | "referralFee" | "policyLimits">(
@@ -754,8 +778,16 @@ export function CaseTable({
           <p className="text-xs text-muted-foreground">Changes save automatically when you update a field. A green checkmark confirms the server accepted the update.</p>
 
           {qualityFilter ? (
-            <div className="rounded-lg border border-pink-200 bg-pink-50 px-4 py-3 text-sm text-navy-950">
-              Dashboard filter: <span className="font-semibold">{getCaseListQualityFilterLabel(qualityFilter)}</span>
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-pink-200 bg-pink-50 px-4 py-3 text-sm text-navy-950">
+              <span>
+                Dashboard filter: <span className="font-semibold">{getCaseListQualityFilterLabel(qualityFilter)}</span>
+                {paralegal !== "all" || attorneyIds.length > 0
+                  ? " — combine with attorney / paralegal column filters as needed."
+                  : null}
+              </span>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setQualityFilter(null)}>
+                Clear
+              </Button>
             </div>
           ) : null}
 
@@ -782,7 +814,7 @@ export function CaseTable({
             <div className="pointer-events-none absolute right-0 top-0 z-30 h-full w-12 bg-gradient-to-l from-white to-transparent" />
             <div
               ref={tableScrollRef}
-              className="max-h-[calc(100vh-23rem)] min-h-[28rem] overflow-auto"
+              className="table-main-scroll max-h-[calc(100vh-23rem)] min-h-[28rem]"
               onScroll={(event) => syncScroll(event, topScrollRef)}
             >
           <Table ref={tableRef} className="min-w-[2284px] table-fixed">
@@ -896,7 +928,7 @@ export function CaseTable({
                 </TableHead>
                 <SortableHead label="Minimum Value" sortKey="minimumValue" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
                 <TableHead className="w-32">Referral Fee</TableHead>
-                <SortableHead label="Policy Limits" sortKey="policyLimits" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
+                <SortableHead label="Policy" sortKey="policyLimits" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-64" />
                 <TableHead className="w-36">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -974,11 +1006,12 @@ export function CaseTable({
                         onCommit={(value) => updateTrackerField(record.shared.id, "referralFee", value)}
                       />
                     </TableCell>
-                    <TableCell>
-                      <InlineNumberInput
-                        prefix="$"
-                        value={record.tracker.policyLimits}
-                        onCommit={(value) => updateTrackerField(record.shared.id, "policyLimits", value)}
+                    <TableCell className="align-top">
+                      <PolicyCoverageFields
+                        compact
+                        tracker={record.tracker}
+                        actorContactId={viewer.contactId}
+                        onPatch={(patch) => applyTrackerPatch(record.shared.id, patch)}
                       />
                     </TableCell>
                     <TableCell>

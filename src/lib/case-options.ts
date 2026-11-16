@@ -215,7 +215,18 @@ export function matchesExpectedLitigationFilter(filter: string, value: ExpectedL
   return value === filter;
 }
 
-export const RELEASE_STATUS_OPTIONS = ["No", "Signed"] satisfies ReleaseStatus[];
+export const RELEASE_STATUS_OPTIONS = [
+  "Not Received",
+  "Pending Edits or Review",
+  "Sent to Client",
+  "Signed by Client",
+  "Returned",
+] satisfies ReleaseStatus[];
+
+/** Release has been signed by the client (or later returned after disbursement). */
+export function isReleaseSignedStage(status: ReleaseStatus | null | undefined) {
+  return status === "Signed by Client" || status === "Returned";
+}
 export const CLOSING_STATUS_OPTIONS = ["No", "Drafted", "Approved", "Signed"] satisfies ClosingStatus[];
 export const CHECK_STATUS_OPTIONS = ["Deposited", "No", "Sent"] satisfies CheckStatus[];
 export const DISBURSED_STATUS_OPTIONS = ["No", "Yes"] satisfies DisbursedStatus[];
@@ -368,7 +379,7 @@ export function applyDerivedWorkflowFromDisburseDate<T extends SettlementResult>
 
   return {
     ...result,
-    releaseStatus: "Signed",
+    releaseStatus: "Returned",
     closingStatus: "Signed",
     checkStatus: "Deposited",
     reductionsStatus: "Approved",

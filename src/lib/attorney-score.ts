@@ -1,6 +1,11 @@
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { EXPECTED_DISBURSEMENT_QUARTER_LABEL } from "@/lib/case-labels";
 import { isActivePipelineCase } from "@/lib/auth/access";
+import {
+  isPolicyCoverageValidationDue,
+  policyCoverageCompletenessOk,
+  policyCoverageRequiresRecurringValidation,
+} from "@/lib/policy-coverage";
 import { daysSince } from "@/lib/utils";
 import { type AttorneyGoal, type CaseRecord } from "@/lib/types";
 
@@ -73,7 +78,7 @@ export function hasCompletenessField(record: CaseRecord, fieldId: CompletenessFi
     case "referralFee":
       return tracker.referralFee != null;
     case "policyLimits":
-      return isNumericFieldSet(tracker.policyLimits);
+      return policyCoverageCompletenessOk(tracker);
     case "policySource":
       return Boolean(tracker.policyInfoSource?.trim());
     default:
@@ -92,19 +97,36 @@ export function hasValidationFieldValue(record: CaseRecord, fieldId: ValidationF
     case "minimumValue":
       return isNumericFieldSet(tracker.minimumValue);
     case "policyLimits":
-      return isNumericFieldSet(tracker.policyLimits);
+      return policyCoverageCompletenessOk(record.tracker);
     default:
       return false;
   }
 }
 
 export function getValidationFieldValidatedAt(record: CaseRecord, fieldId: ValidationFieldId) {
+  if (fieldId === "policyLimits") {
+    return record.tracker.policyCoverageValidatedAt ?? record.tracker.policyLimitsValidatedAt;
+  }
   const field = VALIDATION_FIELDS.find((item) => item.id === fieldId);
   if (!field) return null;
   return record.tracker[field.validatedAtKey];
 }
 
 export function isValidationFieldFresh(record: CaseRecord, fieldId: ValidationFieldId) {
+  if (fieldId === "policyLimits") {
+    const coverage = record.tracker.policyCoverage;
+    if (record.tracker.policyCoverageNeedsClassification) return false;
+    if (!coverage) {
+      // Legacy unclassified: keep prior 90-day policyLimitsValidatedAt behavior.
+      const validatedAt = record.tracker.policyLimitsValidatedAt;
+      if (!validatedAt) return false;
+      return daysSince(validatedAt) < ATTORNEY_SCORE_VALIDATION_DAYS;
+    }
+    if (!policyCoverageRequiresRecurringValidation(coverage)) {
+      return policyCoverageCompletenessOk(record.tracker);
+    }
+    return !isPolicyCoverageValidationDue(record.tracker);
+  }
   const validatedAt = getValidationFieldValidatedAt(record, fieldId);
   if (!validatedAt) return false;
   return daysSince(validatedAt) < ATTORNEY_SCORE_VALIDATION_DAYS;
@@ -118,6 +140,10 @@ export function getOutdatedValidationFields(record: CaseRecord): ValidationField
       const liability = record.tracker.liability?.trim();
       if (!liability) return true;
       if (liability !== "Pending") return false;
+      return !isValidationFieldFresh(record, field.id);
+    }
+    if (field.id === "policyLimits") {
+      if (!hasValidationFieldValue(record, field.id)) return true;
       return !isValidationFieldFresh(record, field.id);
     }
     if (!hasValidationFieldValue(record, field.id)) return true;
@@ -219,9 +245,8 @@ export function buildFieldValidationRowPatch(
   ) {
     patch.minimum_value_validated_at = now;
   }
-  if ("policyLimits" in changeInput && changeInput.policyLimits !== undefined) {
-    patch.policy_limits_validated_at = now;
-  }
+  // Policy coverage revalidation is explicit (confirm action / coverage change handler).
+  // Do not reset the coverage clock when an unrelated field (or bare policyLimits) is saved.
   if ("expectedLitigation" in changeInput && changeInput.expectedLitigation !== undefined) {
     patch.expected_litigation_validated_at = now;
   }
@@ -230,12 +255,10 @@ export function buildFieldValidationRowPatch(
     const liability = mergedInput.liability ?? existingTracker?.liability;
     const quarter = mergedInput.targetResolutionQuarter ?? existingTracker?.targetResolutionQuarter;
     const minimum = mergedInput.minimumValue ?? mergedInput.estimatedSettlementValue ?? existingTracker?.minimumValue;
-    const policyLimits = mergedInput.policyLimits ?? existingTracker?.policyLimits;
 
     if (liability) patch.liability_validated_at = now;
     if (quarter) patch.target_resolution_quarter_validated_at = now;
     if (minimum != null) patch.minimum_value_validated_at = now;
-    if (policyLimits != null) patch.policy_limits_validated_at = now;
   }
 
   return patch;
@@ -256,7 +279,7 @@ export function appendPresentValidationFields<T extends Record<string, unknown>>
   if (tracker.liability?.trim()) next.liability = tracker.liability;
   if (tracker.targetResolutionQuarter?.trim()) next.targetResolutionQuarter = tracker.targetResolutionQuarter;
   if (tracker.minimumValue != null) next.minimumValue = tracker.minimumValue;
-  if (tracker.policyLimits != null) next.policyLimits = tracker.policyLimits;
+  // Do not auto-reconfirm policyLimits on generic Save — coverage uses an explicit action.
   return next as T;
 }
 
@@ -264,7 +287,6 @@ export const INLINE_VALIDATION_CONFIRM_FIELDS = [
   "liability",
   "targetResolutionQuarter",
   "minimumValue",
-  "policyLimits",
 ] as const;
 
 export type InlineValidationConfirmField = (typeof INLINE_VALIDATION_CONFIRM_FIELDS)[number];

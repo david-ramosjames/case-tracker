@@ -25,7 +25,12 @@ export type ExpectedLitigationStatus = "Pre" | "Lit" | "Expect";
 
 export type StageSignalSource = "slack" | "workflow" | "matter_update" | "manual" | "pulse" | "sheet";
 
-export type ReleaseStatus = "No" | "Signed";
+export type ReleaseStatus =
+  | "Not Received"
+  | "Pending Edits or Review"
+  | "Sent to Client"
+  | "Signed by Client"
+  | "Returned";
 export type ClosingStatus = "No" | "Drafted" | "Approved" | "Signed";
 export type CheckStatus = "Deposited" | "No" | "Sent";
 export type DisbursedStatus = "No" | "Yes";
@@ -178,6 +183,17 @@ export type TrackerEntry = {
   referralFeeArrangement: string | null;
   balanceCtaInfo: string | null;
   policyLimits: number | null;
+  /**
+   * no_coverage | pending | coverage_exists | limits_confirmed.
+   * Null = not yet classified (legacy rows may also set policyCoverageNeedsClassification).
+   */
+  policyCoverage: "no_coverage" | "pending" | "coverage_exists" | "limits_confirmed" | null;
+  policyCoverageValidatedAt: string | null;
+  policyCoverageValidatedBy: string | null;
+  policyCoverageNextDueAt: string | null;
+  policyVerificationNotes: string | null;
+  /** Legacy amount present but coverage status not safely inferred. */
+  policyCoverageNeedsClassification: boolean;
   policyInfoSource: string | null;
   expectedLitigation: ExpectedLitigationStatus | null;
   sources: string;
@@ -387,6 +403,12 @@ export type TrackerUpdateInput = Partial<
     | "referralFeeArrangement"
     | "balanceCtaInfo"
     | "policyLimits"
+    | "policyCoverage"
+    | "policyCoverageValidatedAt"
+    | "policyCoverageValidatedBy"
+    | "policyCoverageNextDueAt"
+    | "policyVerificationNotes"
+    | "policyCoverageNeedsClassification"
     | "policyInfoSource"
     | "expectedLitigation"
     | "sources"
@@ -439,5 +461,6 @@ export type DashboardMetrics = {
   casesNotReviewedRecently: number;
   casesNeedingQuarterlyCheckIn: number;
   casesWithOutdatedValidation: number;
+  casesNeedingPolicyRevalidation: number;
   stageSuggestionsOpen: number;
 };

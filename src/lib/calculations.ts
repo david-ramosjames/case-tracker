@@ -1,5 +1,6 @@
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { getOutdatedValidationFields, getValidationFieldLabel } from "@/lib/attorney-score";
+import { matchesPolicyRevalidationFilter, policyCoverageCompletenessOk } from "@/lib/policy-coverage";
 import { getAttorneyCommissionStartMonth, isActivePipelineCase } from "@/lib/auth/access";
 import {
   getCurrentFirmOutperformGoal,
@@ -87,8 +88,14 @@ export function getDataQualityFlags(
     flags.push({ id: "missing-balance-cta", label: "Missing balance/CTA info", severity: "warning" });
   }
 
-  if (tracker.policyLimits == null) {
-    flags.push({ id: "missing-policy-limits", label: "Missing policy limits", severity: "warning" });
+  if (!policyCoverageCompletenessOk(tracker)) {
+    flags.push({
+      id: "missing-policy-limits",
+      label: tracker.policyCoverageNeedsClassification
+        ? "Policy coverage needs classification"
+        : "Missing policy coverage / limits",
+      severity: "warning",
+    });
   }
 
   if (!tracker.policyInfoSource) {
@@ -152,7 +159,7 @@ export function getCaseCompletionChecks(record: CaseRecord): CompletionCheck[] {
     { id: "case-type", complete: Boolean(shared.caseType?.trim()) },
     { id: "minimum", complete: tracker.minimumValue != null },
     { id: "quarter", complete: Boolean(tracker.targetResolutionQuarter?.trim()) },
-    { id: "policy-limits", complete: tracker.policyLimits != null },
+    { id: "policy-limits", complete: policyCoverageCompletenessOk(tracker) },
     { id: "policy-source", complete: Boolean(tracker.policyInfoSource?.trim()) },
     { id: "referral", complete: Boolean(tracker.referralFeeArrangement?.trim()) },
     { id: "balance-cta", complete: Boolean(tracker.balanceCtaInfo?.trim()) },
@@ -222,6 +229,9 @@ export function getDashboardMetrics(
     casesNotReviewedRecently: activeRecords.filter((record) => isStale(record, settings)).length,
     casesNeedingQuarterlyCheckIn: activeRecords.filter(needsQuarterlyCheckIn).length,
     casesWithOutdatedValidation: activeRecords.filter((record) => getOutdatedValidationFields(record).length > 0).length,
+    casesNeedingPolicyRevalidation: activeRecords.filter((record) =>
+      matchesPolicyRevalidationFilter(record.tracker),
+    ).length,
     stageSuggestionsOpen: records.reduce((total, record) => total + getOpenStageSuggestions(record).length, 0),
   };
 }

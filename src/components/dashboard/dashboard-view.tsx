@@ -83,6 +83,14 @@ export function DashboardView({
           value={String(metrics.casesWithOutdatedValidation)}
           detail="Liability, quarter, minimum, or policy limits >90d"
         />
+        <MetricCard
+          href="/cases?filter=policy-revalidation&status=Active"
+          icon={TimerReset}
+          label="Policy revalidation due"
+          value={String(metrics.casesNeedingPolicyRevalidation)}
+          detail="Pending / Coverage Exists past 90 days, or legacy amount to classify"
+          alert={metrics.casesNeedingPolicyRevalidation > 0}
+        />
       </MetricSection>
 
       <MetricSection title="Contact">

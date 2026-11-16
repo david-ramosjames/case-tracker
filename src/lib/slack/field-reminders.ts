@@ -37,8 +37,8 @@ export const FIELD_REMINDER_META: Record<
     shortPrompt: "Confirm the minimum case value, or reply with an update.",
   },
   policyLimits: {
-    label: "Policy limits",
-    shortPrompt: "Confirm policy limits are still accurate, or reply with an update.",
+    label: "Policy coverage",
+    shortPrompt: "Confirm policy coverage / assumed limits are still accurate, or reply with an update.",
   },
   expectedLitigation: {
     label: "Expected litigation",
@@ -180,7 +180,12 @@ export function fieldReminderValidationPatch(fieldKey: FieldReminderKey, now: st
     case "minimumValue":
       return { minimum_value_validated_at: now };
     case "policyLimits":
-      return { policy_limits_validated_at: now };
+      return {
+        policy_limits_validated_at: now,
+        policy_coverage_validated_at: now,
+        // Next due is set in app when coverage status is Pending / Coverage Exists;
+        // leave next_due_at alone here so Slack confirm does not invent a schedule.
+      };
     case "expectedLitigation":
       return { expected_litigation_validated_at: now };
     default:

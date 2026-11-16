@@ -1236,7 +1236,7 @@ export async function resetSettlementFinancialBackfill(): Promise<SettlementFina
           disbursed_status: "No",
           check_status: "No",
           result_quarter: null,
-          release_status: "No",
+          release_status: "Not Received",
           closing_status: "No",
           reductions_status: "Not Complete",
         })
@@ -1741,7 +1741,7 @@ async function recomputeCaseResultFromDisbursements(
     const { error } = await admin.from("case_tracker_results").insert({
       case_id: linkedDocketFlowCaseId(trackerRow),
       tracker_entry_id: input.trackerEntryId,
-      release_status: "No",
+      release_status: "Not Received",
       closing_status: "No",
       check_status: "No",
       ...resultPayload,
@@ -2536,7 +2536,7 @@ export async function syncSettlementsFromSheet(
       result_quarter: resolvedResultQuarter,
       ...(openCaseFromSheet
         ? {
-            release_status: "No" as const,
+            release_status: "Not Received" as const,
             closing_status: "No" as const,
             check_status: "No" as const,
             release_signed_at: null,
@@ -3635,6 +3635,23 @@ function rowToTrackerEntry(
     referralFeeArrangement: toStringOrNull(row.referral_fee_arrangement),
     balanceCtaInfo: toStringOrNull(row.balance_cta_info),
     policyLimits: toNumber(row.policy_limits),
+    policyCoverage: (() => {
+      const raw = toStringOrNull(row.policy_coverage);
+      if (
+        raw === "no_coverage" ||
+        raw === "pending" ||
+        raw === "coverage_exists" ||
+        raw === "limits_confirmed"
+      ) {
+        return raw;
+      }
+      return null;
+    })(),
+    policyCoverageValidatedAt: toStringOrNull(row.policy_coverage_validated_at),
+    policyCoverageValidatedBy: toStringOrNull(row.policy_coverage_validated_by),
+    policyCoverageNextDueAt: toStringOrNull(row.policy_coverage_next_due_at)?.slice(0, 10) ?? null,
+    policyVerificationNotes: toStringOrNull(row.policy_verification_notes),
+    policyCoverageNeedsClassification: toBoolean(row.policy_coverage_needs_classification, false),
     policyInfoSource: toStringOrNull(row.policy_info_source),
     expectedLitigation: normalizeExpectedLitigation(toStringOrNull(row.expected_litigation)),
     sources: toString(row.sources, ""),
@@ -3806,6 +3823,22 @@ function trackerUpdateToRow(input: TrackerUpdateInput, markReviewed = true) {
   if (input.referralFeeArrangement !== undefined) row.referral_fee_arrangement = input.referralFeeArrangement;
   if (input.balanceCtaInfo !== undefined) row.balance_cta_info = input.balanceCtaInfo;
   if (input.policyLimits !== undefined) row.policy_limits = input.policyLimits;
+  if (input.policyCoverage !== undefined) row.policy_coverage = input.policyCoverage;
+  if (input.policyCoverageValidatedAt !== undefined) {
+    row.policy_coverage_validated_at = input.policyCoverageValidatedAt;
+  }
+  if (input.policyCoverageValidatedBy !== undefined) {
+    row.policy_coverage_validated_by = input.policyCoverageValidatedBy;
+  }
+  if (input.policyCoverageNextDueAt !== undefined) {
+    row.policy_coverage_next_due_at = input.policyCoverageNextDueAt;
+  }
+  if (input.policyVerificationNotes !== undefined) {
+    row.policy_verification_notes = input.policyVerificationNotes;
+  }
+  if (input.policyCoverageNeedsClassification !== undefined) {
+    row.policy_coverage_needs_classification = input.policyCoverageNeedsClassification;
+  }
   if (input.policyInfoSource !== undefined) row.policy_info_source = input.policyInfoSource;
   if (input.expectedLitigation !== undefined) row.expected_litigation = toDatabaseExpectedLitigation(input.expectedLitigation);
   if (input.sources !== undefined) row.sources = input.sources;
@@ -4060,7 +4093,18 @@ export function normalizeExpectedLitigation(value: string | null | undefined): E
 }
 
 function normalizeReleaseStatus(value: string | null | undefined, signedAt: string | null): ReleaseStatus {
-  return value === "Signed" || signedAt ? "Signed" : "No";
+  if (
+    value === "Not Received" ||
+    value === "Pending Edits or Review" ||
+    value === "Sent to Client" ||
+    value === "Signed by Client" ||
+    value === "Returned"
+  ) {
+    return value;
+  }
+  // Legacy No / Signed (and signed timestamp without a status).
+  if (value === "Signed" || Boolean(signedAt)) return "Signed by Client";
+  return "Not Received";
 }
 
 function normalizeClosingStatus(value: string | null | undefined, signedAt: string | null): ClosingStatus {
