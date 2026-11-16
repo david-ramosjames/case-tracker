@@ -7,6 +7,8 @@ import {
 } from "@/lib/performance/access";
 import {
   createDeliverable,
+  DuplicateDeliverableError,
+  formatDuplicateDeliverableMessage,
   listAllOpenDeliverables,
   listDeliverablesForAssignee,
   listDeliverablesForPerson,
@@ -103,6 +105,17 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ deliverable });
   } catch (error) {
+    if (error instanceof DuplicateDeliverableError) {
+      const users = await getUsers();
+      const nameById = Object.fromEntries(users.map((u) => [u.id, u.name]));
+      return NextResponse.json(
+        {
+          error: formatDuplicateDeliverableMessage(error.existing, nameById),
+          duplicateId: error.existing.id,
+        },
+        { status: 409 },
+      );
+    }
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
   }
 }

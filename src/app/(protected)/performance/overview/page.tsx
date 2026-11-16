@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function PerformanceOverviewPage() {
   const sessionUser = await requireSessionUser();
-  if (!canViewPerformanceOverview(sessionUser.role)) redirect("/performance/my-work");
+  if (!canViewPerformanceOverview(sessionUser.role)) redirect("/performance/identify");
 
   const { records, goals, users } = await loadViewerCaseBundle();
   const assumptions = await getPerformanceAssumptions();

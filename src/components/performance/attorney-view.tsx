@@ -79,6 +79,7 @@ export function AttorneyView({
       {tab === "output" ? (
         <MyWorkView
           mode="attorney"
+          panel="board"
           initialDeliverables={initialDeliverables}
           initialCommitments={initialCommitments}
           weekStart={weekStart}
@@ -89,6 +90,8 @@ export function AttorneyView({
           people={attorneys}
           caseOptions={caseOptions}
           nameById={nameById}
+          basePath="/performance/attorney"
+          personSwitcherLabel="Attorney"
         />
       ) : (
         <div className="space-y-6">

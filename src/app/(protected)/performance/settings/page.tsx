@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 
 export default async function PerformanceSettingsPage() {
   const sessionUser = await requireSessionUser();
-  if (!canManagePerformanceTargets(sessionUser.role)) redirect("/performance/my-work");
+  if (!canManagePerformanceTargets(sessionUser.role)) redirect("/performance/identify");
   const [assumptions, targets, users, staffDates, pairs] = await Promise.all([
     getPerformanceAssumptions(),
     listPerformanceTargets(),

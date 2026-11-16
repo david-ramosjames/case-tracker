@@ -39,6 +39,8 @@ type CaseOption = {
 
 type Props = {
   mode?: "paralegal" | "attorney";
+  /** identify = entry form + new this week; board = full Finished/Committed/In progress lists */
+  panel?: "identify" | "board";
   initialDeliverables: PerformanceDeliverable[];
   initialCommitments: PerformanceCommitment[];
   weekStart: string;
@@ -49,6 +51,8 @@ type Props = {
   people: AppUser[];
   caseOptions: CaseOption[];
   nameById: Record<string, string>;
+  basePath?: string;
+  personSwitcherLabel?: string;
 };
 
 type CreateDestination = "backlog" | "this_week" | "last_week";
@@ -69,6 +73,7 @@ function lastWeekCompletedAt(lastWeekStart: string) {
 
 export function MyWorkView({
   mode = "paralegal",
+  panel = "board",
   initialDeliverables,
   initialCommitments,
   weekStart,
@@ -79,8 +84,13 @@ export function MyWorkView({
   people,
   caseOptions,
   nameById,
+  basePath,
+  personSwitcherLabel,
 }: Props) {
   const isAttorney = mode === "attorney";
+  const switcherPath = basePath ?? (isAttorney ? "/performance/attorney" : "/performance/my-work");
+  const switcherLabel =
+    personSwitcherLabel ?? (isAttorney ? "Attorney" : "Paralegal");
   const [deliverables, setDeliverables] = useState(initialDeliverables);
   const [commitments, setCommitments] = useState(initialCommitments);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -139,6 +149,14 @@ export function MyWorkView({
   const backlog = useMemo(
     () => deliverables.filter((d) => d.workflowStatus === "backlog"),
     [deliverables],
+  );
+
+  const newEntriesThisWeek = useMemo(
+    () =>
+      deliverables
+        .filter((d) => inWeek(d.identifiedAt, weekStart))
+        .sort((a, b) => (b.identifiedAt ?? "").localeCompare(a.identifiedAt ?? "")),
+    [deliverables, weekStart],
   );
 
   async function refresh() {
@@ -443,6 +461,158 @@ export function MyWorkView({
 
   const creating = busyId?.startsWith("create:") ?? false;
 
+  const identifyForm = (
+    <Card>
+      <CardHeader>
+        <CardTitle>Identify work</CardTitle>
+        <CardDescription>
+          {isAttorney ? "Attorney" : "Paralegal"} entry for{" "}
+          {selectedPerson?.name ?? "selected person"}. Duplicate check runs across everyone — if the same item
+          already exists, creation is blocked.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <div className="md:col-span-2 lg:col-span-1">
+          <CasePicker
+            cases={visibleCases}
+            value={form.caseId}
+            onChange={(caseId) => setForm((f) => ({ ...f, caseId }))}
+            coverOthers={coverOthers}
+            onCoverOthersChange={(next) => {
+              setCoverOthers(next);
+              setForm((f) => ({ ...f, caseId: "" }));
+            }}
+            mineLabel="Showing my cases"
+            coverLabel="Showing all cases (cover)"
+          />
+        </div>
+        {isAttorney ? (
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Type</span>
+            <select
+              className="w-full rounded-md border px-3 py-2"
+              value={form.deliverableType}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  deliverableType: e.target.value as PerformanceDeliverableType,
+                }))
+              }
+            >
+              {ATTORNEY_OUTPUT_TYPES.map((t) => (
+                <option key={t.key} value={t.key}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <>
+            <label className="space-y-1 text-sm">
+              <span className="font-medium">Category</span>
+              <select
+                className="w-full rounded-md border px-3 py-2"
+                value={form.category}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    category: e.target.value as ParalegalCategoryKey,
+                    litEventKind: "",
+                    depoParty: "",
+                  }))
+                }
+              >
+                {PARALEGAL_CATEGORIES.map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {form.category === "lit_event_scheduled" ? (
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Litigation event</span>
+                <select
+                  className="w-full rounded-md border px-3 py-2"
+                  value={form.litEventKind}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      litEventKind: e.target.value as LitEventKind | "",
+                      depoParty: "",
+                    }))
+                  }
+                >
+                  <option value="">Select…</option>
+                  {LIT_EVENT_KINDS.map((t) => (
+                    <option key={t.key} value={t.key}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+            {form.category === "lit_event_scheduled" && form.litEventKind === "deposition" ? (
+              <label className="space-y-1 text-sm">
+                <span className="font-medium">Deposition party</span>
+                <select
+                  className="w-full rounded-md border px-3 py-2"
+                  value={form.depoParty}
+                  onChange={(e) => setForm((f) => ({ ...f, depoParty: e.target.value }))}
+                >
+                  <option value="">Select…</option>
+                  {DEPOSITION_PARTY_ROLES.map((role) => (
+                    <option key={role} value={role}>
+                      {role}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
+          </>
+        )}
+        <label className="space-y-1 text-sm">
+          <span className="font-medium">Requested date</span>
+          <Input
+            type="date"
+            value={form.requestedCompletionDate}
+            onChange={(e) => setForm((f) => ({ ...f, requestedCompletionDate: e.target.value }))}
+          />
+        </label>
+        <label className="space-y-1 text-sm md:col-span-2 lg:col-span-3">
+          <span className="font-medium">Notes</span>
+          <Input
+            value={form.notes}
+            onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+            placeholder="Further details"
+          />
+        </label>
+        <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-3">
+          <Button
+            variant="outline"
+            disabled={creating || !form.caseId}
+            onClick={() => void createItem("backlog")}
+          >
+            {busyId === "create:backlog" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Add to in progress
+          </Button>
+          <Button disabled={creating || !form.caseId} onClick={() => void createItem("this_week")}>
+            {busyId === "create:this_week" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Add to this week
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={creating || !form.caseId}
+            onClick={() => void createItem("last_week")}
+          >
+            {busyId === "create:last_week" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Add to completed last week
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  );
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -452,198 +622,76 @@ export function MyWorkView({
             {viewerContactId && selectedPerson?.id === viewerContactId ? " (you)" : ""}
           </h2>
           <p className="text-sm text-muted-foreground">
-            Week of {weekStart} · {isAttorney ? "attorney output" : "paralegal weekly check"}
+            Week of {weekStart} ·{" "}
+            {panel === "identify"
+              ? isAttorney
+                ? "attorney identify"
+                : "paralegal identify"
+              : isAttorney
+                ? "attorney board"
+                : "paralegal board"}
           </p>
         </div>
         {canBrowsePeople ? (
           <PersonSwitcher
             people={people}
             selectedId={selectedPerson?.id ?? null}
-            basePath={isAttorney ? "/performance/attorney" : "/performance/my-work"}
-            label={isAttorney ? "Attorney" : "Paralegal"}
+            basePath={switcherPath}
+            label={switcherLabel}
           />
         ) : null}
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Completed last week</CardTitle>
-          <CardDescription>
-            Week of {lastWeekStart} — bring this list to the Monday 9:30 check. Pair totals roll up on Team.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">{renderWorkTable(finishedLastWeek, "finished")}</CardContent>
-      </Card>
+      {panel === "identify" ? (
+        <>
+          {identifyForm}
+          {error ? <p className="text-sm text-rose-700">{error}</p> : null}
+          <Card>
+            <CardHeader>
+              <CardTitle>New entries this week</CardTitle>
+              <CardDescription>
+                Items identified on this board during the week of {weekStart}. Full Finished / Committed / In
+                progress lists live on the Paralegal and Attorney tabs.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              {renderWorkTable(newEntriesThisWeek, "thisWeek")}
+            </CardContent>
+          </Card>
+        </>
+      ) : (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Finished last week</CardTitle>
+              <CardDescription>
+                Week of {lastWeekStart} — bring this list to the Monday 9:30 check. Pair totals roll up on Team.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">{renderWorkTable(finishedLastWeek, "finished")}</CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Committed for this week</CardTitle>
-          <CardDescription>Work expected to finish in the current week.</CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">{renderWorkTable(thisWeekCommitted, "thisWeek")}</CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Committed for this week</CardTitle>
+              <CardDescription>Full list of work expected to finish in the current week.</CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">{renderWorkTable(thisWeekCommitted, "thisWeek")}</CardContent>
+          </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Identify work</CardTitle>
-          <CardDescription>
-            Pick a case (yours by default, ordered by case #). Add to in progress for future weeks, commit for this
-            week, or log as completed last week.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          <div className="md:col-span-2 lg:col-span-1">
-            <CasePicker
-              cases={visibleCases}
-              value={form.caseId}
-              onChange={(caseId) => setForm((f) => ({ ...f, caseId }))}
-              coverOthers={coverOthers}
-              onCoverOthersChange={(next) => {
-                setCoverOthers(next);
-                setForm((f) => ({ ...f, caseId: "" }));
-              }}
-              mineLabel="Showing my cases"
-              coverLabel="Showing all cases (cover)"
-            />
-          </div>
-          {isAttorney ? (
-            <label className="space-y-1 text-sm">
-              <span className="font-medium">Type</span>
-              <select
-                className="w-full rounded-md border px-3 py-2"
-                value={form.deliverableType}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    deliverableType: e.target.value as PerformanceDeliverableType,
-                  }))
-                }
-              >
-                {ATTORNEY_OUTPUT_TYPES.map((t) => (
-                  <option key={t.key} value={t.key}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <>
-              <label className="space-y-1 text-sm">
-                <span className="font-medium">Category</span>
-                <select
-                  className="w-full rounded-md border px-3 py-2"
-                  value={form.category}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      category: e.target.value as ParalegalCategoryKey,
-                      litEventKind: "",
-                      depoParty: "",
-                    }))
-                  }
-                >
-                  {PARALEGAL_CATEGORIES.map((t) => (
-                    <option key={t.key} value={t.key}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {form.category === "lit_event_scheduled" ? (
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium">Litigation event</span>
-                  <select
-                    className="w-full rounded-md border px-3 py-2"
-                    value={form.litEventKind}
-                    onChange={(e) =>
-                      setForm((f) => ({
-                        ...f,
-                        litEventKind: e.target.value as LitEventKind | "",
-                        depoParty: "",
-                      }))
-                    }
-                  >
-                    <option value="">Select…</option>
-                    {LIT_EVENT_KINDS.map((t) => (
-                      <option key={t.key} value={t.key}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-              {form.category === "lit_event_scheduled" && form.litEventKind === "deposition" ? (
-                <label className="space-y-1 text-sm">
-                  <span className="font-medium">Deposition party</span>
-                  <select
-                    className="w-full rounded-md border px-3 py-2"
-                    value={form.depoParty}
-                    onChange={(e) => setForm((f) => ({ ...f, depoParty: e.target.value }))}
-                  >
-                    <option value="">Select…</option>
-                    {DEPOSITION_PARTY_ROLES.map((role) => (
-                      <option key={role} value={role}>
-                        {role}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ) : null}
-            </>
-          )}
-          <label className="space-y-1 text-sm">
-            <span className="font-medium">Requested date</span>
-            <Input
-              type="date"
-              value={form.requestedCompletionDate}
-              onChange={(e) => setForm((f) => ({ ...f, requestedCompletionDate: e.target.value }))}
-            />
-          </label>
-          <label className="space-y-1 text-sm md:col-span-2 lg:col-span-3">
-            <span className="font-medium">Notes</span>
-            <Input
-              value={form.notes}
-              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              placeholder="Further details"
-            />
-          </label>
-          <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-3">
-            <Button
-              variant="outline"
-              disabled={creating || !form.caseId}
-              onClick={() => void createItem("backlog")}
-            >
-              {busyId === "create:backlog" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Add to in progress
-            </Button>
-            <Button disabled={creating || !form.caseId} onClick={() => void createItem("this_week")}>
-              {busyId === "create:this_week" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Add to this week
-            </Button>
-            <Button
-              variant="secondary"
-              disabled={creating || !form.caseId}
-              onClick={() => void createItem("last_week")}
-            >
-              {busyId === "create:last_week" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Add to completed last week
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+          {error ? <p className="text-sm text-rose-700">{error}</p> : null}
 
-      {error ? <p className="text-sm text-rose-700">{error}</p> : null}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>In progress for future weeks</CardTitle>
-          <CardDescription>
-            Active work that will not finish this week. Move items to this week when they are ready to complete, or
-            mark them completed last week when appropriate.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="overflow-x-auto">{renderWorkTable(backlog, "backlog")}</CardContent>
-      </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>In progress for future weeks</CardTitle>
+              <CardDescription>
+                Full backlog of active work that will not finish this week. Add new items on Identify Work.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">{renderWorkTable(backlog, "backlog")}</CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

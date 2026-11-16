@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 export default async function PerformanceHistoryPage() {
   const sessionUser = await requireSessionUser();
-  if (!canViewPerformanceHistory(sessionUser.role)) redirect("/performance/my-work");
+  if (!canViewPerformanceHistory(sessionUser.role)) redirect("/performance/identify");
   const users = await getUsers();
   return <HistoryView users={users} initialWeekStart={weekStartMondayCt()} />;
 }

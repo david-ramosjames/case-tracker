@@ -57,6 +57,8 @@ export default async function PerformanceParalegalsPage({
 
   return (
     <MyWorkView
+      mode="paralegal"
+      panel="board"
       initialDeliverables={deliverables}
       initialCommitments={commitments}
       weekStart={weekStart}
@@ -67,6 +69,8 @@ export default async function PerformanceParalegalsPage({
       people={paralegals}
       caseOptions={caseOptions}
       nameById={nameById}
+      basePath="/performance/my-work"
+      personSwitcherLabel="Paralegal"
     />
   );
 }

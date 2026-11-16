@@ -82,12 +82,90 @@ async function appendEvent(input: {
   });
 }
 
+/** Open backlog/committed row with the same case + type + identity (cross-person dupes). */
+export async function findOpenDuplicateDeliverable(input: {
+  caseId: string | null | undefined;
+  deliverableType: string;
+  identityKey: string;
+}): Promise<PerformanceDeliverable | null> {
+  if (!input.caseId) return null;
+  const client = await createPerformanceClient();
+  const { data, error } = await client
+    .from("performance_deliverables")
+    .select("*")
+    .eq("case_id", input.caseId)
+    .eq("deliverable_type", input.deliverableType)
+    .eq("identity_key", input.identityKey)
+    .in("workflow_status", ["backlog", "committed"])
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToDeliverable(data as UnknownRow) : null;
+}
+
+export class DuplicateDeliverableError extends Error {
+  existing: PerformanceDeliverable;
+
+  constructor(existing: PerformanceDeliverable, detail?: string) {
+    const status =
+      existing.workflowStatus === "committed"
+        ? "committed for this week"
+        : existing.workflowStatus === "backlog"
+          ? "in progress"
+          : existing.workflowStatus;
+    super(
+      detail ??
+        `Same item already exists on case ${existing.caseNumber} as ${status}. Do not create a duplicate.`,
+    );
+    this.name = "DuplicateDeliverableError";
+    this.existing = existing;
+  }
+}
+
+export function formatDuplicateDeliverableMessage(
+  existing: PerformanceDeliverable,
+  nameById: Record<string, string>,
+) {
+  const status =
+    existing.workflowStatus === "committed"
+      ? "committed for this week"
+      : existing.workflowStatus === "backlog"
+        ? "in progress"
+        : existing.workflowStatus;
+  const identified =
+    existing.identifiedBy && nameById[existing.identifiedBy]
+      ? nameById[existing.identifiedBy]
+      : null;
+  const assignee =
+    existing.assigneeUserId && nameById[existing.assigneeUserId]
+      ? nameById[existing.assigneeUserId]
+      : null;
+  const attorney =
+    existing.attorneyUserId && nameById[existing.attorneyUserId]
+      ? nameById[existing.attorneyUserId]
+      : null;
+  const who = identified
+    ? `Identified by ${identified}`
+    : [assignee && `paralegal ${assignee}`, attorney && `attorney ${attorney}`]
+        .filter(Boolean)
+        .join(" / ") || "someone else";
+  return `Same item already exists on case ${existing.caseNumber} as ${status} (${who}). Do not create a duplicate.`;
+}
+
 /** Create deliverable in backlog — does not create a weekly commitment. Never mutates case status. */
 export async function createDeliverable(
   input: CreateDeliverableInput,
   actorUserId?: string | null,
 ): Promise<PerformanceDeliverable> {
   const { identityKey, identityLabel } = identityFromCreateInput(input);
+  const existing = await findOpenDuplicateDeliverable({
+    caseId: input.caseId,
+    deliverableType: input.deliverableType,
+    identityKey,
+  });
+  if (existing) {
+    throw new DuplicateDeliverableError(existing);
+  }
+
   const client = await createPerformanceClient();
   const { data, error } = await client
     .from("performance_deliverables")
@@ -116,6 +194,12 @@ export async function createDeliverable(
 
   if (error) {
     if (error.code === "23505") {
+      const raced = await findOpenDuplicateDeliverable({
+        caseId: input.caseId,
+        deliverableType: input.deliverableType,
+        identityKey,
+      });
+      if (raced) throw new DuplicateDeliverableError(raced);
       throw new Error("An open deliverable with this identity already exists on the case.");
     }
     throw error;
