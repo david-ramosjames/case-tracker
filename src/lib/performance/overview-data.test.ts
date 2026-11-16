@@ -125,4 +125,37 @@ describe("collectSettledUndisbursed", () => {
     assert.equal(rows[0]?.daysOutstanding, 30);
     assert.equal(rows[0]?.clientName, "Krystal Garcia");
   });
+
+  it("excludes parties when case is not Settled (column G not Y), e.g. 782", () => {
+    const rows = collectSettledUndisbursed(
+      [
+        record({
+          caseNumber: "782",
+          clientName: "Nathaniel Vasquez",
+          caseStage: "Treatment",
+          settlementDate: "2024-04-29",
+          disbursements: [
+            party({
+              id: "bi",
+              partyLabel: "Nathaniel Vasquez - BI",
+              settlementDate: "2024-04-10",
+              pendingRemaining: false,
+              attorneyFees: 0,
+            }),
+            party({
+              id: "uim",
+              partyLabel: "Nathaniel Vasquez - UIM",
+              settlementDate: "2024-04-29",
+              pendingRemaining: false,
+              attorneyFees: 0,
+            }),
+          ],
+        }),
+      ],
+      new Map([["atty-1", "Jesus Zuniga"]]),
+      "2026-11-15",
+    );
+
+    assert.equal(rows.length, 0);
+  });
 });

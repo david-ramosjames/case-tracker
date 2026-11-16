@@ -19,8 +19,9 @@ function isPartyDisbursed(party: CaseDisbursement): boolean {
 
 /**
  * Outstanding aging is per individual/party, not case-level.
- * A co-party without their own settlement date does not get days (and does not
- * keep the matter on the list via the case settlement date).
+ * Requires Settled stage (sheet column G = Y / full settlement) — same gate as
+ * stage sync. Party settlement dates alone do not qualify (e.g. 782 Treatment).
+ * A co-party without their own settlement date does not get days.
  */
 export function collectSettledUndisbursed(
   records: CaseRecord[],
@@ -29,6 +30,9 @@ export function collectSettledUndisbursed(
 ): SettledUndisbursedCase[] {
   const rows: Omit<SettledUndisbursedCase, "daysOutstanding">[] = [];
   for (const record of records) {
+    // Column G Y → Settled. Without that, party H dates are not outstanding yet.
+    if (record.tracker.caseStage !== "Settled") continue;
+
     const attorneyName = usersById.get(record.shared.attorneyId) ?? "—";
 
     if (record.tracker.disbursements.length > 0) {
@@ -48,7 +52,6 @@ export function collectSettledUndisbursed(
       continue;
     }
 
-    if (record.tracker.caseStage !== "Settled") continue;
     if (isCaseFullyDisbursed(record.tracker.result)) continue;
     const settlementDate = record.tracker.result.settlementDate;
     if (!settlementDate) continue;
