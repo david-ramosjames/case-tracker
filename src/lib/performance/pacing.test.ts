@@ -7,7 +7,7 @@ import {
 } from "./pacing";
 
 describe("performance pacing", () => {
-  it("projects signed cases linearly", () => {
+  it("projects signed cases linearly using completed days (today incomplete)", () => {
     const result = computeSignedCasePacing({
       signedMtd: 12,
       year: 2026,
@@ -15,10 +15,27 @@ describe("performance pacing", () => {
       dayOfMonth: 10,
       monthlyGoal: 40,
     });
+    // Nov 10 → 9 completed days: 12/9*30 = 40
     assert.equal(result.daysInMonth, 30);
-    assert.equal(result.projectedMonthEnd, 36);
-    assert.equal(result.projectedAttainment, 0.9);
-    assert.equal(result.variance, -4);
+    assert.equal(result.daysElapsed, 9);
+    assert.equal(result.projectedMonthEnd, 40);
+    assert.equal(result.projectedAttainment, 1);
+    assert.equal(result.variance, 0);
+  });
+
+  it("paces Nov 16 MTD as 15 completed days", () => {
+    const result = computeSignedCasePacing({
+      signedMtd: 24,
+      year: 2026,
+      month1to12: 11,
+      dayOfMonth: 16,
+      monthlyGoal: 40,
+    });
+    // 24/15*30 = 48; variance +8 vs goal 40 → 120%
+    assert.equal(result.daysElapsed, 15);
+    assert.equal(result.projectedMonthEnd, 48);
+    assert.equal(result.projectedAttainment, 1.2);
+    assert.equal(result.variance, 8);
   });
 
   it("excludes settled cases that cannot disburse before quarter end", () => {

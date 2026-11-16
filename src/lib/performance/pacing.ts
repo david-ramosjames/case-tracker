@@ -10,7 +10,11 @@ export type SignedCasePacing = {
   variance: number | null;
 };
 
-/** Jon's linear monthly signed-case pacing. */
+/**
+ * Jon's linear monthly signed-case pacing.
+ * Today counts as incomplete, so rate uses completed prior days only
+ * (e.g. Nov 16 → 15 days): signed / completed × daysInMonth.
+ */
 export function computeSignedCasePacing(input: {
   signedMtd: number;
   year: number;
@@ -19,7 +23,9 @@ export function computeSignedCasePacing(input: {
   monthlyGoal: number;
 }): SignedCasePacing {
   const dim = daysInMonth(input.year, input.month1to12);
-  const daysElapsed = Math.max(1, Math.min(input.dayOfMonth, dim));
+  const cappedDay = Math.max(1, Math.min(input.dayOfMonth, dim));
+  // Exclude today until the day is over (day 1 still uses 1 so we have a rate).
+  const daysElapsed = Math.max(1, cappedDay - 1);
   const projectedMonthEnd =
     daysElapsed > 0 ? (input.signedMtd / daysElapsed) * dim : null;
   const projectedAttainment =
