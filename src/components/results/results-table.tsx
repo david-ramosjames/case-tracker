@@ -45,7 +45,8 @@ import {
   type TrackerEntry,
 } from "@/lib/types";
 import { cn, formatCurrency } from "@/lib/utils";
-import { useEffect, useMemo, useRef, useState, type RefObject, type UIEvent } from "react";
+import { createSyncedHorizontalScroll } from "@/lib/ui/synced-horizontal-scroll";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 type SortKey = "completion" | "caseNumber" | "clientName" | "settlementDate" | "settlementAmount" | "attorneyFees";
 type SortDirection = "asc" | "desc";
@@ -126,6 +127,7 @@ export function ResultsTable({
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const [scrollWidth, setScrollWidth] = useState(2380);
+  const syncScroll = useMemo(() => createSyncedHorizontalScroll(), []);
 
   useEffect(() => {
     setDisbursed(initialDisbursed);
@@ -243,12 +245,6 @@ export function ResultsTable({
     window.addEventListener("resize", updateScrollWidth);
     return () => window.removeEventListener("resize", updateScrollWidth);
   }, [filteredRecords.length]);
-
-  function syncScroll(event: UIEvent<HTMLDivElement>, targetRef: RefObject<HTMLDivElement | null>) {
-    if (targetRef.current && targetRef.current.scrollLeft !== event.currentTarget.scrollLeft) {
-      targetRef.current.scrollLeft = event.currentTarget.scrollLeft;
-    }
-  }
 
   function clearFilters() {
     setCaseStatus("Active");
@@ -447,13 +443,13 @@ export function ResultsTable({
         </p>
 
         <div className="mt-4 rounded-lg border bg-white">
-          <div className="border-b bg-muted/40 px-4 py-2">
+          <div className="border-b bg-muted/40 px-3 py-1.5">
             <div
               ref={topScrollRef}
-              className="overflow-x-auto rounded-full border bg-white"
+              className="table-top-h-scroll"
               onScroll={(event) => syncScroll(event, tableScrollRef)}
             >
-              <div style={{ width: scrollWidth, height: 12 }} />
+              <div style={{ width: scrollWidth, height: 1 }} aria-hidden />
             </div>
           </div>
           <div className="relative">

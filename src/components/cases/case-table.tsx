@@ -45,9 +45,10 @@ import {
   type TrackerEntry,
   type TrackerUpdateInput,
 } from "@/lib/types";
+import { createSyncedHorizontalScroll } from "@/lib/ui/synced-horizontal-scroll";
 import { cn, formatDate, formatOptionalDate, parseCalendarDate } from "@/lib/utils";
 import { cleanCaseNumber, compareCaseNumbers } from "@/lib/csv/parse";
-import { type ReactNode, type RefObject, type UIEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 
 type SortKey = "completion" | "attorneyScore" | "caseNumber" | "clientName" | "dateSigned" | "dol" | "minimumValue" | "policyLimits";
 type SortDirection = "asc" | "desc";
@@ -160,6 +161,7 @@ export function CaseTable({
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const [scrollWidth, setScrollWidth] = useState(2284);
+  const syncScroll = useMemo(() => createSyncedHorizontalScroll(), []);
 
   const activeRecords = useMemo(
     () => workingRecords.filter((record) => isActivePipelineCase(record, goals)),
@@ -324,12 +326,6 @@ export function CaseTable({
     window.addEventListener("resize", updateScrollWidth);
     return () => window.removeEventListener("resize", updateScrollWidth);
   }, [filteredRecords.length]);
-
-  function syncScroll(event: UIEvent<HTMLDivElement>, targetRef: RefObject<HTMLDivElement | null>) {
-    if (targetRef.current && targetRef.current.scrollLeft !== event.currentTarget.scrollLeft) {
-      targetRef.current.scrollLeft = event.currentTarget.scrollLeft;
-    }
-  }
 
   function clearFilters() {
     setAttorneyIds([]);
@@ -773,13 +769,13 @@ export function CaseTable({
         </div>
 
         <div className="mt-4 rounded-lg border bg-white">
-          <div className="border-b bg-muted/40 px-4 py-2">
+          <div className="border-b bg-muted/40 px-3 py-1.5">
             <div
               ref={topScrollRef}
-              className="overflow-x-auto rounded-full border bg-white"
+              className="table-top-h-scroll"
               onScroll={(event) => syncScroll(event, tableScrollRef)}
             >
-              <div style={{ width: scrollWidth, height: 12 }} />
+              <div style={{ width: scrollWidth, height: 1 }} aria-hidden />
             </div>
           </div>
           <div className="relative">

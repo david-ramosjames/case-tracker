@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { Eye, Loader2 } from "lucide-react";
-import { Fragment, type RefObject, type UIEvent } from "react";
+import { Fragment } from "react";
+import { createSyncedHorizontalScroll } from "@/lib/ui/synced-horizontal-scroll";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import {
   LitigationEventDateInput,
@@ -93,6 +94,7 @@ export function LitigationTable({
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
   const [scrollWidth, setScrollWidth] = useState(1400);
+  const syncScroll = useMemo(() => createSyncedHorizontalScroll(), []);
 
   const attorneys = useMemo(() => users.filter((user) => user.role === "attorney" && user.active), [users]);
 
@@ -138,12 +140,6 @@ export function LitigationTable({
     window.addEventListener("resize", updateScrollWidth);
     return () => window.removeEventListener("resize", updateScrollWidth);
   }, [filteredRecords.length, viewer.canViewAllCases]);
-
-  function syncScroll(event: UIEvent<HTMLDivElement>, targetRef: RefObject<HTMLDivElement | null>) {
-    if (targetRef.current && targetRef.current.scrollLeft !== event.currentTarget.scrollLeft) {
-      targetRef.current.scrollLeft = event.currentTarget.scrollLeft;
-    }
-  }
 
   function setEventStatusFilter(key: LitigationEventKey, value: string) {
     setEventStatusFilters((current) => ({ ...current, [key]: value }));
@@ -350,13 +346,13 @@ export function LitigationTable({
         {saveMessage ? <p className="text-sm text-red-600">{saveMessage}</p> : null}
 
         <div className="rounded-lg border bg-white">
-          <div className="border-b bg-muted/40 px-4 py-2">
+          <div className="border-b bg-muted/40 px-3 py-1.5">
             <div
               ref={topScrollRef}
-              className="overflow-x-auto rounded-full border bg-white"
+              className="table-top-h-scroll"
               onScroll={(event) => syncScroll(event, tableScrollRef)}
             >
-              <div style={{ width: scrollWidth, height: 12 }} />
+              <div style={{ width: scrollWidth, height: 1 }} aria-hidden />
             </div>
           </div>
           <div className="relative">
