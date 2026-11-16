@@ -20,19 +20,31 @@ import {
 } from "@/lib/policy-coverage";
 import { type TrackerEntry, type TrackerUpdateInput } from "@/lib/types";
 
+type Fields = "all" | "coverage" | "limits";
+
 type Props = {
   tracker: TrackerEntry;
   actorContactId?: string | null;
   compact?: boolean;
+  /** Which controls to render. Case table uses separate columns via coverage | limits. */
+  fields?: Fields;
   onPatch: (patch: TrackerUpdateInput) => void | Promise<void>;
 };
 
-export function PolicyCoverageFields({ tracker, actorContactId, compact, onPatch }: Props) {
+export function PolicyCoverageFields({
+  tracker,
+  actorContactId,
+  compact,
+  fields = "all",
+  onPatch,
+}: Props) {
   const status = tracker.policyCoverage;
   const readOnlyLimits = policyLimitsAreReadOnly(status);
   const amountLabel = policyLimitsAmountLabel(status);
   const due = isPolicyCoverageValidationDue(tracker);
   const limitsError = validatePolicyLimitsForCoverage(status, tracker.policyLimits);
+  const showCoverage = fields === "all" || fields === "coverage";
+  const showLimits = fields === "all" || fields === "limits";
   const [limitsDraft, setLimitsDraft] = useState(
     tracker.policyLimits == null ? "" : String(tracker.policyLimits),
   );
@@ -64,12 +76,6 @@ export function PolicyCoverageFields({ tracker, actorContactId, compact, onPatch
 
   async function onLimitsChange(value: number | null) {
     if (readOnlyLimits) return;
-    const nextStatus = status;
-    const error = validatePolicyLimitsForCoverage(nextStatus, value);
-    if (nextStatus === "limits_confirmed" && error) {
-      await onPatch({ policyLimits: value });
-      return;
-    }
     await onPatch({ policyLimits: value });
   }
 
@@ -84,8 +90,8 @@ export function PolicyCoverageFields({ tracker, actorContactId, compact, onPatch
     );
   }
 
-  return (
-    <div className={compact ? "space-y-2" : "space-y-3"}>
+  const notices = (
+    <>
       {tracker.policyCoverageNeedsClassification ? (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-950">
           Legacy policy amount on file — classify Policy Coverage (amount preserved).
@@ -94,49 +100,78 @@ export function PolicyCoverageFields({ tracker, actorContactId, compact, onPatch
       {due && status && (status === "pending" || status === "coverage_exists") ? (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-950">
           Revalidation due
-          {tracker.policyCoverageNextDueAt ? ` (since ${tracker.policyCoverageNextDueAt})` : ""}. Confirm or update
-          coverage — viewing the case does not reset the clock.
+          {tracker.policyCoverageNextDueAt ? ` (since ${tracker.policyCoverageNextDueAt})` : ""}. Confirm or
+          update coverage — viewing the case does not reset the clock.
         </p>
       ) : null}
+    </>
+  );
 
-      <label className="block space-y-1 text-sm">
-        <span className="font-medium">Policy Coverage</span>
-        <Select
-          value={status ?? ""}
-          onChange={(event) => void onCoverageChange(event.target.value)}
-        >
-          <option value="">Select coverage…</option>
-          {POLICY_COVERAGE_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </Select>
-      </label>
-
-      <label className="block space-y-1 text-sm">
-        <span className="font-medium">Policy Limits ($)</span>
-        <Input
-          inputMode="decimal"
-          value={limitsDraft}
-          disabled={readOnlyLimits || !status}
-          onChange={(event) => setLimitsDraft(event.target.value)}
-          onBlur={() => {
-            const trimmed = limitsDraft.trim();
-            if (!trimmed) {
-              void onLimitsChange(null);
-              return;
-            }
-            const parsed = Number(trimmed.replace(/,/g, ""));
-            if (Number.isFinite(parsed)) void onLimitsChange(parsed);
-            else setLimitsDraft(tracker.policyLimits == null ? "" : String(tracker.policyLimits));
-          }}
-        />
-        {amountLabel ? <span className="block text-xs text-muted-foreground">{amountLabel}</span> : null}
-        {limitsError ? <span className="block text-xs text-rose-700">{limitsError}</span> : null}
-      </label>
-
+  const meta = (
+    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
       {!compact ? (
+        <span>
+          Status: <strong className="text-navy-950">{policyCoverageLabel(status)}</strong>
+        </span>
+      ) : null}
+      {tracker.policyCoverageValidatedAt ? (
+        <span>Last validated {tracker.policyCoverageValidatedAt.slice(0, 10)}</span>
+      ) : null}
+      {tracker.policyCoverageNextDueAt ? <span>Next due {tracker.policyCoverageNextDueAt}</span> : null}
+      {status === "pending" || status === "coverage_exists" ? (
+        <Button type="button" size="sm" variant="outline" onClick={() => void confirmValidation()}>
+          Confirm coverage still accurate
+        </Button>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <div className={compact ? "space-y-1.5" : "space-y-3"}>
+      {showCoverage ? notices : null}
+
+      {showCoverage ? (
+        <label className="block space-y-1 text-sm">
+          {fields === "all" ? <span className="font-medium">Policy Coverage</span> : null}
+          <Select
+            value={status ?? ""}
+            onChange={(event) => void onCoverageChange(event.target.value)}
+          >
+            <option value="">Select coverage…</option>
+            {POLICY_COVERAGE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </Select>
+        </label>
+      ) : null}
+
+      {showLimits ? (
+        <label className="block space-y-1 text-sm">
+          {fields === "all" ? <span className="font-medium">Policy Limits ($)</span> : null}
+          <Input
+            inputMode="decimal"
+            value={limitsDraft}
+            disabled={readOnlyLimits || !status}
+            onChange={(event) => setLimitsDraft(event.target.value)}
+            onBlur={() => {
+              const trimmed = limitsDraft.trim();
+              if (!trimmed) {
+                void onLimitsChange(null);
+                return;
+              }
+              const parsed = Number(trimmed.replace(/,/g, ""));
+              if (Number.isFinite(parsed)) void onLimitsChange(parsed);
+              else setLimitsDraft(tracker.policyLimits == null ? "" : String(tracker.policyLimits));
+            }}
+          />
+          {amountLabel ? <span className="block text-xs text-muted-foreground">{amountLabel}</span> : null}
+          {limitsError ? <span className="block text-xs text-rose-700">{limitsError}</span> : null}
+        </label>
+      ) : null}
+
+      {fields === "all" && !compact ? (
         <label className="block space-y-1 text-sm">
           <span className="font-medium">Verification notes (optional)</span>
           <Input
@@ -149,20 +184,7 @@ export function PolicyCoverageFields({ tracker, actorContactId, compact, onPatch
         </label>
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span>
-          Status: <strong className="text-navy-950">{policyCoverageLabel(status)}</strong>
-        </span>
-        {tracker.policyCoverageValidatedAt ? (
-          <span>Last validated {tracker.policyCoverageValidatedAt.slice(0, 10)}</span>
-        ) : null}
-        {tracker.policyCoverageNextDueAt ? <span>Next due {tracker.policyCoverageNextDueAt}</span> : null}
-        {status === "pending" || status === "coverage_exists" ? (
-          <Button type="button" size="sm" variant="outline" onClick={() => void confirmValidation()}>
-            Confirm coverage still accurate
-          </Button>
-        ) : null}
-      </div>
+      {showCoverage ? meta : null}
     </div>
   );
 }

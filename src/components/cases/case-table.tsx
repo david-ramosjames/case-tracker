@@ -928,7 +928,8 @@ export function CaseTable({
                 </TableHead>
                 <SortableHead label="Minimum Value" sortKey="minimumValue" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-36" />
                 <TableHead className="w-32">Referral Fee</TableHead>
-                <SortableHead label="Policy" sortKey="policyLimits" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-64" />
+                <TableHead className="w-44">Policy Coverage</TableHead>
+                <SortableHead label="Policy Limits" sortKey="policyLimits" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-40" />
                 <TableHead className="w-36">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -1009,6 +1010,16 @@ export function CaseTable({
                     <TableCell className="align-top">
                       <PolicyCoverageFields
                         compact
+                        fields="coverage"
+                        tracker={record.tracker}
+                        actorContactId={viewer.contactId}
+                        onPatch={(patch) => applyTrackerPatch(record.shared.id, patch)}
+                      />
+                    </TableCell>
+                    <TableCell className="align-top">
+                      <PolicyCoverageFields
+                        compact
+                        fields="limits"
                         tracker={record.tracker}
                         actorContactId={viewer.contactId}
                         onPatch={(patch) => applyTrackerPatch(record.shared.id, patch)}
