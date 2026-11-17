@@ -1,7 +1,11 @@
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { toStandardTargetPeriodLabel } from "@/lib/case-options";
+import {
+  getTargetPeriodRelative,
+  toStandardTargetPeriodLabel,
+  type TargetPeriodRelative,
+} from "@/lib/case-options";
 import { agingStatus } from "@/lib/performance/outstanding";
 import {
   type ExpectedDisbursementQuarterCase,
@@ -21,6 +25,24 @@ function pct(n: number | null) {
 
 function sumFees(rows: Array<{ expectedAttorneyFees: number }>) {
   return rows.reduce((total, row) => total + row.expectedAttorneyFees, 0);
+}
+
+const DISBURSE_Q_TONE: Record<TargetPeriodRelative, string> = {
+  // Current quarter — due now
+  current: "rounded px-1.5 py-0.5 bg-emerald-100 text-emerald-900",
+  // Already passed — overdue / missed planning window
+  past: "rounded px-1.5 py-0.5 bg-rose-100 text-rose-900",
+  future: "",
+};
+
+function ExpectedDisburseQuarterCell({ value }: { value: string | null | undefined }) {
+  const label = toStandardTargetPeriodLabel(value) ?? (value?.trim() || "—");
+  const relative = getTargetPeriodRelative(value);
+  const tone = relative ? DISBURSE_Q_TONE[relative] : "";
+  if (!tone) {
+    return <span className="whitespace-nowrap text-sm">{label}</span>;
+  }
+  return <span className={`inline-block whitespace-nowrap text-sm font-medium ${tone}`}>{label}</span>;
 }
 
 const STAGE_LABELS: Record<string, string> = {
@@ -240,9 +262,8 @@ function OutstandingTable({
               <TableCell>{row.attorneyName}</TableCell>
               <TableCell>{money(row.expectedAttorneyFees)}</TableCell>
               <TableCell>{row.settlementDate}</TableCell>
-              <TableCell className="whitespace-nowrap text-sm">
-                {toStandardTargetPeriodLabel(row.targetResolutionQuarter) ??
-                  (row.targetResolutionQuarter?.trim() || "—")}
+              <TableCell>
+                <ExpectedDisburseQuarterCell value={row.targetResolutionQuarter} />
               </TableCell>
               <TableCell
                 className={
@@ -292,9 +313,8 @@ function ExpectedThisQuarterTable({ rows }: { rows: ExpectedDisbursementQuarterC
             <TableCell>{STAGE_LABELS[row.caseStage] ?? row.caseStage}</TableCell>
             <TableCell>{money(row.expectedAttorneyFees)}</TableCell>
             <TableCell>{row.settlementDate?.trim() || "—"}</TableCell>
-            <TableCell className="whitespace-nowrap text-sm">
-              {toStandardTargetPeriodLabel(row.targetResolutionQuarter) ??
-                (row.targetResolutionQuarter?.trim() || "—")}
+            <TableCell>
+              <ExpectedDisburseQuarterCell value={row.targetResolutionQuarter} />
             </TableCell>
           </TableRow>
         ))}

@@ -368,6 +368,25 @@ export function getCurrentTargetPeriodLabel(date = new Date()) {
   return `Q${quarter}-${yy}`;
 }
 
+export type TargetPeriodRelative = "past" | "current" | "future";
+
+/** Where an expected-disbursement quarter sits vs the calendar quarter of `date`. */
+export function getTargetPeriodRelative(
+  value: string | null | undefined,
+  date = new Date(),
+): TargetPeriodRelative | null {
+  const standard = toStandardTargetPeriodLabel(value);
+  if (!standard) return null;
+  const parsed = parseTargetPeriodLabel(standard);
+  const current = parseTargetPeriodLabel(getCurrentTargetPeriodLabel(date));
+  if (!parsed || !current) return null;
+  const a = parsed.year * 10 + parsed.quarter;
+  const b = current.year * 10 + current.quarter;
+  if (a < b) return "past";
+  if (a > b) return "future";
+  return "current";
+}
+
 export function isTargetPeriodCurrentOrFuture(label: string | null | undefined, date = new Date()) {
   if (!label?.trim()) return false;
   const parsed = parseTargetPeriodLabel(label);
