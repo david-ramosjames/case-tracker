@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ExpectedThisQuarterTable } from "@/components/performance/expected-this-quarter-table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -45,20 +46,11 @@ function ExpectedDisburseQuarterCell({ value }: { value: string | null | undefin
   return <span className={`inline-block whitespace-nowrap text-sm font-medium ${tone}`}>{label}</span>;
 }
 
-const STAGE_LABELS: Record<string, string> = {
-  Onboarding: "Onboarding",
-  Txt: "Treatment",
-  Dmd: "Demand",
-  Lit: "Litigation",
-  Settled: "Settled",
-  Disengaged: "Disengaged",
-  Terminated: "Terminated",
-  Referred: "Referred",
-};
-
 const BAR = {
   actual: "#2563eb", // blue
-  projected: "#9ca3af", // gray
+  settled: "#64748b", // slate — settled not disbursed
+  unsettled: "#cbd5e1", // light slate — expected, not settled
+  projected: "#9ca3af", // gray (signed pacing)
   goal: "#16a34a", // green
 } as const;
 
@@ -117,8 +109,8 @@ export function OverviewView({
               Projected attainment {pct(feeProjection.attainment)}
             </CardTitle>
             <p className="text-sm text-muted-foreground">
-              Disbursed + eligible settled (lag {feeProjection.lagDays}d). Goal from Performance Settings — not
-              individual attorney /goals.
+              Disbursed + eligible settled (lag {feeProjection.lagDays}d) + unsettled expected this quarter.
+              Goal from Performance Settings — not individual attorney /goals.
             </p>
           </CardHeader>
           <CardContent>
@@ -135,6 +127,23 @@ export function OverviewView({
                   value: feeProjection.projectedQuarterlyFees,
                   color: BAR.projected,
                   format: "money",
+                  segments: [
+                    {
+                      label: "Actual",
+                      value: feeProjection.feesDisbursedInQuarter,
+                      color: BAR.actual,
+                    },
+                    {
+                      label: "Settled not disbursed",
+                      value: feeProjection.eligibleSettledUndisbursedFees,
+                      color: BAR.settled,
+                    },
+                    {
+                      label: "Expected unsettled",
+                      value: feeProjection.unsettledExpectedFees,
+                      color: BAR.unsettled,
+                    },
+                  ],
                 },
                 {
                   label: "Goal",
@@ -144,6 +153,11 @@ export function OverviewView({
                 },
               ]}
             />
+            <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <LegendSwatch color={BAR.actual} label="Actual" />
+              <LegendSwatch color={BAR.settled} label="Settled not disbursed" />
+              <LegendSwatch color={BAR.unsettled} label="Expected unsettled" />
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -186,17 +200,32 @@ export function OverviewView({
           </p>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <ExpectedThisQuarterTable rows={expectedThisQuarter} />
+          <ExpectedThisQuarterTable rows={expectedThisQuarter} currentQuarterLabel={quarterLabel} />
         </CardContent>
       </Card>
     </div>
   );
 }
 
+function LegendSwatch({ color, label }: { color: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: color }} />
+      {label}
+    </span>
+  );
+}
+
 function ComparisonBarChart({
   bars,
 }: {
-  bars: Array<{ label: string; value: number; color: string; format: "money" | "number" }>;
+  bars: Array<{
+    label: string;
+    value: number;
+    color: string;
+    format: "money" | "number";
+    segments?: Array<{ label: string; value: number; color: string }>;
+  }>;
 }) {
   const max = Math.max(...bars.map((b) => b.value), 1);
   const chartHeight = 140;
@@ -211,14 +240,41 @@ function ComparisonBarChart({
             : Number.isInteger(bar.value)
               ? String(bar.value)
               : bar.value.toFixed(1);
+        const segments = (bar.segments ?? []).filter((segment) => segment.value > 0);
+        const segmentTotal = segments.reduce((sum, segment) => sum + segment.value, 0);
+
         return (
           <div key={bar.label} className="flex w-full max-w-[6rem] flex-col items-center gap-1.5">
             <span className="text-xs font-semibold text-navy-950">{valueLabel}</span>
-            <div
-              className="w-14 rounded-t-sm"
-              style={{ height, backgroundColor: bar.color }}
-              title={`${bar.label}: ${valueLabel}`}
-            />
+            {segments.length > 0 && segmentTotal > 0 ? (
+              <div
+                className="flex w-14 flex-col-reverse overflow-hidden rounded-t-sm"
+                style={{ height }}
+                title={segments
+                  .map((segment) => `${segment.label}: ${money(segment.value)}`)
+                  .join(" · ")}
+              >
+                {segments.map((segment) => {
+                  const segmentHeight = Math.max(
+                    2,
+                    Math.round((segment.value / segmentTotal) * height),
+                  );
+                  return (
+                    <div
+                      key={segment.label}
+                      style={{ height: segmentHeight, backgroundColor: segment.color }}
+                      title={`${segment.label}: ${money(segment.value)}`}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <div
+                className="w-14 rounded-t-sm"
+                style={{ height, backgroundColor: bar.color }}
+                title={`${bar.label}: ${valueLabel}`}
+              />
+            )}
             <span className="text-xs text-muted-foreground">{bar.label}</span>
           </div>
         );
@@ -275,49 +331,6 @@ function OutstandingTable({
             </TableRow>
           );
         })}
-        {rows.length === 0 ? (
-          <TableRow>
-            <TableCell colSpan={6} className="text-muted-foreground">
-              None
-            </TableCell>
-          </TableRow>
-        ) : null}
-      </TableBody>
-    </Table>
-  );
-}
-
-function ExpectedThisQuarterTable({ rows }: { rows: ExpectedDisbursementQuarterCase[] }) {
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Case</TableHead>
-          <TableHead>Attorney</TableHead>
-          <TableHead>Stage</TableHead>
-          <TableHead>Fees</TableHead>
-          <TableHead>Settled</TableHead>
-          <TableHead>Exp. disburse Q</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <TableRow key={row.caseId}>
-            <TableCell>
-              <Link href={`/cases/${row.caseId}`} className="font-medium text-pink-700 hover:underline">
-                {row.caseNumber}
-              </Link>
-              <div className="text-xs text-muted-foreground">{row.clientName}</div>
-            </TableCell>
-            <TableCell>{row.attorneyName}</TableCell>
-            <TableCell>{STAGE_LABELS[row.caseStage] ?? row.caseStage}</TableCell>
-            <TableCell>{money(row.expectedAttorneyFees)}</TableCell>
-            <TableCell>{row.settlementDate?.trim() || "—"}</TableCell>
-            <TableCell>
-              <ExpectedDisburseQuarterCell value={row.targetResolutionQuarter} />
-            </TableCell>
-          </TableRow>
-        ))}
         {rows.length === 0 ? (
           <TableRow>
             <TableCell colSpan={6} className="text-muted-foreground">

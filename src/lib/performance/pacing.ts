@@ -73,7 +73,10 @@ export type ExpectedDisbursementQuarterCase = {
 
 export type QuarterlyFeeProjection = {
   feesDisbursedInQuarter: number;
+  /** Lag-eligible settled, not yet disbursed (stack segment 2). */
   eligibleSettledUndisbursedFees: number;
+  /** Expected this quarter but not yet settled (stack segment 3). */
+  unsettledExpectedFees: number;
   projectedQuarterlyFees: number;
   quarterlyGoal: number;
   attainment: number | null;
@@ -100,12 +103,14 @@ export function isEligibleForQuarterProjection(input: {
 }
 
 /**
- * Jon fee pacing: disbursed in quarter + eligible fully settled undisbursed.
+ * Jon fee pacing: disbursed + lag-eligible settled undisbursed + unsettled expected this quarter.
  * Distinct from /goals plan (pipeline targetResolutionQuarter).
  */
 export function computeJonQuarterlyFeeProjection(input: {
   feesDisbursedInQuarter: number;
   settledUndisbursed: SettledUndisbursedCase[];
+  /** Fees for active cases with Exp. disburse Q = current that are not Settled. */
+  unsettledExpectedFees?: number;
   quarterlyGoal: number;
   quarterEndYmd: string;
   lagDays: number;
@@ -129,12 +134,15 @@ export function computeJonQuarterlyFeeProjection(input: {
     (sum, row) => sum + row.expectedAttorneyFees,
     0,
   );
-  const projectedQuarterlyFees = input.feesDisbursedInQuarter + eligibleSettledUndisbursedFees;
+  const unsettledExpectedFees = Math.max(0, input.unsettledExpectedFees ?? 0);
+  const projectedQuarterlyFees =
+    input.feesDisbursedInQuarter + eligibleSettledUndisbursedFees + unsettledExpectedFees;
   const attainment =
     input.quarterlyGoal > 0 ? projectedQuarterlyFees / input.quarterlyGoal : null;
   return {
     feesDisbursedInQuarter: input.feesDisbursedInQuarter,
     eligibleSettledUndisbursedFees,
+    unsettledExpectedFees,
     projectedQuarterlyFees,
     quarterlyGoal: input.quarterlyGoal,
     attainment,

@@ -87,7 +87,33 @@ describe("performance pacing", () => {
       lagDays: 42,
     });
     assert.equal(result.eligibleSettledUndisbursedFees, 50_000);
+    assert.equal(result.unsettledExpectedFees, 0);
     assert.equal(result.projectedQuarterlyFees, 150_000);
     assert.equal(result.excludedCases.length, 1);
+  });
+
+  it("adds unsettled expected-this-quarter fees into projected total", () => {
+    const result = computeJonQuarterlyFeeProjection({
+      feesDisbursedInQuarter: 100_000,
+      settledUndisbursed: [
+        {
+          caseId: "a",
+          caseNumber: "1",
+          clientName: "A",
+          attorneyName: "X",
+          expectedAttorneyFees: 50_000,
+          settlementDate: "2026-01-01",
+          daysOutstanding: 10,
+          targetResolutionQuarter: "Q1-26",
+        },
+      ],
+      unsettledExpectedFees: 25_000,
+      quarterlyGoal: 200_000,
+      quarterEndYmd: "2026-03-31",
+      lagDays: 42,
+    });
+    assert.equal(result.eligibleSettledUndisbursedFees, 50_000);
+    assert.equal(result.unsettledExpectedFees, 25_000);
+    assert.equal(result.projectedQuarterlyFees, 175_000);
   });
 });

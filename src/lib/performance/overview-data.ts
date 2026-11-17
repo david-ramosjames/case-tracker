@@ -183,10 +183,14 @@ export function buildJonFeeProjection(input: {
   const settled = collectSettledUndisbursed(input.records, input.usersById);
   const expectedThisQuarter = collectExpectedDisbursementThisQuarter(input.records, input.usersById);
   const feesDisbursed = feesDisbursedInCalendarQuarter(input.records, bounds.startYmd, bounds.endYmd);
+  const unsettledExpectedFees = expectedThisQuarter
+    .filter((row) => row.caseStage !== "Settled")
+    .reduce((sum, row) => sum + row.expectedAttorneyFees, 0);
 
   const projection = computeJonQuarterlyFeeProjection({
     feesDisbursedInQuarter: feesDisbursed,
     settledUndisbursed: settled,
+    unsettledExpectedFees,
     quarterlyGoal: input.quarterlyGoal,
     quarterEndYmd: bounds.endYmd,
     lagDays: input.lagDays,

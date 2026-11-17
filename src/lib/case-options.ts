@@ -401,6 +401,26 @@ export function getSelectableTargetPeriodOptions(date = new Date()) {
   return getTargetPeriodOptions(date).filter((label) => isTargetPeriodCurrentOrFuture(label, date));
 }
 
+/** Quick picks: current quarter plus the next 5, chronological (6 total). */
+export function getQuickExpectedDisburseQuarterOptions(date = new Date()) {
+  const current = getCurrentTargetPeriodLabel(date);
+  const parsed = parseTargetPeriodLabel(current);
+  if (!parsed) return [current];
+
+  const options: string[] = [];
+  let year = parsed.year;
+  let quarter = parsed.quarter;
+  for (let i = 0; i < 6; i += 1) {
+    options.push(`Q${quarter}-${String(year % 100).padStart(2, "0")}`);
+    quarter += 1;
+    if (quarter > 4) {
+      quarter = 1;
+      year += 1;
+    }
+  }
+  return options;
+}
+
 /** Column filter options — standard Q#-YY labels only (current quarter and later). */
 export function getTargetPeriodFilterOptions(date = new Date()) {
   return getSelectableTargetPeriodOptions(date);
