@@ -58,6 +58,16 @@ export function PerformanceSettingsView({
     );
     return String(hit?.targetValue ?? 40);
   });
+  const [quarterlyFeesGoal, setQuarterlyFeesGoal] = useState(() => {
+    const hit = initialTargets.find(
+      (t) =>
+        t.metricKey === "attorney_fees_quarter" &&
+        t.periodGrain === "quarter" &&
+        t.scope === "firm" &&
+        !t.effectiveTo,
+    );
+    return String(hit?.targetValue ?? "");
+  });
   const [lag, setLag] = useState(String(initialAssumptions.settlementToDisburseLagDays));
   const [agingTarget, setAgingTarget] = useState(String(initialAssumptions.agingTargetDays));
   const [agingWarn, setAgingWarn] = useState(String(initialAssumptions.agingWarnDays));
@@ -239,6 +249,41 @@ export function PerformanceSettingsView({
       if (!res.ok) throw new Error(body.error ?? "Save failed");
       if (body.target) setTargets((prev) => [body.target!, ...prev]);
       setMessage("Monthly signed-case goal saved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveQuarterlyFeesGoal() {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const today = chicagoTodayYmd();
+      const [y, m] = today.split("-").map(Number);
+      const quarter = Math.floor(((m ?? 1) - 1) / 3) + 1;
+      const startMonth = (quarter - 1) * 3 + 1;
+      const effectiveFrom = `${y}-${String(startMonth).padStart(2, "0")}-01`;
+      const value = Number(String(quarterlyFeesGoal).replace(/,/g, ""));
+      if (!Number.isFinite(value) || value < 0) throw new Error("Enter a valid dollar goal.");
+      const res = await fetch("/api/performance/targets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          metricKey: "attorney_fees_quarter",
+          periodGrain: "quarter",
+          targetValue: value,
+          scope: "firm",
+          effectiveFrom,
+          notes: `Firm Performance Overview attorney-fees goal for ${y} Q${quarter}`,
+        }),
+      });
+      const body = (await res.json()) as { target?: PerformanceTarget; error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Save failed");
+      if (body.target) setTargets((prev) => [body.target!, ...prev]);
+      setMessage(`Firm quarterly attorney-fees goal saved for ${y} Q${quarter}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -492,6 +537,31 @@ export function PerformanceSettingsView({
           </label>
           <Button disabled={busy} onClick={() => void saveSignedGoal()}>
             Save signed goal
+          </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Firm quarterly attorney-fees goal</CardTitle>
+          <CardDescription>
+            Goal bar on Performance Overview (Projected attainment). Separate from individual attorney /goals fee
+            targets. Effective from the first day of the current calendar quarter.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-end gap-3">
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Quarterly goal ($)</span>
+            <Input
+              value={quarterlyFeesGoal}
+              onChange={(e) => setQuarterlyFeesGoal(e.target.value)}
+              className="w-44"
+              inputMode="decimal"
+              placeholder="e.g. 1619659"
+            />
+          </label>
+          <Button disabled={busy} onClick={() => void saveQuarterlyFeesGoal()}>
+            Save fees goal
           </Button>
         </CardContent>
       </Card>

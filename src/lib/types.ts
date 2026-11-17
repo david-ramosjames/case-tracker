@@ -454,6 +454,8 @@ export type DocketFlowScheduledEvent = {
   included: boolean;
   completed: boolean;
   calendarOrigin: "docketflow" | "google_ics_mirror";
+  /** When the calendar row was created in DocketFlow (ISO). */
+  createdAt: string | null;
 };
 
 export type DataQualityFlag = {

@@ -53,8 +53,22 @@ export type SettledUndisbursedCase = {
   expectedAttorneyFees: number;
   settlementDate: string;
   daysOutstanding: number;
+  /** Tracker expected disbursement quarter (planning field). */
+  targetResolutionQuarter: string | null;
   /** Party/disbursement row id when outstanding is tracked per individual. */
   disbursementId?: string | null;
+};
+
+/** Active cases planned to disburse in a given expected-disbursement quarter. */
+export type ExpectedDisbursementQuarterCase = {
+  caseId: string;
+  caseNumber: string;
+  clientName: string;
+  attorneyName: string;
+  caseStage: string;
+  expectedAttorneyFees: number;
+  targetResolutionQuarter: string | null;
+  settlementDate: string | null;
 };
 
 export type QuarterlyFeeProjection = {

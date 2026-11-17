@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { AttorneyPlanView } from "@/components/performance/attorney-plan-view";
+import { AutoProgressPanel } from "@/components/performance/auto-progress-panel";
 import { ConfirmEventsPanel, type ConfirmEventRow } from "@/components/performance/confirm-events-panel";
 import { MyWorkView } from "@/components/performance/my-work-view";
 import { cn } from "@/lib/utils";
@@ -111,6 +112,11 @@ export function AttorneyView({
               clientName: c.clientName,
               attorneyId: c.attorneyId,
             }))}
+          />
+          <AutoProgressPanel
+            role="attorney"
+            personId={selectedAttorney?.id ?? null}
+            weekStart={weekStart}
           />
           {confirmRows.length > 0 ? <ConfirmEventsPanel rows={confirmRows} /> : null}
         </div>

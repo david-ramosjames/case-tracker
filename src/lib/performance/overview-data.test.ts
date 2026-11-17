@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { collectSettledUndisbursed } from "./overview-data";
+import { collectExpectedDisbursementThisQuarter, collectSettledUndisbursed } from "./overview-data";
 import { type CaseDisbursement, type CaseRecord } from "@/lib/types";
 
 function party(partial: Partial<CaseDisbursement> & Pick<CaseDisbursement, "id" | "partyLabel">): CaseDisbursement {
@@ -29,6 +29,10 @@ function record(partial: {
   attorneyFees?: number | null;
   disbursedStatus?: CaseRecord["tracker"]["result"]["disbursedStatus"];
   disburseDate?: string | null;
+  targetResolutionQuarter?: string | null;
+  isActive?: boolean;
+  estimatedFeeValue?: number | null;
+  minimumValue?: number | null;
   disbursements?: CaseDisbursement[];
 }): CaseRecord {
   return {
@@ -40,6 +44,10 @@ function record(partial: {
     },
     tracker: {
       caseStage: partial.caseStage ?? "Settled",
+      isActive: partial.isActive ?? true,
+      targetResolutionQuarter: partial.targetResolutionQuarter ?? null,
+      estimatedFeeValue: partial.estimatedFeeValue ?? null,
+      minimumValue: partial.minimumValue ?? null,
       result: {
         settlementDate: partial.settlementDate ?? "2026-03-27",
         attorneyFees: partial.attorneyFees ?? 10_000,
@@ -117,13 +125,21 @@ describe("collectSettledUndisbursed", () => {
 
   it("falls back to case-level when there are no party rows", () => {
     const rows = collectSettledUndisbursed(
-      [record({ disbursements: [], settlementDate: "2026-01-01", attorneyFees: 5_000 })],
+      [
+        record({
+          disbursements: [],
+          settlementDate: "2026-01-01",
+          attorneyFees: 5_000,
+          targetResolutionQuarter: "Q1-26",
+        }),
+      ],
       new Map([["atty-1", "Jesus Zuniga"]]),
       "2026-01-31",
     );
     assert.equal(rows.length, 1);
     assert.equal(rows[0]?.daysOutstanding, 30);
     assert.equal(rows[0]?.clientName, "Krystal Garcia");
+    assert.equal(rows[0]?.targetResolutionQuarter, "Q1-26");
   });
 
   it("excludes parties when case is not Settled (column G not Y), e.g. 782", () => {
@@ -157,5 +173,57 @@ describe("collectSettledUndisbursed", () => {
     );
 
     assert.equal(rows.length, 0);
+  });
+});
+
+describe("collectExpectedDisbursementThisQuarter", () => {
+  it("includes active cases planned for the current quarter and excludes others", () => {
+    const asOf = new Date("2026-11-15T18:00:00Z");
+    const rows = collectExpectedDisbursementThisQuarter(
+      [
+        record({
+          id: "in-q",
+          caseNumber: "100",
+          caseStage: "Lit",
+          targetResolutionQuarter: "Q4-26",
+          estimatedFeeValue: 40_000,
+          settlementDate: null,
+          attorneyFees: null,
+        }),
+        record({
+          id: "other-q",
+          caseNumber: "101",
+          caseStage: "Dmd",
+          targetResolutionQuarter: "Q1-27",
+          estimatedFeeValue: 20_000,
+          settlementDate: null,
+          attorneyFees: null,
+        }),
+        record({
+          id: "inactive",
+          caseNumber: "102",
+          caseStage: "Settled",
+          isActive: false,
+          targetResolutionQuarter: "Q4-26",
+          attorneyFees: 15_000,
+        }),
+        record({
+          id: "disbursed",
+          caseNumber: "103",
+          caseStage: "Settled",
+          targetResolutionQuarter: "Q4-26",
+          attorneyFees: 12_000,
+          disbursedStatus: "Yes",
+          disburseDate: "2026-10-01",
+        }),
+      ],
+      new Map([["atty-1", "Jesus Zuniga"]]),
+      asOf,
+    );
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]?.caseNumber, "100");
+    assert.equal(rows[0]?.expectedAttorneyFees, 40_000);
+    assert.equal(rows[0]?.targetResolutionQuarter, "Q4-26");
   });
 });

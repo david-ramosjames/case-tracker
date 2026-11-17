@@ -69,6 +69,7 @@ describe("performance pacing", () => {
           expectedAttorneyFees: 50_000,
           settlementDate: "2026-01-01",
           daysOutstanding: 10,
+          targetResolutionQuarter: "Q1-26",
         },
         {
           caseId: "b",
@@ -78,6 +79,7 @@ describe("performance pacing", () => {
           expectedAttorneyFees: 80_000,
           settlementDate: "2026-03-20",
           daysOutstanding: 5,
+          targetResolutionQuarter: "Q2-26",
         },
       ],
       quarterlyGoal: 200_000,

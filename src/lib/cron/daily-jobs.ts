@@ -5,10 +5,11 @@ import { syncSlackChannelsFromGoogleSheetIfConfigured } from "@/lib/google/sheet
 import { renameQuoContactsWithLanguageIfConfigured } from "@/lib/quo/rename-contacts";
 import { sendSlackFieldReminders } from "@/lib/slack/field-reminder-notify";
 import { sendSlackMissingFieldNotices } from "@/lib/slack/missing-field-notify";
+import { sendSettledUndisbursedSlackNotices } from "@/lib/slack/settled-undisbursed-notify";
 import { processDailyPulseRecap } from "@/lib/slack/stage-confirmation";
 import { promoteOnboardingToTreatment } from "@/lib/slack/stage-workflow";
 import { syncQuoPhonesToTrackerIfConfigured, processSmsTimeInStageAutomations, autoRejectStaleSmsPendingApprovals } from "@/lib/sms/workflow";
-import { getCases, getSettings } from "@/lib/supabase/services";
+import { getAttorneyGoals, getCases, getSettings } from "@/lib/supabase/services";
 import { errorMessage } from "@/lib/utils";
 
 export type DailyJobStep =
@@ -20,6 +21,7 @@ export type DailyJobStep =
   | "dailyPulse"
   | "missingFields"
   | "fieldReminders"
+  | "settledUndisbursed"
   | "smsTimeTriggers"
   | "all";
 
@@ -79,6 +81,23 @@ async function runFieldReminders(options: DailyJobOptions) {
     forceSend: force && Boolean(options.caseNumber?.trim()),
     dryRun: options.dryRun,
     settings,
+  });
+}
+
+async function runSettledUndisbursed(options: DailyJobOptions) {
+  const force = options.force ?? false;
+  const [records, goals] = await Promise.all([
+    filterRecordsForCaseNumber(await getCases(), options.caseNumber),
+    getAttorneyGoals(),
+  ]);
+
+  return sendSettledUndisbursedSlackNotices(records, {
+    goals,
+    dryRun: options.dryRun,
+    caseNumber: options.caseNumber,
+    // Morning cron is 10 AM Central; force/manual can send anytime.
+    morningOnly: !force,
+    force,
   });
 }
 
@@ -275,6 +294,27 @@ export async function runDailyCronGroup(group: DailyCronGroup, options: DailyJob
     };
   }
 
+  if (group === "settledUndisbursed") {
+    const settledUndisbursedResult = await runDailyJobStep("settledUndisbursed", () =>
+      runSettledUndisbursed(options),
+    );
+    if (settledUndisbursedResult.error) errors.push(settledUndisbursedResult.error);
+
+    return {
+      ok: errors.length === 0,
+      group,
+      settledUndisbursed:
+        settledUndisbursedResult.data ??
+        ({
+          posted: 0,
+          skipped: 0,
+          eligible: 0,
+          error: settledUndisbursedResult.error?.error,
+        } as const),
+      errors: errors.length > 0 ? errors : undefined,
+    };
+  }
+
   const smsTimeTriggersResult = await runDailyJobStep("smsTimeTriggers", async () => {
     const staleRejections = await autoRejectStaleSmsPendingApprovals({
       dryRun: Boolean(options.dryRun),
@@ -331,6 +371,11 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
     const fieldRemindersResult = await runDailyJobStep("fieldReminders", () => runFieldReminders(options));
     if (fieldRemindersResult.error) errors.push(fieldRemindersResult.error);
 
+    const settledUndisbursedResult = await runDailyJobStep("settledUndisbursed", () =>
+      runSettledUndisbursed(options),
+    );
+    if (settledUndisbursedResult.error) errors.push(settledUndisbursedResult.error);
+
     const smsTimeTriggersResult = await runDailyJobStep("smsTimeTriggers", async () => {
       const staleRejections = await autoRejectStaleSmsPendingApprovals({ dryRun });
       const timeTriggers = await processSmsTimeInStageAutomations({ dryRun, caseNumber: options.caseNumber });
@@ -338,7 +383,12 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
     });
     if (smsTimeTriggersResult.error) errors.push(smsTimeTriggersResult.error);
 
-    const slackRan = Boolean(missingFieldsResult.data || fieldRemindersResult.data || pulseResult.data);
+    const slackRan = Boolean(
+      missingFieldsResult.data ||
+        fieldRemindersResult.data ||
+        settledUndisbursedResult.data ||
+        pulseResult.data,
+    );
     const ok = errors.length === 0 || slackRan;
 
     return {
@@ -364,6 +414,9 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
       fieldReminders:
         fieldRemindersResult.data ??
         ({ posted: 0, skipped: 0, fields: 0, error: fieldRemindersResult.error?.error } as const),
+      settledUndisbursed:
+        settledUndisbursedResult.data ??
+        ({ posted: 0, skipped: 0, eligible: 0, error: settledUndisbursedResult.error?.error } as const),
       smsTimeTriggers:
         smsTimeTriggersResult.data ??
         ({ queued: 0, matched: 0, skipped: 0, automations: 0, error: smsTimeTriggersResult.error?.error } as const),
@@ -448,6 +501,20 @@ export async function runDailyJob(step: DailyJobStep, options: DailyJobOptions =
 
   if (step === "fieldReminders") {
     const result = await runDailyJobStep("fieldReminders", () => runFieldReminders(options));
+    if (result.error) {
+      return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
+    }
+    return {
+      ok: true,
+      step,
+      dryRun,
+      result: result.data,
+      filter: options.caseNumber ? { caseNumber: options.caseNumber, force } : null,
+    };
+  }
+
+  if (step === "settledUndisbursed") {
+    const result = await runDailyJobStep("settledUndisbursed", () => runSettledUndisbursed(options));
     if (result.error) {
       return { ok: false, step, dryRun, error: result.error.error, errors: [result.error] };
     }

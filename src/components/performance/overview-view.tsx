@@ -1,8 +1,14 @@
 import Link from "next/link";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { toStandardTargetPeriodLabel } from "@/lib/case-options";
 import { agingStatus } from "@/lib/performance/outstanding";
-import { type QuarterlyFeeProjection, type SignedCasePacing, type SettledUndisbursedCase } from "@/lib/performance/pacing";
+import {
+  type ExpectedDisbursementQuarterCase,
+  type QuarterlyFeeProjection,
+  type SignedCasePacing,
+  type SettledUndisbursedCase,
+} from "@/lib/performance/pacing";
 
 function money(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -13,9 +19,20 @@ function pct(n: number | null) {
   return `${Math.round(n * 100)}%`;
 }
 
-function sumFees(rows: SettledUndisbursedCase[]) {
+function sumFees(rows: Array<{ expectedAttorneyFees: number }>) {
   return rows.reduce((total, row) => total + row.expectedAttorneyFees, 0);
 }
+
+const STAGE_LABELS: Record<string, string> = {
+  Onboarding: "Onboarding",
+  Txt: "Treatment",
+  Dmd: "Demand",
+  Lit: "Litigation",
+  Settled: "Settled",
+  Disengaged: "Disengaged",
+  Terminated: "Terminated",
+  Referred: "Referred",
+};
 
 const BAR = {
   actual: "#2563eb", // blue
@@ -28,6 +45,7 @@ export function OverviewView({
   feeProjection,
   top5,
   oldest,
+  expectedThisQuarter,
   agingTargetDays,
   agingWarnDays,
   quarterLabel,
@@ -36,12 +54,14 @@ export function OverviewView({
   feeProjection: QuarterlyFeeProjection;
   top5: SettledUndisbursedCase[];
   oldest: SettledUndisbursedCase[];
+  expectedThisQuarter: ExpectedDisbursementQuarterCase[];
   agingTargetDays: number;
   agingWarnDays: number;
   quarterLabel: string;
 }) {
   const top5Total = sumFees(top5);
   const outstandingTotal = sumFees(oldest);
+  const expectedThisQuarterTotal = sumFees(expectedThisQuarter);
   const signedProjected = signed.projectedMonthEnd ?? 0;
 
   return (
@@ -75,7 +95,8 @@ export function OverviewView({
               Projected attainment {pct(feeProjection.attainment)}
             </CardTitle>
             <p className="text-sm text-muted-foreground">
-              Disbursed + eligible settled (lag {feeProjection.lagDays}d). Distinct from /goals pipeline plan.
+              Disbursed + eligible settled (lag {feeProjection.lagDays}d). Goal from Performance Settings — not
+              individual attorney /goals.
             </p>
           </CardHeader>
           <CardContent>
@@ -133,6 +154,19 @@ export function OverviewView({
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardDescription>Expected disbursement this quarter ({quarterLabel})</CardDescription>
+          <CardTitle className="text-2xl">{money(expectedThisQuarterTotal)}</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            {expectedThisQuarter.length} active cases with Expected disbursement quarter = current quarter
+          </p>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <ExpectedThisQuarterTable rows={expectedThisQuarter} />
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -188,6 +222,7 @@ function OutstandingTable({
           <TableHead>Attorney</TableHead>
           <TableHead>Fees</TableHead>
           <TableHead>Settled</TableHead>
+          <TableHead>Exp. disburse Q</TableHead>
           <TableHead>Days</TableHead>
         </TableRow>
       </TableHeader>
@@ -205,6 +240,10 @@ function OutstandingTable({
               <TableCell>{row.attorneyName}</TableCell>
               <TableCell>{money(row.expectedAttorneyFees)}</TableCell>
               <TableCell>{row.settlementDate}</TableCell>
+              <TableCell className="whitespace-nowrap text-sm">
+                {toStandardTargetPeriodLabel(row.targetResolutionQuarter) ??
+                  (row.targetResolutionQuarter?.trim() || "—")}
+              </TableCell>
               <TableCell
                 className={
                   status === "over" ? "font-semibold text-rose-700" : status === "warn" ? "text-amber-700" : ""
@@ -217,7 +256,51 @@ function OutstandingTable({
         })}
         {rows.length === 0 ? (
           <TableRow>
-            <TableCell colSpan={5} className="text-muted-foreground">
+            <TableCell colSpan={6} className="text-muted-foreground">
+              None
+            </TableCell>
+          </TableRow>
+        ) : null}
+      </TableBody>
+    </Table>
+  );
+}
+
+function ExpectedThisQuarterTable({ rows }: { rows: ExpectedDisbursementQuarterCase[] }) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Case</TableHead>
+          <TableHead>Attorney</TableHead>
+          <TableHead>Stage</TableHead>
+          <TableHead>Fees</TableHead>
+          <TableHead>Settled</TableHead>
+          <TableHead>Exp. disburse Q</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={row.caseId}>
+            <TableCell>
+              <Link href={`/cases/${row.caseId}`} className="font-medium text-pink-700 hover:underline">
+                {row.caseNumber}
+              </Link>
+              <div className="text-xs text-muted-foreground">{row.clientName}</div>
+            </TableCell>
+            <TableCell>{row.attorneyName}</TableCell>
+            <TableCell>{STAGE_LABELS[row.caseStage] ?? row.caseStage}</TableCell>
+            <TableCell>{money(row.expectedAttorneyFees)}</TableCell>
+            <TableCell>{row.settlementDate?.trim() || "—"}</TableCell>
+            <TableCell className="whitespace-nowrap text-sm">
+              {toStandardTargetPeriodLabel(row.targetResolutionQuarter) ??
+                (row.targetResolutionQuarter?.trim() || "—")}
+            </TableCell>
+          </TableRow>
+        ))}
+        {rows.length === 0 ? (
+          <TableRow>
+            <TableCell colSpan={6} className="text-muted-foreground">
               None
             </TableCell>
           </TableRow>

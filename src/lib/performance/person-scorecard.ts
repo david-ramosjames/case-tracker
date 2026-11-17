@@ -32,6 +32,8 @@ export const ATTORNEY_SCORE_METRICS = [
   { key: "lit_completed_combined" as const, label: "Lit events completed (depo / med / hearing)" },
   { key: "settlement" as const, label: "Settlements" },
   { key: "disbursement" as const, label: "Disbursements" },
+  { key: "demand_sent" as const, label: "Demands sent" },
+  { key: "lawsuit_filed" as const, label: "Lawsuits filed" },
 ] as const;
 
 export type ParalegalMetricKey = (typeof PARALEGAL_SCORE_METRICS)[number]["key"];
@@ -74,6 +76,8 @@ function emptyAttorneyCounts(): Record<AttorneyMetricKey, number> {
     lit_completed_combined: 0,
     settlement: 0,
     disbursement: 0,
+    demand_sent: 0,
+    lawsuit_filed: 0,
   };
 }
 
@@ -101,6 +105,8 @@ function addAttorneyActual(counts: Record<AttorneyMetricKey, number>, item: Perf
     counts.lit_completed_combined += creditFor(item);
   } else if (type === "settlement") counts.settlement += creditFor(item);
   else if (type === "disbursement") counts.disbursement += creditFor(item);
+  else if (type === "demand_sent") counts.demand_sent += creditFor(item);
+  else if (type === "lawsuit_filed") counts.lawsuit_filed += creditFor(item);
 }
 
 function belongsToPerson(
@@ -264,18 +270,20 @@ function buildAttorneyScorecard(
     targetSettlements: goals.settlement,
     actualDisbursements: counts.disbursement,
     targetDisbursements: goals.disbursement,
+    actualDemands: counts.demand_sent,
+    targetDemands: goals.demand_sent,
+    actualLawsuit: counts.lawsuit_filed,
+    targetLawsuit: goals.lawsuit_filed,
   });
+  const ratioParts = [
+    scored.litCompleted,
+    scored.settlements,
+    scored.disbursements,
+    scored.demands,
+    scored.lawsuit,
+  ].filter((v): v is number => typeof v === "number");
   const overall =
-    [scored.litCompleted, scored.settlements, scored.disbursements].filter(
-      (v): v is number => typeof v === "number",
-    ).length > 0
-      ? ([scored.litCompleted, scored.settlements, scored.disbursements].filter(
-          (v): v is number => typeof v === "number",
-        ).reduce((a, b) => a + b, 0) /
-        [scored.litCompleted, scored.settlements, scored.disbursements].filter(
-          (v): v is number => typeof v === "number",
-        ).length)
-      : null;
+    ratioParts.length > 0 ? ratioParts.reduce((a, b) => a + b, 0) / ratioParts.length : null;
   return {
     weekStart,
     weekLabel: formatWeekRangeLabel(weekStart),
@@ -290,7 +298,11 @@ function buildAttorneyScorecard(
           ? scored.litCompleted
           : m.key === "settlement"
             ? scored.settlements
-            : scored.disbursements,
+            : m.key === "disbursement"
+              ? scored.disbursements
+              : m.key === "demand_sent"
+                ? scored.demands
+                : scored.lawsuit,
     })),
     overall,
   };

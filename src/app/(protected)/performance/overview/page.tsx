@@ -4,7 +4,7 @@ import { requireSessionUser } from "@/lib/auth/session";
 import { canViewPerformanceOverview } from "@/lib/performance/access";
 import { getPerformanceAssumptions } from "@/lib/performance/assumptions";
 import { buildJonFeeProjection, buildSignedPacingForToday } from "@/lib/performance/overview-data";
-import { getMonthlySignedCaseGoal } from "@/lib/performance/targets";
+import { getMonthlySignedCaseGoal, getQuarterlyAttorneyFeesGoal } from "@/lib/performance/targets";
 import { chicagoDateParts } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 
@@ -14,17 +14,19 @@ export default async function PerformanceOverviewPage() {
   const sessionUser = await requireSessionUser();
   if (!canViewPerformanceOverview(sessionUser.role)) redirect("/performance/identify");
 
-  const { records, goals, users } = await loadViewerCaseBundle();
+  const { records, users } = await loadViewerCaseBundle();
   const assumptions = await getPerformanceAssumptions();
   const parts = chicagoDateParts();
   const monthlyGoal = await getMonthlySignedCaseGoal(parts.year, parts.month);
   const signed = buildSignedPacingForToday(records, monthlyGoal || 40);
   const usersById = new Map(users.map((u) => [u.id, u.name]));
-  const { projection, top5, oldest, bounds } = buildJonFeeProjection({
+  const quarter = Math.floor((parts.month - 1) / 3) + 1;
+  const quarterlyFeeGoal = await getQuarterlyAttorneyFeesGoal(parts.year, quarter);
+  const { projection, top5, oldest, expectedThisQuarter, bounds } = buildJonFeeProjection({
     records,
     usersById,
-    goals,
     lagDays: assumptions.settlementToDisburseLagDays,
+    quarterlyGoal: quarterlyFeeGoal,
   });
 
   return (
@@ -33,6 +35,7 @@ export default async function PerformanceOverviewPage() {
       feeProjection={projection}
       top5={top5}
       oldest={oldest}
+      expectedThisQuarter={expectedThisQuarter}
       agingTargetDays={assumptions.agingTargetDays}
       agingWarnDays={assumptions.agingWarnDays}
       quarterLabel={`${bounds.year} Q${bounds.quarter}`}

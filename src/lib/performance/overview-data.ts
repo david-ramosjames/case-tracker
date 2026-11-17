@@ -1,16 +1,63 @@
+import { getProjectedFeeValue } from "@/lib/calculations";
+import { matchesTargetPeriodFilter, toStandardTargetPeriodLabel } from "@/lib/case-options";
 import { isCaseFullyDisbursed } from "@/lib/case-status";
 import { getDisbursementAttorneyFees } from "@/lib/disbursements";
 import {
   computeJonQuarterlyFeeProjection,
   computeSignedCasePacing,
+  type ExpectedDisbursementQuarterCase,
   type SettledUndisbursedCase,
 } from "@/lib/performance/pacing";
 import { rankTopOutstandingByFees, sortOutstandingByAge, withDaysOutstanding } from "@/lib/performance/outstanding";
 import { chicagoDateParts, chicagoTodayYmd } from "@/lib/performance/weeks";
-import { type AttorneyGoal, type CaseDisbursement, type CaseRecord } from "@/lib/types";
+import { type CaseDisbursement, type CaseRecord } from "@/lib/types";
 
 function expectedAttorneyFees(record: CaseRecord): number {
   return record.tracker.result.attorneyFees ?? record.tracker.actualFeeValue ?? 0;
+}
+
+function currentExpectedDisbursementQuarterLabel(date = new Date()) {
+  const parts = chicagoDateParts(date);
+  const quarter = Math.floor((parts.month - 1) / 3) + 1;
+  return toStandardTargetPeriodLabel(`Q${quarter}-${String(parts.year % 100).padStart(2, "0")}`) ?? `Q${quarter}-${String(parts.year % 100).padStart(2, "0")}`;
+}
+
+/**
+ * Active cases whose Expected disbursement quarter is the current calendar quarter
+ * (Chicago), excluding fully disbursed / closed pipeline cases.
+ */
+export function collectExpectedDisbursementThisQuarter(
+  records: CaseRecord[],
+  usersById: Map<string, string>,
+  asOf = new Date(),
+): ExpectedDisbursementQuarterCase[] {
+  const currentQuarter = currentExpectedDisbursementQuarterLabel(asOf);
+  const rows: ExpectedDisbursementQuarterCase[] = [];
+
+  for (const record of records) {
+    if (!record.tracker.isActive) continue;
+    if (isCaseFullyDisbursed(record.tracker.result)) continue;
+    if (!matchesTargetPeriodFilter(currentQuarter, record.tracker.targetResolutionQuarter)) continue;
+
+    const attorneyName = usersById.get(record.shared.attorneyId) ?? "—";
+    const fees =
+      record.tracker.caseStage === "Settled"
+        ? expectedAttorneyFees(record) || getProjectedFeeValue(record) || 0
+        : getProjectedFeeValue(record) || 0;
+
+    rows.push({
+      caseId: record.shared.id,
+      caseNumber: record.shared.caseNumber,
+      clientName: record.shared.clientName,
+      attorneyName,
+      caseStage: record.tracker.caseStage,
+      expectedAttorneyFees: fees,
+      targetResolutionQuarter: record.tracker.targetResolutionQuarter ?? null,
+      settlementDate: record.tracker.result.settlementDate,
+    });
+  }
+
+  return rows.sort((a, b) => b.expectedAttorneyFees - a.expectedAttorneyFees);
 }
 
 function isPartyDisbursed(party: CaseDisbursement): boolean {
@@ -46,6 +93,7 @@ export function collectSettledUndisbursed(
           attorneyName,
           expectedAttorneyFees: getDisbursementAttorneyFees(party, record),
           settlementDate: party.settlementDate,
+          targetResolutionQuarter: record.tracker.targetResolutionQuarter ?? null,
           disbursementId: party.id,
         });
       }
@@ -62,6 +110,7 @@ export function collectSettledUndisbursed(
       attorneyName,
       expectedAttorneyFees: expectedAttorneyFees(record),
       settlementDate,
+      targetResolutionQuarter: record.tracker.targetResolutionQuarter ?? null,
       disbursementId: null,
     });
   }
@@ -126,22 +175,19 @@ function feesDisbursedInCalendarQuarter(records: CaseRecord[], startYmd: string,
 export function buildJonFeeProjection(input: {
   records: CaseRecord[];
   usersById: Map<string, string>;
-  goals: AttorneyGoal[];
   lagDays: number;
+  /** Firm Performance quarterly attorney-fees goal (from Settings). */
+  quarterlyGoal: number;
 }) {
   const bounds = calendarQuarterBounds();
   const settled = collectSettledUndisbursed(input.records, input.usersById);
+  const expectedThisQuarter = collectExpectedDisbursementThisQuarter(input.records, input.usersById);
   const feesDisbursed = feesDisbursedInCalendarQuarter(input.records, bounds.startYmd, bounds.endYmd);
-  const feeGoals = input.goals.filter((g) => g.year === bounds.year);
-  const quarterlyGoal = feeGoals.reduce((sum, g) => {
-    const fees = [g.feeQ1Goal, g.feeQ2Goal, g.feeQ3Goal, g.feeQ4Goal][bounds.quarter - 1] ?? 0;
-    return sum + fees;
-  }, 0);
 
   const projection = computeJonQuarterlyFeeProjection({
     feesDisbursedInQuarter: feesDisbursed,
     settledUndisbursed: settled,
-    quarterlyGoal,
+    quarterlyGoal: input.quarterlyGoal,
     quarterEndYmd: bounds.endYmd,
     lagDays: input.lagDays,
   });
@@ -151,5 +197,6 @@ export function buildJonFeeProjection(input: {
     projection,
     top5: rankTopOutstandingByFees(settled, 5),
     oldest: sortOutstandingByAge(settled),
+    expectedThisQuarter,
   };
 }

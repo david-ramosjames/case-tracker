@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { AutoProgressPanel } from "@/components/performance/auto-progress-panel";
 import { CasePicker } from "@/components/performance/case-picker";
 import { PersonScorecardView } from "@/components/performance/person-scorecard-view";
 import { PersonSwitcher } from "@/components/performance/person-switcher";
@@ -667,6 +668,14 @@ export function MyWorkView({
         <>
           {scorecard && selectedPerson ? (
             <PersonScorecardView bundle={scorecard} personName={selectedPerson.name} />
+          ) : null}
+
+          {selectedPerson ? (
+            <AutoProgressPanel
+              role={isAttorney ? "attorney" : "paralegal"}
+              personId={selectedPerson.id}
+              weekStart={weekStart}
+            />
           ) : null}
 
           <Card>

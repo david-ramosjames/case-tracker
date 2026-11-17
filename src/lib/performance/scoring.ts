@@ -50,6 +50,10 @@ export type AttorneyScoreInputs = {
   targetSettlements: number;
   actualDisbursements: number;
   targetDisbursements: number;
+  actualDemands?: number;
+  targetDemands?: number;
+  actualLawsuit?: number;
+  targetLawsuit?: number;
 };
 
 /** Attorney attainment only — workbook has no weighted Overall. */
@@ -58,6 +62,8 @@ export function scoreAttorneyWeek(input: AttorneyScoreInputs) {
     litCompleted: attainmentRatio(input.actualLitCompleted, input.targetLitCompleted),
     settlements: attainmentRatio(input.actualSettlements, input.targetSettlements),
     disbursements: attainmentRatio(input.actualDisbursements, input.targetDisbursements),
+    demands: attainmentRatio(input.actualDemands ?? 0, input.targetDemands),
+    lawsuit: attainmentRatio(input.actualLawsuit ?? 0, input.targetLawsuit),
   };
 }
 
@@ -72,4 +78,6 @@ export const DEFAULT_ATTORNEY_TARGETS = {
   lit_completed_combined: 3,
   settlement: 1,
   disbursement: 1,
+  demand_sent: 2,
+  lawsuit_filed: 2,
 } as const;

@@ -47,7 +47,7 @@ import {
 import { deriveFeePercentFromSettlement } from "@/lib/fee-percent";
 import { deriveCaseStatusFromTracker, applyOpenSettledTrackerFallback, isCaseFullyDisbursed } from "@/lib/case-status";
 import { EMPTY_LITIGATION_EVENTS } from "@/lib/litigation-events";
-import { pickNextScheduledEvents } from "@/lib/docketflow/case-events";
+import { mapCaseEventRows, pickNextScheduledEvents } from "@/lib/docketflow/case-events";
 import {
   type ActivityLogEntry,
   type AppUser,
@@ -422,6 +422,9 @@ export async function getTrackerEntryByCaseId(caseId: string): Promise<TrackerEn
   return record?.tracker ?? null;
 }
 
+const CASE_EVENT_COLUMNS =
+  "id, case_id, title, date, deadline_end_date, start_date_time, end_date_time, category, event_kind, schedule_kind, included, completed, calendar_origin, created_at";
+
 /** Next upcoming DocketFlow calendar rows for a linked case (`case_events`). */
 export async function getNextScheduledDocketFlowEvents(
   caseId: string,
@@ -430,15 +433,26 @@ export async function getNextScheduledDocketFlowEvents(
   const client = await createSharedDataClient();
   const { data, error } = await client
     .from("case_events")
-    .select(
-      "id, case_id, title, date, deadline_end_date, start_date_time, end_date_time, category, event_kind, schedule_kind, included, completed, calendar_origin",
-    )
+    .select(CASE_EVENT_COLUMNS)
     .eq("case_id", caseId)
     .order("date", { ascending: true })
     .order("id", { ascending: true });
 
   if (error) throw error;
   return pickNextScheduledEvents(data ?? [], limit);
+}
+
+/** All DocketFlow calendar rows for a case (performance auto-progress). */
+export async function listDocketFlowCaseEvents(caseId: string): Promise<DocketFlowScheduledEvent[]> {
+  const client = await createSharedDataClient();
+  const { data, error } = await client
+    .from("case_events")
+    .select(CASE_EVENT_COLUMNS)
+    .eq("case_id", caseId)
+    .order("date", { ascending: true })
+    .order("id", { ascending: true });
+  if (error) throw error;
+  return mapCaseEventRows(data ?? []);
 }
 
 export type TrackerActor = {

@@ -129,6 +129,19 @@ function formatAllJobLines(body: Record<string, unknown>): string[] {
     );
   }
 
+  const settledUndisbursed = body.settledUndisbursed as
+    | { posted?: number; skipped?: number; eligible?: number; skippedReason?: string; error?: string }
+    | undefined;
+  if (settledUndisbursed?.error) {
+    lines.push(`Settled not disbursed failed: ${settledUndisbursed.error}`);
+  } else if (settledUndisbursed?.skippedReason) {
+    lines.push(`Settled not disbursed: skipped (${settledUndisbursed.skippedReason})`);
+  } else if (settledUndisbursed) {
+    lines.push(
+      `Settled not disbursed: ${settledUndisbursed.posted ?? 0} posted (${settledUndisbursed.eligible ?? 0} eligible, ${settledUndisbursed.skipped ?? 0} skipped)`,
+    );
+  }
+
   const smsTimeTriggers = body.smsTimeTriggers as
     | {
         queued?: number;
@@ -183,6 +196,8 @@ function formatSingleStepLine(step: DailyJobStep, body: Record<string, unknown>)
       return `Missing-field notices: ${result.posted ?? 0} posted`;
     case "fieldReminders":
       return `Field reminders: ${result.posted ?? 0} posted`;
+    case "settledUndisbursed":
+      return `Settled not disbursed: ${result.posted ?? 0} posted`;
     case "smsTimeTriggers":
       return `SMS time-in-stage: ${result.queued ?? 0} queued`;
     default:
@@ -243,14 +258,9 @@ async function postDailyJobSlack(text: string) {
 
 const DAILY_CRON_BATCH_LABELS = [
   "Quo phone sync",
-  "Quo language tags",
-  "Slack channel sheet sync",
+  "Quo language + Slack channels",
   "Settlement sheet sync",
-  "Treatment promotion",
-  "Daily pulse",
-  "Missing fields",
-  "Field reminders",
-  "SMS automations",
+  "Pulse / reminders / settled-undisbursed / SMS",
 ] as const;
 
 /** Post immediately when cron starts so a hung/killed run is still visible in #daily-pulse. */

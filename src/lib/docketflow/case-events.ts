@@ -14,6 +14,7 @@ type CaseEventRow = {
   included?: boolean | null;
   completed?: boolean | null;
   calendar_origin?: string | null;
+  created_at?: string | null;
 };
 
 function todayYmd(date = new Date()): string {
@@ -25,6 +26,10 @@ function deadlineInclusiveEndDate(ev: Pick<DocketFlowScheduledEvent, "date" | "d
   const last = ev.deadlineEndDate?.trim();
   if (last && last >= ev.date) return last;
   return ev.date;
+}
+
+export function mapCaseEventRows(rows: CaseEventRow[]): DocketFlowScheduledEvent[] {
+  return rows.map(rowToScheduledEvent).sort(compareScheduledEvents);
 }
 
 function rowToScheduledEvent(row: CaseEventRow): DocketFlowScheduledEvent {
@@ -46,7 +51,42 @@ function rowToScheduledEvent(row: CaseEventRow): DocketFlowScheduledEvent {
     included: row.included !== false,
     completed: Boolean(row.completed),
     calendarOrigin: row.calendar_origin === "google_ics_mirror" ? "google_ics_mirror" : "docketflow",
+    createdAt: row.created_at ?? null,
   };
+}
+
+/** Events whose calendar date falls in [weekStart, weekEnd], including completed ones. */
+export function pickEventsByDateInWeek(
+  rows: CaseEventRow[],
+  weekStart: string,
+  weekEnd: string,
+): DocketFlowScheduledEvent[] {
+  return rows
+    .map(rowToScheduledEvent)
+    .filter((ev) => {
+      if (!ev.included) return false;
+      if (ev.calendarOrigin === "google_ics_mirror") return false;
+      const day = (ev.date || ev.startDateTime || "").slice(0, 10);
+      return day >= weekStart && day <= weekEnd;
+    })
+    .sort(compareScheduledEvents);
+}
+
+/** Events created in [weekStart, weekEnd] (paralegal scheduling credit). */
+export function pickEventsCreatedInWeek(
+  rows: CaseEventRow[],
+  weekStart: string,
+  weekEnd: string,
+): DocketFlowScheduledEvent[] {
+  return rows
+    .map(rowToScheduledEvent)
+    .filter((ev) => {
+      if (!ev.included) return false;
+      if (ev.calendarOrigin === "google_ics_mirror") return false;
+      const day = (ev.createdAt || "").slice(0, 10);
+      return Boolean(day) && day >= weekStart && day <= weekEnd;
+    })
+    .sort(compareScheduledEvents);
 }
 
 function compareScheduledEvents(a: DocketFlowScheduledEvent, b: DocketFlowScheduledEvent): number {

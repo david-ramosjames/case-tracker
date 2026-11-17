@@ -10,6 +10,7 @@ export type DailyCronGroup =
   | "dailyPulse"
   | "missingFields"
   | "fieldReminders"
+  | "settledUndisbursed"
   | "sms";
 
 export const DAILY_CRON_GROUP_ORDER: DailyCronGroup[] = [
@@ -21,6 +22,7 @@ export const DAILY_CRON_GROUP_ORDER: DailyCronGroup[] = [
   "dailyPulse",
   "missingFields",
   "fieldReminders",
+  "settledUndisbursed",
   "sms",
 ];
 
@@ -35,7 +37,14 @@ export const DAILY_CRON_BATCHES: DailyCronGroup[][] = [
   ["quoPhoneSync"],
   ["quoLanguageTag", "slackChannels"],
   ["settlementSync"],
-  ["treatmentPromotion", "dailyPulse", "missingFields", "fieldReminders", "sms"],
+  [
+    "treatmentPromotion",
+    "dailyPulse",
+    "missingFields",
+    "fieldReminders",
+    "settledUndisbursed",
+    "sms",
+  ],
 ];
 
 /** Batch indexes whose groups have no mutual dependency and can run in parallel. */

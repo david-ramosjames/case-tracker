@@ -90,3 +90,22 @@ export async function getMonthlySignedCaseGoal(year: number, month1to12: number)
     periodGrain: "month",
   });
 }
+
+/** Firm Performance Overview attorney-fees goal for a calendar quarter (not attorney /goals). */
+export const ATTORNEY_FEES_QUARTER_METRIC = "attorney_fees_quarter";
+
+export function calendarQuarterStartYmd(year: number, quarter1to4: number) {
+  const month = (Math.max(1, Math.min(4, quarter1to4)) - 1) * 3 + 1;
+  return `${year}-${String(month).padStart(2, "0")}-01`;
+}
+
+export async function getQuarterlyAttorneyFeesGoal(year: number, quarter1to4: number) {
+  const onDate = calendarQuarterStartYmd(year, quarter1to4);
+  const targets = await listPerformanceTargets();
+  return resolveTargetValue({
+    targets,
+    metricKey: ATTORNEY_FEES_QUARTER_METRIC,
+    onDate,
+    periodGrain: "quarter",
+  });
+}
