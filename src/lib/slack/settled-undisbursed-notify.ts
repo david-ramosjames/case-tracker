@@ -6,7 +6,7 @@ import {
   coerceClosingStatus,
   coerceReductionsStatus,
 } from "@/lib/case-options";
-import { getCentralHour } from "@/lib/cron/daily-cron-run";
+import { isSettledUndisbursedSendWindow } from "@/lib/cron/daily-cron-run";
 import { isResultsTabCase } from "@/lib/results-commission-year";
 import { resolveChannelUserMentions } from "@/lib/slack/channel-topic";
 import { fetchChannelTopic, normalizeSlackChannelId, postSlackMessage } from "@/lib/slack/client";
@@ -68,20 +68,25 @@ export async function sendSettledUndisbursedSlackNotices(
   options?: {
     goals?: AttorneyGoal[];
     dryRun?: boolean;
-    /** When false, skip unless Central hour is 10 (morning cron). Default true for cron. */
+    /**
+     * When true (default for cron), only send in the Mon 10:00 / Wed 12:00 Central windows.
+     * Force/manual runs set force=true (or scheduleOnly=false) to send anytime.
+     */
+    scheduleOnly?: boolean;
+    /** @deprecated Use scheduleOnly. Kept so older callers keep working. */
     morningOnly?: boolean;
     caseNumber?: string;
     force?: boolean;
   },
 ) {
-  const morningOnly = options?.morningOnly !== false;
-  if (morningOnly && !options?.force && getCentralHour() !== 10) {
+  const scheduleOnly = options?.scheduleOnly ?? options?.morningOnly ?? true;
+  if (scheduleOnly && !options?.force && !isSettledUndisbursedSendWindow()) {
     return {
       posted: 0,
       skipped: 0,
       eligible: 0,
       dryRun: Boolean(options?.dryRun),
-      skippedReason: "Not morning (10 AM Central)" as const,
+      skippedReason: "Outside Mon 10:00 / Wed 12:00 Central send window" as const,
       previewItems: [] as SettledUndisbursedPreviewItem[],
     };
   }

@@ -95,8 +95,8 @@ async function runSettledUndisbursed(options: DailyJobOptions) {
     goals,
     dryRun: options.dryRun,
     caseNumber: options.caseNumber,
-    // Morning cron is 10 AM Central; force/manual can send anytime.
-    morningOnly: !force,
+    // Mon 10:00 / Wed 12:00 Central only; force/manual can send anytime.
+    scheduleOnly: !force,
     force,
   });
 }

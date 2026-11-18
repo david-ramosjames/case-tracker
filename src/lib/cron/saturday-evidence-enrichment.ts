@@ -1,19 +1,14 @@
 import { resolveClientContactSlackCaches } from "@/lib/client-contact/sync-quo";
-import { getCentralHour } from "@/lib/cron/daily-cron-run";
+import { getCentralHour, getCentralWeekdayShort } from "@/lib/cron/daily-cron-run";
 import { syncQuoPhonesToTrackerIfConfigured } from "@/lib/sms/workflow";
 import { postSlackMessage } from "@/lib/slack/client";
 import { getDailyPulseChannelId, isSlackEnabled } from "@/lib/slack/config";
 import { errorMessage } from "@/lib/utils";
 
+export { getCentralWeekdayShort };
+
 /** Saturday night Central hours: 10pm, 11pm, and midnight (Sunday 12am CT). */
 export const SATURDAY_EVIDENCE_ENRICHMENT_HOURS = [22, 23, 0] as const;
-
-export function getCentralWeekdayShort(now = new Date()) {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Chicago",
-    weekday: "short",
-  }).format(now);
-}
 
 /**
  * Vercel schedules both CDT/CST UTC times; only Sat 10pm–midnight Central runs proceed.

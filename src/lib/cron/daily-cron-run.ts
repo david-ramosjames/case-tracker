@@ -107,6 +107,24 @@ export function getCentralHour(now = new Date()) {
   );
 }
 
+/** Short weekday in America/Chicago (`Sun` … `Sat`). */
+export function getCentralWeekdayShort(now = new Date()) {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Chicago",
+    weekday: "short",
+  }).format(now);
+}
+
+/**
+ * Settled-not-disbursed Slack notices: Monday 10:00 and Wednesday 12:00 Central.
+ * Used by the morning daily chain (Mon) and the dedicated noon cron (Wed).
+ */
+export function isSettledUndisbursedSendWindow(now = new Date()) {
+  const hour = getCentralHour(now);
+  const weekday = getCentralWeekdayShort(now);
+  return (weekday === "Mon" && hour === 10) || (weekday === "Wed" && hour === 12);
+}
+
 export function isDailyCronSlotDue(slot: DailyCronSlot, now = new Date()) {
   return getCentralHour(now) === DAILY_CRON_SLOT_CENTRAL_HOURS[slot];
 }

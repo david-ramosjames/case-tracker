@@ -79,6 +79,14 @@
     {
       "path": "/api/cron/performance-snapshots?kind=eow",
       "schedule": "0 4 * * 1"
+    },
+    {
+      "path": "/api/cron/settled-undisbursed",
+      "schedule": "0 17 * * 3"
+    },
+    {
+      "path": "/api/cron/settled-undisbursed",
+      "schedule": "0 18 * * 3"
     }
   ],
   "functions": {
@@ -98,6 +106,9 @@
       "maxDuration": 800
     },
     "src/app/api/cron/quo-evidence-enrichment/route.ts": {
+      "maxDuration": 800
+    },
+    "src/app/api/cron/settled-undisbursed/route.ts": {
       "maxDuration": 800
     },
     "src/app/api/admin/slack-topic-sync-all/route.ts": {
