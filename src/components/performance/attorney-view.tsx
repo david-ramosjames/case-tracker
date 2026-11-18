@@ -6,6 +6,7 @@ import { AutoProgressPanel } from "@/components/performance/auto-progress-panel"
 import { ConfirmEventsPanel, type ConfirmEventRow } from "@/components/performance/confirm-events-panel";
 import { MyWorkView } from "@/components/performance/my-work-view";
 import { cn } from "@/lib/utils";
+import { type AttorneyBoardBuckets } from "@/lib/performance/attorney-board";
 import { type PersonScorecardBundle } from "@/lib/performance/person-scorecard";
 import {
   type AttorneyPlanLine,
@@ -38,6 +39,7 @@ export function AttorneyView({
   viewerContactId,
   confirmRows,
   scorecard = null,
+  boardBuckets = null,
 }: {
   initialDeliverables: PerformanceDeliverable[];
   initialCommitments: PerformanceCommitment[];
@@ -52,6 +54,7 @@ export function AttorneyView({
   viewerContactId: string | null;
   confirmRows: ConfirmEventRow[];
   scorecard?: PersonScorecardBundle | null;
+  boardBuckets?: AttorneyBoardBuckets | null;
 }) {
   const [tab, setTab] = useState<Tab>("output");
 
@@ -97,6 +100,7 @@ export function AttorneyView({
           basePath="/performance/attorney"
           personSwitcherLabel="Attorney"
           scorecard={scorecard}
+          boardBuckets={boardBuckets}
         />
       ) : (
         <div className="space-y-6">

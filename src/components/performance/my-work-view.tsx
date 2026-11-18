@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { AutoProgressPanel } from "@/components/performance/auto-progress-panel";
 import { CasePicker } from "@/components/performance/case-picker";
@@ -13,14 +14,20 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
-  ATTORNEY_OUTPUT_TYPES,
+  ATTORNEY_IDENTIFY_CATEGORIES,
   DEPOSITION_PARTY_ROLES,
   LIT_EVENT_KINDS,
   PARALEGAL_CATEGORIES,
   litEventKindLabel,
+  type AttorneyIdentifyCategoryKey,
   type LitEventKind,
   type ParalegalCategoryKey,
 } from "@/lib/performance/deliverable-categories";
+import {
+  isSyntheticBoardDeliverable,
+  isVisibleOnParalegalBoard,
+  type AttorneyBoardBuckets,
+} from "@/lib/performance/attorney-board";
 import { type PersonScorecardBundle } from "@/lib/performance/person-scorecard";
 import { sortCasesByNumber } from "@/lib/performance/staff-roles";
 import {
@@ -29,8 +36,21 @@ import {
   type PerformanceDeliverable,
   type PerformanceDeliverableType,
 } from "@/lib/performance/types";
-import { weekEndFromStart } from "@/lib/performance/weeks";
+import { daysBetweenYmd } from "@/lib/performance/pacing";
+import { chicagoTodayYmd, weekEndFromStart } from "@/lib/performance/weeks";
 import { type AppUser } from "@/lib/types";
+
+function deliverableStartYmd(d: PerformanceDeliverable) {
+  return (d.createdAt || d.identifiedAt || "").slice(0, 10) || null;
+}
+
+/** Days from create/start until complete (finished) or today (still open). */
+function daysSinceStarted(d: PerformanceDeliverable, todayYmd = chicagoTodayYmd()) {
+  const start = deliverableStartYmd(d);
+  if (!start) return null;
+  const end = (d.completedAt || "").slice(0, 10) || todayYmd;
+  return Math.max(0, daysBetweenYmd(start, end));
+}
 
 type CaseOption = {
   id: string;
@@ -57,6 +77,8 @@ type Props = {
   basePath?: string;
   personSwitcherLabel?: string;
   scorecard?: PersonScorecardBundle | null;
+  /** Attorney Output board: DF lit events + settlements (overrides default filters). */
+  boardBuckets?: AttorneyBoardBuckets | null;
 };
 
 type CreateDestination = "backlog" | "this_week" | "last_week";
@@ -91,7 +113,9 @@ export function MyWorkView({
   basePath,
   personSwitcherLabel,
   scorecard = null,
+  boardBuckets = null,
 }: Props) {
+  const router = useRouter();
   const isAttorney = mode === "attorney";
   const switcherPath = basePath ?? (isAttorney ? "/performance/attorney" : "/performance/my-work");
   const switcherLabel =
@@ -103,14 +127,10 @@ export function MyWorkView({
   const [coverOthers, setCoverOthers] = useState(false);
   const [form, setForm] = useState({
     caseId: "",
-    category: "demand_sent" as ParalegalCategoryKey | PerformanceDeliverableType,
+    category: "demand_sent" as ParalegalCategoryKey | AttorneyIdentifyCategoryKey,
     litEventKind: "" as LitEventKind | "",
-    depoParty: "",
-    deliverableType: "demand_sent" as PerformanceDeliverableType,
-    documentLabel: "",
-    roundNumber: "",
-    litPersonName: "",
-    hearingType: "",
+    /** Deposition party role or free-form hearing sub-type. */
+    subType: "",
     requestedCompletionDate: "",
     notes: "",
   });
@@ -133,35 +153,38 @@ export function MyWorkView({
     return map;
   }, [commitments]);
 
-  const finishedLastWeek = useMemo(
-    () =>
-      deliverables
-        .filter((d) => d.workflowStatus === "done" && inWeek(d.completedAt, lastWeekStart))
-        .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? "")),
-    [deliverables, lastWeekStart],
-  );
+  const boardDeliverables = useMemo(() => {
+    if (isAttorney) return deliverables;
+    return deliverables.filter(isVisibleOnParalegalBoard);
+  }, [deliverables, isAttorney]);
 
-  const thisWeekCommitted = useMemo(
-    () =>
-      deliverables.filter((d) => {
-        if (d.workflowStatus !== "committed") return false;
-        const commitment = commitmentByDeliverable.get(d.id);
-        return commitment?.weekStart === weekStart;
-      }),
-    [deliverables, commitmentByDeliverable, weekStart],
-  );
+  const finishedLastWeek = useMemo(() => {
+    if (boardBuckets) return boardBuckets.finished;
+    return boardDeliverables
+      .filter((d) => d.workflowStatus === "done" && inWeek(d.completedAt, lastWeekStart))
+      .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""));
+  }, [boardBuckets, boardDeliverables, lastWeekStart]);
 
-  const backlog = useMemo(
-    () => deliverables.filter((d) => d.workflowStatus === "backlog"),
-    [deliverables],
-  );
+  const thisWeekCommitted = useMemo(() => {
+    if (boardBuckets) return boardBuckets.committed;
+    return boardDeliverables.filter((d) => {
+      if (d.workflowStatus !== "committed") return false;
+      const commitment = commitmentByDeliverable.get(d.id);
+      return commitment?.weekStart === weekStart;
+    });
+  }, [boardBuckets, boardDeliverables, commitmentByDeliverable, weekStart]);
+
+  const backlog = useMemo(() => {
+    if (boardBuckets) return boardBuckets.backlog;
+    return boardDeliverables.filter((d) => d.workflowStatus === "backlog");
+  }, [boardBuckets, boardDeliverables]);
 
   const newEntriesThisWeek = useMemo(
     () =>
-      deliverables
+      boardDeliverables
         .filter((d) => inWeek(d.identifiedAt, weekStart))
         .sort((a, b) => (b.identifiedAt ?? "").localeCompare(a.identifiedAt ?? "")),
-    [deliverables, weekStart],
+    [boardDeliverables, weekStart],
   );
 
   async function refresh() {
@@ -178,47 +201,33 @@ export function MyWorkView({
   }
 
   function resolveCreateFields() {
-    if (isAttorney) {
-      if (!form.notes.trim()) throw new Error("Add notes with further details.");
-      const type = form.deliverableType;
-      return {
-        deliverableType: type,
-        documentLabel: form.documentLabel || null,
-        hearingType:
-          type === "hearing" || type === "hearing_trial"
-            ? form.hearingType.trim() || form.notes.trim()
-            : form.hearingType || null,
-        litPersonName: form.litPersonName || null,
-        roundNumber: form.roundNumber ? Number(form.roundNumber) : null,
-        notes: form.notes.trim(),
-      };
-    }
+    const category = form.category;
 
-    const category = form.category as ParalegalCategoryKey;
     if (category === "lit_event_scheduled") {
-      if (!form.litEventKind) throw new Error("Select a litigation event type.");
-      if (form.litEventKind === "deposition" && !form.depoParty) {
-        throw new Error("Select a deposition party role.");
+      if (!form.litEventKind) throw new Error("Select a Type for the lit event.");
+      if (form.litEventKind === "deposition" && !form.subType.trim()) {
+        throw new Error("Select a Sub-type for the deposition.");
       }
-      if (!form.notes.trim() && form.litEventKind !== "deposition") {
-        throw new Error("Add notes with further details.");
+      if (form.litEventKind === "hearing" && !form.subType.trim()) {
+        throw new Error("Enter a Sub-type for the hearing.");
       }
-      if (form.litEventKind === "deposition" && !form.notes.trim() && !form.depoParty) {
-        throw new Error("Add notes with further details.");
-      }
+      if (!form.notes.trim()) throw new Error("Add notes with further details.");
       return {
         deliverableType: "lit_event_scheduled" as const,
-        hearingType: form.litEventKind,
-        documentLabel: form.litEventKind === "deposition" ? form.depoParty || null : null,
+        hearingType: form.litEventKind === "trial" ? "trial" : form.litEventKind,
+        documentLabel:
+          form.litEventKind === "deposition" || form.litEventKind === "hearing"
+            ? form.subType.trim()
+            : null,
         litPersonName: null,
         roundNumber: null,
-        notes: form.notes.trim() || null,
+        notes: form.notes.trim(),
       };
     }
 
     if (!form.notes.trim()) throw new Error("Add notes with further details.");
     return {
-      deliverableType: category,
+      deliverableType: category as PerformanceDeliverableType,
       documentLabel: null,
       hearingType: null,
       litPersonName: null,
@@ -294,11 +303,7 @@ export function MyWorkView({
         ...f,
         caseId: "",
         litEventKind: "",
-        depoParty: "",
-        documentLabel: "",
-        roundNumber: "",
-        litPersonName: "",
-        hearingType: "",
+        subType: "",
         notes: "",
       }));
       if (destination === "last_week") await refresh();
@@ -328,8 +333,63 @@ export function MyWorkView({
         setDeliverables((prev) => prev.map((d) => (d.id === id ? body.deliverable! : d)));
       }
       if (body.commitment) setCommitments((prev) => [...prev, body.commitment!]);
+      if (boardBuckets) router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Commit failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function moveToInProgress(id: string) {
+    setBusyId(id);
+    setError(null);
+    try {
+      const commitment = commitmentByDeliverable.get(id);
+      const res = await fetch(`/api/performance/deliverables/${id}/uncommit`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commitmentId: commitment?.id ?? null }),
+      });
+      const body = (await res.json()) as { deliverable?: PerformanceDeliverable; error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Move failed");
+      if (body.deliverable) {
+        setDeliverables((prev) => prev.map((d) => (d.id === id ? body.deliverable! : d)));
+      }
+      setCommitments((prev) =>
+        prev.map((c) =>
+          c.deliverableId === id && c.outcome === "promised" ? { ...c, outcome: "moved" } : c,
+        ),
+      );
+      if (boardBuckets) router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Move failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function cancelItem(id: string) {
+    if (!window.confirm("Cancel this deliverable? It will be removed from the board.")) return;
+    setBusyId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/performance/deliverables/${id}/cancel`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: "Cancelled from board" }),
+      });
+      const body = (await res.json()) as { deliverable?: PerformanceDeliverable; error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Cancel failed");
+      setDeliverables((prev) => prev.filter((d) => d.id !== id));
+      setCommitments((prev) =>
+        prev.map((c) =>
+          c.deliverableId === id && c.outcome === "promised" ? { ...c, outcome: "cancelled" } : c,
+        ),
+      );
+      if (boardBuckets) router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Cancel failed");
     } finally {
       setBusyId(null);
     }
@@ -354,6 +414,7 @@ export function MyWorkView({
         setDeliverables((prev) => prev.map((d) => (d.id === id ? body.deliverable! : d)));
       }
       await refresh();
+      if (boardBuckets) router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Complete failed");
     } finally {
@@ -366,95 +427,129 @@ export function MyWorkView({
     mode: "finished" | "thisWeek" | "backlog",
   ) {
     return (
-      <Table>
+      <Table className="table-fixed w-full min-w-[64rem]">
         <TableHeader>
           <TableRow>
-            <TableHead>Paralegal</TableHead>
-            <TableHead>Attorney</TableHead>
-            <TableHead>Deliverable</TableHead>
-            <TableHead>Case #</TableHead>
-            <TableHead>Client</TableHead>
-            <TableHead>{mode === "finished" ? "Complete date" : "Status"}</TableHead>
-            <TableHead>Notes</TableHead>
-            {mode !== "finished" ? <TableHead /> : null}
+            <TableHead className="w-[8rem]">Paralegal</TableHead>
+            <TableHead className="w-[8rem]">Attorney</TableHead>
+            <TableHead className="w-[14rem]">Deliverable</TableHead>
+            <TableHead className="w-[5.5rem]">Case #</TableHead>
+            <TableHead className="w-[9rem]">Client</TableHead>
+            <TableHead className="w-[5.5rem]">Started</TableHead>
+            <TableHead className="w-[7.5rem]">{mode === "finished" ? "Complete date" : "Status"}</TableHead>
+            <TableHead className="w-[12rem]">Notes</TableHead>
+            <TableHead className="w-[18rem]" />
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((d) => (
-            <TableRow key={d.id}>
-              <TableCell className="whitespace-nowrap">
-                {d.assigneeUserId ? nameById[d.assigneeUserId] ?? "—" : "—"}
-              </TableCell>
-              <TableCell className="whitespace-nowrap">
-                {d.attorneyUserId ? nameById[d.attorneyUserId] ?? "—" : "—"}
-              </TableCell>
-              <TableCell>
-                <div className="font-medium">
-                  {d.deliverableType === "lit_event_scheduled"
-                    ? `Schedule Litigation Event${
-                        d.hearingType ? ` · ${litEventKindLabel(d.hearingType) ?? d.hearingType}` : ""
-                      }${d.documentLabel ? ` · ${d.documentLabel}` : ""}`
-                    : typeLabel(d.deliverableType)}
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  {d.notes || d.identityLabel || d.identityKey}
-                </div>
-              </TableCell>
-              <TableCell>
-                {d.caseId ? (
-                  <Link className="font-medium text-pink-700 hover:underline" href={`/cases/${d.caseId}`}>
-                    {d.caseNumber}
-                  </Link>
-                ) : (
-                  d.caseNumber
-                )}
-              </TableCell>
-              <TableCell>{d.clientNameSnapshot ?? "—"}</TableCell>
-              <TableCell className="whitespace-nowrap text-xs">
-                {mode === "finished" ? (
-                  d.completedAt?.slice(0, 10) ?? "—"
-                ) : (
-                  <Badge variant="outline">
-                    {d.workflowStatus === "backlog"
-                      ? "In progress"
-                      : d.workflowStatus === "committed"
-                        ? "This week"
-                        : d.workflowStatus}
-                  </Badge>
-                )}
-              </TableCell>
-              <TableCell className="max-w-[16rem] truncate text-xs" title={d.notes ?? undefined}>
-                {d.notes ?? "—"}
-              </TableCell>
-              {mode !== "finished" ? (
-                <TableCell className="space-x-2 whitespace-nowrap">
-                  {d.workflowStatus === "backlog" ? (
+          {rows.map((d) => {
+            const startYmd = deliverableStartYmd(d);
+            const ageDays = daysSinceStarted(d);
+            return (
+              <TableRow key={d.id}>
+                <TableCell className="whitespace-nowrap">
+                  {d.assigneeUserId ? nameById[d.assigneeUserId] ?? "—" : "—"}
+                </TableCell>
+                <TableCell className="whitespace-nowrap">
+                  {d.attorneyUserId ? nameById[d.attorneyUserId] ?? "—" : "—"}
+                </TableCell>
+                <TableCell>
+                  <div className="font-medium">
+                    {d.deliverableType === "lit_event_scheduled"
+                      ? `Schedule Litigation Event${
+                          d.hearingType ? ` · ${litEventKindLabel(d.hearingType) ?? d.hearingType}` : ""
+                        }${d.documentLabel ? ` · ${d.documentLabel}` : ""}`
+                      : typeLabel(d.deliverableType)}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {d.identityLabel || d.identityKey}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  {d.caseId ? (
+                    <Link className="font-medium text-pink-700 hover:underline" href={`/cases/${d.caseId}`}>
+                      {d.caseNumber}
+                    </Link>
+                  ) : (
+                    d.caseNumber
+                  )}
+                </TableCell>
+                <TableCell>{d.clientNameSnapshot ?? "—"}</TableCell>
+                <TableCell className="whitespace-nowrap text-xs" title={startYmd ?? undefined}>
+                  {ageDays != null ? (
                     <>
-                      <Button size="sm" variant="outline" disabled={busyId === d.id} onClick={() => void commit(d.id)}>
-                        Add to this week
+                      <div className="font-medium tabular-nums">{ageDays}d</div>
+                      <div className="text-muted-foreground">{startYmd}</div>
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </TableCell>
+                <TableCell className="whitespace-nowrap text-xs">
+                  {mode === "finished" ? (
+                    d.completedAt?.slice(0, 10) ?? "—"
+                  ) : (
+                    <Badge variant="outline">
+                      {d.workflowStatus === "backlog"
+                        ? "In progress"
+                        : d.workflowStatus === "committed"
+                          ? "This week"
+                          : d.workflowStatus}
+                    </Badge>
+                  )}
+                </TableCell>
+                <TableCell className="truncate text-xs" title={d.notes ?? undefined}>
+                  {d.notes ?? "—"}
+                </TableCell>
+                <TableCell className="space-x-2 whitespace-nowrap">
+                  {mode !== "finished" && isSyntheticBoardDeliverable(d.id) ? (
+                    <span className="text-xs text-muted-foreground">
+                      {d.id.startsWith("docket:") ? "DocketFlow calendar" : "Case Tracker"}
+                    </span>
+                  ) : null}
+                  {mode !== "finished" &&
+                  !isSyntheticBoardDeliverable(d.id) &&
+                  d.workflowStatus === "backlog" ? (
+                    <Button size="sm" variant="outline" disabled={busyId === d.id} onClick={() => void commit(d.id)}>
+                      Move to this week
+                    </Button>
+                  ) : null}
+                  {mode === "thisWeek" &&
+                  !isSyntheticBoardDeliverable(d.id) &&
+                  d.workflowStatus === "committed" ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busyId === d.id}
+                      onClick={() => void moveToInProgress(d.id)}
+                    >
+                      Move to in progress
+                    </Button>
+                  ) : null}
+                  {mode !== "finished" &&
+                  !isSyntheticBoardDeliverable(d.id) &&
+                  (d.workflowStatus === "backlog" || d.workflowStatus === "committed") ? (
+                    <>
+                      <Button size="sm" disabled={busyId === d.id} onClick={() => void complete(d.id)}>
+                        Complete
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
                         disabled={busyId === d.id}
-                        onClick={() => void complete(d.id, true)}
+                        onClick={() => void cancelItem(d.id)}
                       >
-                        Finished last week
+                        Cancel
                       </Button>
                     </>
                   ) : null}
-                  {d.workflowStatus === "backlog" || d.workflowStatus === "committed" ? (
-                    <Button size="sm" disabled={busyId === d.id} onClick={() => void complete(d.id)}>
-                      Complete
-                    </Button>
-                  ) : null}
                 </TableCell>
-              ) : null}
-            </TableRow>
-          ))}
+              </TableRow>
+            );
+          })}
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={mode === "finished" ? 7 : 8} className="text-muted-foreground">
+              <TableCell colSpan={9} className="text-muted-foreground">
                 No items.
               </TableCell>
             </TableRow>
@@ -491,91 +586,77 @@ export function MyWorkView({
             coverLabel="Showing all cases (cover)"
           />
         </div>
-        {isAttorney ? (
+        <label className="space-y-1 text-sm">
+          <span className="font-medium">Category</span>
+          <select
+            className="w-full rounded-md border px-3 py-2"
+            value={form.category}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                category: e.target.value as ParalegalCategoryKey | AttorneyIdentifyCategoryKey,
+                litEventKind: "",
+                subType: "",
+              }))
+            }
+          >
+            {(isAttorney ? ATTORNEY_IDENTIFY_CATEGORIES : PARALEGAL_CATEGORIES).map((t) => (
+              <option key={t.key} value={t.key}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {form.category === "lit_event_scheduled" ? (
           <label className="space-y-1 text-sm">
             <span className="font-medium">Type</span>
             <select
               className="w-full rounded-md border px-3 py-2"
-              value={form.deliverableType}
+              value={form.litEventKind}
               onChange={(e) =>
                 setForm((f) => ({
                   ...f,
-                  deliverableType: e.target.value as PerformanceDeliverableType,
+                  litEventKind: e.target.value as LitEventKind | "",
+                  subType: "",
                 }))
               }
             >
-              {ATTORNEY_OUTPUT_TYPES.map((t) => (
+              <option value="">Select…</option>
+              {LIT_EVENT_KINDS.map((t) => (
                 <option key={t.key} value={t.key}>
                   {t.label}
                 </option>
               ))}
             </select>
           </label>
-        ) : (
-          <>
-            <label className="space-y-1 text-sm">
-              <span className="font-medium">Category</span>
-              <select
-                className="w-full rounded-md border px-3 py-2"
-                value={form.category}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    category: e.target.value as ParalegalCategoryKey,
-                    litEventKind: "",
-                    depoParty: "",
-                  }))
-                }
-              >
-                {PARALEGAL_CATEGORIES.map((t) => (
-                  <option key={t.key} value={t.key}>
-                    {t.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {form.category === "lit_event_scheduled" ? (
-              <label className="space-y-1 text-sm">
-                <span className="font-medium">Litigation event</span>
-                <select
-                  className="w-full rounded-md border px-3 py-2"
-                  value={form.litEventKind}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      litEventKind: e.target.value as LitEventKind | "",
-                      depoParty: "",
-                    }))
-                  }
-                >
-                  <option value="">Select…</option>
-                  {LIT_EVENT_KINDS.map((t) => (
-                    <option key={t.key} value={t.key}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-            {form.category === "lit_event_scheduled" && form.litEventKind === "deposition" ? (
-              <label className="space-y-1 text-sm">
-                <span className="font-medium">Deposition party</span>
-                <select
-                  className="w-full rounded-md border px-3 py-2"
-                  value={form.depoParty}
-                  onChange={(e) => setForm((f) => ({ ...f, depoParty: e.target.value }))}
-                >
-                  <option value="">Select…</option>
-                  {DEPOSITION_PARTY_ROLES.map((role) => (
-                    <option key={role} value={role}>
-                      {role}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-          </>
-        )}
+        ) : null}
+        {form.category === "lit_event_scheduled" && form.litEventKind === "deposition" ? (
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Sub-type</span>
+            <select
+              className="w-full rounded-md border px-3 py-2"
+              value={form.subType}
+              onChange={(e) => setForm((f) => ({ ...f, subType: e.target.value }))}
+            >
+              <option value="">Select…</option>
+              {DEPOSITION_PARTY_ROLES.map((role) => (
+                <option key={role} value={role}>
+                  {role}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+        {form.category === "lit_event_scheduled" && form.litEventKind === "hearing" ? (
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Sub-type</span>
+            <Input
+              value={form.subType}
+              onChange={(e) => setForm((f) => ({ ...f, subType: e.target.value }))}
+              placeholder="Type of hearing"
+            />
+          </label>
+        ) : null}
         <label className="space-y-1 text-sm">
           <span className="font-medium">Requested date</span>
           <Input
@@ -682,7 +763,9 @@ export function MyWorkView({
             <CardHeader>
               <CardTitle>Finished last week</CardTitle>
               <CardDescription>
-                Week of {lastWeekStart} — bring this list to the Monday 9:30 check. Pair totals roll up on Team.
+                {boardBuckets
+                  ? `Week of ${lastWeekStart} — shared completed work, plus verified lit events and settlements (attorney-only).`
+                  : `Week of ${lastWeekStart} — bring this list to the Monday 9:30 check. Pair totals roll up on Team.`}
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">{renderWorkTable(finishedLastWeek, "finished")}</CardContent>
@@ -691,7 +774,11 @@ export function MyWorkView({
           <Card>
             <CardHeader>
               <CardTitle>Committed for this week</CardTitle>
-              <CardDescription>Full list of work expected to finish in the current week.</CardDescription>
+              <CardDescription>
+                {boardBuckets
+                  ? "Lit events on the DocketFlow calendar this week, plus settlements dated or committed this week."
+                  : "Full list of work expected to finish in the current week."}
+              </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">{renderWorkTable(thisWeekCommitted, "thisWeek")}</CardContent>
           </Card>
@@ -702,7 +789,9 @@ export function MyWorkView({
             <CardHeader>
               <CardTitle>In progress for future weeks</CardTitle>
               <CardDescription>
-                Full backlog of active work that will not finish this week. Add new items on Identify Work.
+                {boardBuckets
+                  ? "Lit events on the DocketFlow calendar for the next two weeks (week +1 and +2)."
+                  : "Full backlog of active work that will not finish this week. Add new items on Identify Work."}
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">{renderWorkTable(backlog, "backlog")}</CardContent>

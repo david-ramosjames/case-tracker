@@ -455,6 +455,22 @@ export async function listDocketFlowCaseEvents(caseId: string): Promise<DocketFl
   return mapCaseEventRows(data ?? []);
 }
 
+/** Batch-load DocketFlow calendar rows for many cases, optionally clipped to a date window. */
+export async function listDocketFlowCaseEventsForCases(input: {
+  caseIds: string[];
+  dateFrom?: string;
+  dateTo?: string;
+}): Promise<DocketFlowScheduledEvent[]> {
+  if (input.caseIds.length === 0) return [];
+  const client = await createSharedDataClient();
+  let query = client.from("case_events").select(CASE_EVENT_COLUMNS).in("case_id", input.caseIds);
+  if (input.dateFrom) query = query.gte("date", input.dateFrom);
+  if (input.dateTo) query = query.lte("date", input.dateTo);
+  const { data, error } = await query.order("date", { ascending: true }).order("id", { ascending: true });
+  if (error) throw error;
+  return mapCaseEventRows(data ?? []);
+}
+
 export type TrackerActor = {
   userId?: string;
   userName: string;

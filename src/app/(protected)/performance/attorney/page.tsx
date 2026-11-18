@@ -3,6 +3,10 @@ import { requireSessionUser } from "@/lib/auth/session";
 import { AttorneyView } from "@/components/performance/attorney-view";
 import { type ConfirmEventRow } from "@/components/performance/confirm-events-panel";
 import { canBrowsePerformancePeople } from "@/lib/performance/access";
+import {
+  attorneyBoardDateWindow,
+  buildAttorneyBoardBuckets,
+} from "@/lib/performance/attorney-board";
 import { listAttorneyPlanLines } from "@/lib/performance/attorney-plans";
 import {
   listCommitmentsForWeek,
@@ -14,7 +18,10 @@ import { listPerformanceTargets } from "@/lib/performance/targets";
 import { shiftWeekStart } from "@/lib/performance/team-rollup";
 import { weekStartMondayCt } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
-import { getNextScheduledDocketFlowEvents } from "@/lib/supabase/services";
+import {
+  getNextScheduledDocketFlowEvents,
+  listDocketFlowCaseEventsForCases,
+} from "@/lib/supabase/services";
 import { type AppUser } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -79,10 +86,43 @@ export default async function PerformanceAttorneysPage({
 
   const nameById = Object.fromEntries(users.map((u) => [u.id, u.name]));
 
+  const attorneyRecords = selectedAttorney
+    ? records.filter((r) => r.shared.attorneyId === selectedAttorney.id)
+    : [];
+
+  const window = attorneyBoardDateWindow(weekStart, lastWeekStart);
+  let eventsByCaseId: Record<string, Awaited<ReturnType<typeof listDocketFlowCaseEventsForCases>>> = {};
+  try {
+    const events = await listDocketFlowCaseEventsForCases({
+      caseIds: attorneyRecords.map((r) => r.shared.id),
+      dateFrom: window.dateFrom,
+      dateTo: window.dateTo,
+    });
+    eventsByCaseId = {};
+    for (const event of events) {
+      const list = eventsByCaseId[event.caseId] ?? [];
+      list.push(event);
+      eventsByCaseId[event.caseId] = list;
+    }
+  } catch {
+    eventsByCaseId = {};
+  }
+
+  const boardBuckets = selectedAttorney
+    ? buildAttorneyBoardBuckets({
+        weekStart,
+        lastWeekStart,
+        personId: selectedAttorney.id,
+        deliverables,
+        commitments,
+        records: attorneyRecords,
+        eventsByCaseId,
+      })
+    : null;
+
   const confirmRows: ConfirmEventRow[] = [];
   if (selectedAttorney) {
-    const attorneyRecords = records.filter((r) => r.shared.attorneyId === selectedAttorney.id).slice(0, 25);
-    for (const record of attorneyRecords) {
+    for (const record of attorneyRecords.slice(0, 25)) {
       try {
         const events = await getNextScheduledDocketFlowEvents(record.shared.id, 2);
         for (const event of events) {
@@ -116,6 +156,7 @@ export default async function PerformanceAttorneysPage({
       viewerContactId={contact?.id ?? null}
       confirmRows={confirmRows}
       scorecard={scorecard}
+      boardBuckets={boardBuckets}
     />
   );
 }

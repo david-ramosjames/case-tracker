@@ -416,6 +416,62 @@ export async function cancelDeliverable(input: {
   return deliverable;
 }
 
+/** Move a this-week commitment back to the open backlog (In progress). */
+export async function uncommitDeliverableToBacklog(input: {
+  deliverableId: string;
+  commitmentId?: string | null;
+  actorUserId?: string | null;
+}): Promise<PerformanceDeliverable> {
+  const client = await createPerformanceClient();
+
+  const { data: existing, error: loadError } = await client
+    .from("performance_deliverables")
+    .select("*")
+    .eq("id", input.deliverableId)
+    .maybeSingle();
+  if (loadError) throw loadError;
+  if (!existing) throw new Error("Deliverable not found.");
+  const current = rowToDeliverable(existing as UnknownRow);
+  if (current.workflowStatus === "done" || current.workflowStatus === "cancelled") {
+    throw new Error("Cannot move a closed deliverable back to in progress.");
+  }
+
+  if (input.commitmentId) {
+    await client
+      .from("performance_commitments")
+      .update({ outcome: "moved", moved_to_week_start: null })
+      .eq("id", input.commitmentId)
+      .eq("outcome", "promised");
+  } else {
+    await client
+      .from("performance_commitments")
+      .update({ outcome: "moved", moved_to_week_start: null })
+      .eq("deliverable_id", input.deliverableId)
+      .eq("outcome", "promised");
+  }
+
+  const { data, error } = await client
+    .from("performance_deliverables")
+    .update({
+      workflow_status: "backlog",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.deliverableId)
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  const deliverable = rowToDeliverable(data as UnknownRow);
+  await appendEvent({
+    deliverableId: deliverable.id,
+    commitmentId: input.commitmentId,
+    actorUserId: input.actorUserId,
+    eventType: "uncommitted",
+    payload: { to: "backlog" },
+  });
+  return deliverable;
+}
+
 export async function listDeliverablesForAssignee(assigneeUserId: string) {
   const client = await createPerformanceClient();
   const { data, error } = await client
