@@ -31,11 +31,20 @@ function cellClass(status: GoalStatus | "behind" | "met" | "ahead") {
   return "bg-white text-navy-950";
 }
 
-function TeamLabel({ row }: { row: PairWeekRow }) {
+function TeamLabel({
+  row,
+  primary = "attorney",
+}: {
+  row: PairWeekRow;
+  /** Paralegals tab leads with the paralegal; Attorneys / Closings keep attorney first. */
+  primary?: "attorney" | "paralegal";
+}) {
+  const top = primary === "paralegal" ? row.paralegalName : row.attorneyName;
+  const sub = primary === "paralegal" ? row.attorneyName : row.paralegalName;
   return (
     <div className="leading-tight">
-      <div className="font-medium text-navy-950">{row.attorneyName}</div>
-      <div className="text-xs text-muted-foreground">{row.paralegalName}</div>
+      <div className="font-medium text-navy-950">{top}</div>
+      <div className="text-xs text-muted-foreground">{sub}</div>
       {row.isVacant ? <div className="text-[10px] text-slate-400">Vacant</div> : null}
     </div>
   );
@@ -284,7 +293,7 @@ export function TeamView({
                 {pairRows.map((row) => (
                   <TableRow key={`para-${row.pairId}`}>
                     <TableCell className="min-w-[9rem]">
-                      <TeamLabel row={row} />
+                      <TeamLabel row={row} primary="paralegal" />
                     </TableCell>
                     {PAIR_PARALEGAL_METRICS.map((metric) => {
                       const actual = row.counts[metric.key];

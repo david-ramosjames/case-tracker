@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { FIRM_WEEKLY_METRICS, defaultFirmWeeklyTarget } from "@/lib/performance/firm-metrics";
 import {
-  ATTORNEY_SCORE_METRICS,
+  ATTORNEY_TARGET_METRICS,
   PARALEGAL_SCORE_METRICS,
 } from "@/lib/performance/person-scorecard";
 import {
@@ -115,7 +115,7 @@ export function PerformanceSettingsView({
   );
   const [attorneyRoleGoals, setAttorneyRoleGoals] = useState(() =>
     Object.fromEntries(
-      ATTORNEY_SCORE_METRICS.map((m) => {
+      ATTORNEY_TARGET_METRICS.map((m) => {
         const open = initialTargets.find(
           (t) =>
             t.metricKey === m.key &&
@@ -140,7 +140,7 @@ export function PerformanceSettingsView({
       paralegals.find((u) => u.id === personId) ?? attorneys.find((u) => u.id === personId) ?? null;
     if (!person) return {};
     const isAtty = person.role === "attorney";
-    const metrics = isAtty ? ATTORNEY_SCORE_METRICS : PARALEGAL_SCORE_METRICS;
+    const metrics = isAtty ? ATTORNEY_TARGET_METRICS : PARALEGAL_SCORE_METRICS;
     const role = isAtty ? "attorney" : "paralegal";
     const onDate = weekStartMondayCt();
     return Object.fromEntries(
@@ -168,7 +168,7 @@ export function PerformanceSettingsView({
     attorneys.find((u) => u.id === individualPersonId) ??
     null;
   const individualIsAttorney = individualPerson?.role === "attorney";
-  const individualMetrics = individualIsAttorney ? ATTORNEY_SCORE_METRICS : PARALEGAL_SCORE_METRICS;
+  const individualMetrics = individualIsAttorney ? ATTORNEY_TARGET_METRICS : PARALEGAL_SCORE_METRICS;
 
   function loadIndividualDraft(
     personId: string,
@@ -182,7 +182,7 @@ export function PerformanceSettingsView({
       return;
     }
     const isAtty = person.role === "attorney";
-    const metrics = isAtty ? ATTORNEY_SCORE_METRICS : PARALEGAL_SCORE_METRICS;
+    const metrics = isAtty ? ATTORNEY_TARGET_METRICS : PARALEGAL_SCORE_METRICS;
     const role = isAtty ? "attorney" : "paralegal";
     setIndividualGoals(
       Object.fromEntries(
@@ -326,7 +326,7 @@ export function PerformanceSettingsView({
     setError(null);
     setMessage(null);
     try {
-      const metrics = kind === "paralegal" ? PARALEGAL_SCORE_METRICS : ATTORNEY_SCORE_METRICS;
+      const metrics = kind === "paralegal" ? PARALEGAL_SCORE_METRICS : ATTORNEY_TARGET_METRICS;
       const draft = kind === "paralegal" ? paralegalRoleGoals : attorneyRoleGoals;
       let nextTargets = targets;
       for (const metric of metrics) {
@@ -614,8 +614,9 @@ export function PerformanceSettingsView({
           <CardTitle>Individual / role weekly scorecard targets</CardTitle>
           <CardDescription>
             These drive Paralegal and Attorney board scorecards (last week, expected this week, 13-week trend).
-            Resolution order: person override → role default → workbook defaults (para 1/1/2/3). Firm Team goals
-            above stay separate.
+            Paralegal sections are equal thirds; attorney sections are Pre-Lit 20% / Litigation 40% / Closing
+            40%. Resolution order: person override → role default → workbook defaults. Firm Team goals above
+            stay separate.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-8">
@@ -651,10 +652,17 @@ export function PerformanceSettingsView({
 
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-navy-950">Attorney role defaults</h3>
+            <p className="text-xs text-muted-foreground">
+              Score weights: Pre-Lit 20% · Litigation 40% · Closing 40%. Disengaged is tracked on the
+              board but has no target.
+            </p>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {ATTORNEY_SCORE_METRICS.map((metric) => (
+              {ATTORNEY_TARGET_METRICS.map((metric) => (
                 <label key={metric.key} className="space-y-1 text-sm">
                   <span className="font-medium">{metric.label}</span>
+                  <span className="block text-[11px] text-muted-foreground">
+                    {metric.group} · {metric.groupWeightLabel}
+                  </span>
                   <Input
                     value={attorneyRoleGoals[metric.key] ?? ""}
                     onChange={(e) =>

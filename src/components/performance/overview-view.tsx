@@ -1,13 +1,6 @@
-import Link from "next/link";
 import { ExpectedThisQuarterTable } from "@/components/performance/expected-this-quarter-table";
+import { SettledUndisbursedTable } from "@/components/performance/settled-undisbursed-table";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import {
-  getTargetPeriodRelative,
-  toStandardTargetPeriodLabel,
-  type TargetPeriodRelative,
-} from "@/lib/case-options";
-import { agingStatus } from "@/lib/performance/outstanding";
 import {
   type ExpectedDisbursementQuarterCase,
   type QuarterlyFeeProjection,
@@ -28,24 +21,6 @@ function sumFees(rows: Array<{ expectedAttorneyFees: number }>) {
   return rows.reduce((total, row) => total + row.expectedAttorneyFees, 0);
 }
 
-const DISBURSE_Q_TONE: Record<TargetPeriodRelative, string> = {
-  // Current quarter — due now
-  current: "rounded px-1.5 py-0.5 bg-emerald-100 text-emerald-900",
-  // Already passed — overdue / missed planning window
-  past: "rounded px-1.5 py-0.5 bg-rose-100 text-rose-900",
-  future: "",
-};
-
-function ExpectedDisburseQuarterCell({ value }: { value: string | null | undefined }) {
-  const label = toStandardTargetPeriodLabel(value) ?? (value?.trim() || "—");
-  const relative = getTargetPeriodRelative(value);
-  const tone = relative ? DISBURSE_Q_TONE[relative] : "";
-  if (!tone) {
-    return <span className="whitespace-nowrap text-sm">{label}</span>;
-  }
-  return <span className={`inline-block whitespace-nowrap text-sm font-medium ${tone}`}>{label}</span>;
-}
-
 const BAR = {
   actual: "#2563eb", // blue
   settled: "#64748b", // slate — settled not disbursed
@@ -57,33 +32,33 @@ const BAR = {
 export function OverviewView({
   signed,
   feeProjection,
-  top5,
-  oldest,
+  settledUndisbursed,
   expectedThisQuarter,
+  tablesFirmWide,
   agingTargetDays,
   agingWarnDays,
   quarterLabel,
 }: {
   signed: SignedCasePacing;
   feeProjection: QuarterlyFeeProjection;
-  top5: SettledUndisbursedCase[];
-  oldest: SettledUndisbursedCase[];
+  settledUndisbursed: SettledUndisbursedCase[];
   expectedThisQuarter: ExpectedDisbursementQuarterCase[];
+  tablesFirmWide: boolean;
   agingTargetDays: number;
   agingWarnDays: number;
   quarterLabel: string;
 }) {
-  const top5Total = sumFees(top5);
-  const outstandingTotal = sumFees(oldest);
+  const settledUndisbursedTotal = sumFees(settledUndisbursed);
   const expectedThisQuarterTotal = sumFees(expectedThisQuarter);
   const signedProjected = signed.projectedMonthEnd ?? 0;
+  const tablesScopeLabel = tablesFirmWide ? "firm-wide" : "your cases";
 
   return (
     <div className="space-y-6">
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Signed cases</CardDescription>
+            <CardDescription>Signed cases · firm-wide</CardDescription>
             <CardTitle className="text-2xl text-navy-950">
               Month-end pacing {pct(signed.projectedAttainment)}
             </CardTitle>
@@ -104,13 +79,13 @@ export function OverviewView({
 
         <Card>
           <CardHeader className="pb-2">
-            <CardDescription>Attorney fees ({quarterLabel})</CardDescription>
+            <CardDescription>Attorney fees ({quarterLabel}) · firm-wide</CardDescription>
             <CardTitle className="text-2xl text-navy-950">
               Projected attainment {pct(feeProjection.attainment)}
             </CardTitle>
             <p className="text-sm text-muted-foreground">
               Disbursed + eligible settled (lag {feeProjection.lagDays}d) + unsettled expected this quarter.
-              Goal from Performance Settings — not individual attorney /goals.
+              Same firm totals for every role — goal from Performance Settings, not individual /goals.
             </p>
           </CardHeader>
           <CardContent>
@@ -162,41 +137,33 @@ export function OverviewView({
         </Card>
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardDescription>Top 5 settled, undisbursed</CardDescription>
-            <CardTitle className="text-2xl">{money(top5Total)}</CardTitle>
-            <p className="text-sm text-muted-foreground">By expected attorney fees</p>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <OutstandingTable rows={top5} agingTargetDays={agingTargetDays} agingWarnDays={agingWarnDays} />
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Oldest outstanding settlements</CardDescription>
-            <CardTitle className="text-2xl">{money(outstandingTotal)}</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              {oldest.length} settlements · {agingTargetDays}-day operating target
-            </p>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            <OutstandingTable
-              rows={oldest.slice(0, 15)}
-              agingTargetDays={agingTargetDays}
-              agingWarnDays={agingWarnDays}
-            />
-          </CardContent>
-        </Card>
-      </div>
+      <Card>
+        <CardHeader>
+          <CardDescription>Settled, not disbursed · {tablesScopeLabel}</CardDescription>
+          <CardTitle className="text-2xl">{money(settledUndisbursedTotal)}</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            {settledUndisbursed.length} settlements · sorted by expected attorney fees ·{" "}
+            {agingTargetDays}-day operating target
+          </p>
+        </CardHeader>
+        <CardContent className="overflow-x-auto">
+          <SettledUndisbursedTable
+            rows={settledUndisbursed}
+            agingTargetDays={agingTargetDays}
+            agingWarnDays={agingWarnDays}
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
-          <CardDescription>Expected disbursement this quarter ({quarterLabel})</CardDescription>
+          <CardDescription>
+            Expected disbursement this quarter ({quarterLabel}) · {tablesScopeLabel}
+          </CardDescription>
           <CardTitle className="text-2xl">{money(expectedThisQuarterTotal)}</CardTitle>
           <p className="text-sm text-muted-foreground">
-            {expectedThisQuarter.length} active cases with Expected disbursement quarter = current quarter
+            {expectedThisQuarter.length} unsettled cases with Expected disbursement quarter = current
+            quarter (settled outstanding is in the list above)
           </p>
         </CardHeader>
         <CardContent className="overflow-x-auto">
@@ -280,65 +247,5 @@ function ComparisonBarChart({
         );
       })}
     </div>
-  );
-}
-
-function OutstandingTable({
-  rows,
-  agingTargetDays,
-  agingWarnDays,
-}: {
-  rows: SettledUndisbursedCase[];
-  agingTargetDays: number;
-  agingWarnDays: number;
-}) {
-  return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Case</TableHead>
-          <TableHead>Attorney</TableHead>
-          <TableHead>Fees</TableHead>
-          <TableHead>Settled</TableHead>
-          <TableHead>Exp. disburse Q</TableHead>
-          <TableHead>Days</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => {
-          const status = agingStatus(row.daysOutstanding, agingTargetDays, agingWarnDays);
-          return (
-            <TableRow key={row.disbursementId ?? row.caseId}>
-              <TableCell>
-                <Link href={`/cases/${row.caseId}`} className="font-medium text-pink-700 hover:underline">
-                  {row.caseNumber}
-                </Link>
-                <div className="text-xs text-muted-foreground">{row.clientName}</div>
-              </TableCell>
-              <TableCell>{row.attorneyName}</TableCell>
-              <TableCell>{money(row.expectedAttorneyFees)}</TableCell>
-              <TableCell>{row.settlementDate}</TableCell>
-              <TableCell>
-                <ExpectedDisburseQuarterCell value={row.targetResolutionQuarter} />
-              </TableCell>
-              <TableCell
-                className={
-                  status === "over" ? "font-semibold text-rose-700" : status === "warn" ? "text-amber-700" : ""
-                }
-              >
-                {row.daysOutstanding}
-              </TableCell>
-            </TableRow>
-          );
-        })}
-        {rows.length === 0 ? (
-          <TableRow>
-            <TableCell colSpan={6} className="text-muted-foreground">
-              None
-            </TableCell>
-          </TableRow>
-        ) : null}
-      </TableBody>
-    </Table>
   );
 }

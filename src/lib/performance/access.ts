@@ -23,8 +23,17 @@ export function canViewPerformanceHistory(role: UserRole | null | undefined) {
   return canManagePerformanceTargets(role) || role === "attorney";
 }
 
+/** Firm Overview is the same for everyone — signed pacing + fee projection across all cases. */
 export function canViewPerformanceOverview(role: UserRole | null | undefined) {
-  return canManagePerformanceTargets(role) || role === "attorney";
+  return canViewPerformance(role);
+}
+
+/**
+ * Detail tables under Overview charts: firm-wide for admins, Ryan (manager), and Lyliana
+ * (paralegal_manager). Everyone else sees only their assigned cases.
+ */
+export function canViewFirmOverviewDetailTables(role: UserRole | null | undefined) {
+  return isAdminRole(role) || role === "manager" || role === "paralegal_manager";
 }
 
 /** Firm-wide person switcher on board tabs. Attorneys may open a paralegal’s board. */

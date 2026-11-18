@@ -1,13 +1,15 @@
 import { daysBetweenYmd } from "@/lib/performance/pacing";
 import { type SettledUndisbursedCase } from "@/lib/performance/pacing";
 
+export function sortOutstandingByFees(rows: SettledUndisbursedCase[]): SettledUndisbursedCase[] {
+  return [...rows].sort((a, b) => b.expectedAttorneyFees - a.expectedAttorneyFees);
+}
+
 export function rankTopOutstandingByFees(
   rows: SettledUndisbursedCase[],
   limit = 5,
 ): SettledUndisbursedCase[] {
-  return [...rows]
-    .sort((a, b) => b.expectedAttorneyFees - a.expectedAttorneyFees)
-    .slice(0, limit);
+  return sortOutstandingByFees(rows).slice(0, limit);
 }
 
 export function sortOutstandingByAge(rows: SettledUndisbursedCase[]): SettledUndisbursedCase[] {

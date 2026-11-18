@@ -1,6 +1,6 @@
 import { getProjectedFeeValue } from "@/lib/calculations";
 import { matchesTargetPeriodFilter, toStandardTargetPeriodLabel } from "@/lib/case-options";
-import { isCaseFullyDisbursed } from "@/lib/case-status";
+import { CLOSED_CASE_STAGES, isCaseFullyDisbursed } from "@/lib/case-status";
 import { getDisbursementAttorneyFees } from "@/lib/disbursements";
 import {
   computeJonQuarterlyFeeProjection,
@@ -8,7 +8,7 @@ import {
   type ExpectedDisbursementQuarterCase,
   type SettledUndisbursedCase,
 } from "@/lib/performance/pacing";
-import { rankTopOutstandingByFees, sortOutstandingByAge, withDaysOutstanding } from "@/lib/performance/outstanding";
+import { sortOutstandingByAge, sortOutstandingByFees, withDaysOutstanding } from "@/lib/performance/outstanding";
 import { chicagoDateParts, chicagoTodayYmd } from "@/lib/performance/weeks";
 import { type CaseDisbursement, type CaseRecord } from "@/lib/types";
 
@@ -23,8 +23,9 @@ function currentExpectedDisbursementQuarterLabel(date = new Date()) {
 }
 
 /**
- * Active cases whose Expected disbursement quarter is the current calendar quarter
- * (Chicago), excluding fully disbursed / closed pipeline cases.
+ * Unsettled active cases whose Expected disbursement quarter is the current calendar
+ * quarter (Chicago). Settled / closed / fully disbursed cases are excluded — settled
+ * outstanding is covered by the settled-undisbursed lists.
  */
 export function collectExpectedDisbursementThisQuarter(
   records: CaseRecord[],
@@ -36,14 +37,14 @@ export function collectExpectedDisbursementThisQuarter(
 
   for (const record of records) {
     if (!record.tracker.isActive) continue;
+    if (record.tracker.caseStage === "Settled") continue;
+    if (CLOSED_CASE_STAGES.has(record.tracker.caseStage)) continue;
+    if (record.shared.status === "Closed") continue;
     if (isCaseFullyDisbursed(record.tracker.result)) continue;
     if (!matchesTargetPeriodFilter(currentQuarter, record.tracker.targetResolutionQuarter)) continue;
 
     const attorneyName = usersById.get(record.shared.attorneyId) ?? "—";
-    const fees =
-      record.tracker.caseStage === "Settled"
-        ? expectedAttorneyFees(record) || getProjectedFeeValue(record) || 0
-        : getProjectedFeeValue(record) || 0;
+    const fees = getProjectedFeeValue(record) || 0;
 
     rows.push({
       caseId: record.shared.id,
@@ -183,9 +184,10 @@ export function buildJonFeeProjection(input: {
   const settled = collectSettledUndisbursed(input.records, input.usersById);
   const expectedThisQuarter = collectExpectedDisbursementThisQuarter(input.records, input.usersById);
   const feesDisbursed = feesDisbursedInCalendarQuarter(input.records, bounds.startYmd, bounds.endYmd);
-  const unsettledExpectedFees = expectedThisQuarter
-    .filter((row) => row.caseStage !== "Settled")
-    .reduce((sum, row) => sum + row.expectedAttorneyFees, 0);
+  const unsettledExpectedFees = expectedThisQuarter.reduce(
+    (sum, row) => sum + row.expectedAttorneyFees,
+    0,
+  );
 
   const projection = computeJonQuarterlyFeeProjection({
     feesDisbursedInQuarter: feesDisbursed,
@@ -199,7 +201,7 @@ export function buildJonFeeProjection(input: {
   return {
     bounds,
     projection,
-    top5: rankTopOutstandingByFees(settled, 5),
+    settledUndisbursed: sortOutstandingByFees(settled),
     oldest: sortOutstandingByAge(settled),
     expectedThisQuarter,
   };

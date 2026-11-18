@@ -10,6 +10,19 @@ export function averageNonNull(values: Array<number | null | undefined>): number
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
+/** Weighted mean; missing sections drop out and remaining weights re-normalize. */
+export function weightedAverage(parts: Array<{ value: number | null | undefined; weight: number }>): number | null {
+  let sum = 0;
+  let weight = 0;
+  for (const part of parts) {
+    if (part.value == null || !Number.isFinite(part.value) || part.weight <= 0) continue;
+    sum += part.value * part.weight;
+    weight += part.weight;
+  }
+  if (weight === 0) return null;
+  return sum / weight;
+}
+
 export type ParalegalScoreInputs = {
   actualDemands: number;
   targetDemands: number;
@@ -28,7 +41,7 @@ export type ParalegalScoreResult = {
   overall: number | null;
 };
 
-/** Workbook 3-bucket Overall; no 100% cap. */
+/** Three equal buckets (1/3 each); no 100% cap. */
 export function scoreParalegalWeek(input: ParalegalScoreInputs): ParalegalScoreResult {
   const preLit = attainmentRatio(input.actualDemands, input.targetDemands);
   const litActual = input.actualLawsuit + input.actualDiscovery;
@@ -44,26 +57,71 @@ export function scoreParalegalWeek(input: ParalegalScoreInputs): ParalegalScoreR
 }
 
 export type AttorneyScoreInputs = {
+  actualDemands: number;
+  targetDemands: number;
+  actualLawsuit: number;
+  targetLawsuit: number;
+  actualLitEventsScheduled: number;
+  targetLitEventsScheduled: number;
   actualLitCompleted: number;
   targetLitCompleted: number;
   actualSettlements: number;
   targetSettlements: number;
   actualDisbursements: number;
   targetDisbursements: number;
-  actualDemands?: number;
-  targetDemands?: number;
-  actualLawsuit?: number;
-  targetLawsuit?: number;
 };
 
-/** Attorney attainment only — workbook has no weighted Overall. */
-export function scoreAttorneyWeek(input: AttorneyScoreInputs) {
+export type AttorneyScoreResult = {
+  preLit: number | null;
+  litigation: number | null;
+  closing: number | null;
+  demands: number | null;
+  lawsuit: number | null;
+  litScheduled: number | null;
+  litCompleted: number | null;
+  settlements: number | null;
+  disbursements: number | null;
+  overall: number | null;
+};
+
+export const ATTORNEY_SECTION_WEIGHTS = {
+  preLit: 0.2,
+  litigation: 0.4,
+  closing: 0.4,
+} as const;
+
+/**
+ * Attorney scorecard: Pre-Lit 20% · Litigation 40% · Closing 40%.
+ * Within Litigation / Closing, metrics average equally. Disengaged is display-only.
+ */
+export function scoreAttorneyWeek(input: AttorneyScoreInputs): AttorneyScoreResult {
+  const demands = attainmentRatio(input.actualDemands, input.targetDemands);
+  const lawsuit = attainmentRatio(input.actualLawsuit, input.targetLawsuit);
+  const litScheduled = attainmentRatio(input.actualLitEventsScheduled, input.targetLitEventsScheduled);
+  const litCompleted = attainmentRatio(input.actualLitCompleted, input.targetLitCompleted);
+  const settlements = attainmentRatio(input.actualSettlements, input.targetSettlements);
+  const disbursements = attainmentRatio(input.actualDisbursements, input.targetDisbursements);
+
+  const preLit = demands;
+  const litigation = averageNonNull([lawsuit, litScheduled, litCompleted]);
+  const closing = averageNonNull([settlements, disbursements]);
+  const overall = weightedAverage([
+    { value: preLit, weight: ATTORNEY_SECTION_WEIGHTS.preLit },
+    { value: litigation, weight: ATTORNEY_SECTION_WEIGHTS.litigation },
+    { value: closing, weight: ATTORNEY_SECTION_WEIGHTS.closing },
+  ]);
+
   return {
-    litCompleted: attainmentRatio(input.actualLitCompleted, input.targetLitCompleted),
-    settlements: attainmentRatio(input.actualSettlements, input.targetSettlements),
-    disbursements: attainmentRatio(input.actualDisbursements, input.targetDisbursements),
-    demands: attainmentRatio(input.actualDemands ?? 0, input.targetDemands),
-    lawsuit: attainmentRatio(input.actualLawsuit ?? 0, input.targetLawsuit),
+    preLit,
+    litigation,
+    closing,
+    demands,
+    lawsuit,
+    litScheduled,
+    litCompleted,
+    settlements,
+    disbursements,
+    overall,
   };
 }
 
@@ -75,9 +133,10 @@ export const DEFAULT_PARALEGAL_TARGETS = {
 } as const;
 
 export const DEFAULT_ATTORNEY_TARGETS = {
+  demand_sent: 2,
+  lawsuit_filed: 2,
+  lit_event_scheduled: 4,
   lit_completed_combined: 3,
   settlement: 1,
   disbursement: 1,
-  demand_sent: 2,
-  lawsuit_filed: 2,
 } as const;

@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { attainmentRatio, scoreAttorneyWeek, scoreParalegalWeek } from "./scoring";
+import {
+  attainmentRatio,
+  scoreAttorneyWeek,
+  scoreParalegalWeek,
+  weightedAverage,
+} from "./scoring";
 
 describe("performance scoring", () => {
-  it("computes paralegal overall without capping at 100%", () => {
+  it("computes paralegal overall as equal 1/3 sections without capping at 100%", () => {
     const result = scoreParalegalWeek({
       actualDemands: 2,
       targetDemands: 1,
@@ -37,18 +42,53 @@ describe("performance scoring", () => {
     assert.equal(result.overall, 1);
   });
 
-  it("attorney scoring is attainment-only (no invented overall)", () => {
+  it("attorney overall weights Pre-Lit 20% / Litigation 40% / Closing 40%", () => {
     const result = scoreAttorneyWeek({
-      actualLitCompleted: 6,
+      actualDemands: 2,
+      targetDemands: 2,
+      actualLawsuit: 2,
+      targetLawsuit: 2,
+      actualLitEventsScheduled: 4,
+      targetLitEventsScheduled: 4,
+      actualLitCompleted: 3,
       targetLitCompleted: 3,
       actualSettlements: 1,
       targetSettlements: 1,
-      actualDisbursements: 0,
+      actualDisbursements: 1,
       targetDisbursements: 1,
     });
-    assert.equal(result.litCompleted, 2);
-    assert.equal(result.settlements, 1);
-    assert.equal(result.disbursements, 0);
-    assert.equal("overall" in result, false);
+    assert.equal(result.preLit, 1);
+    assert.equal(result.litigation, 1);
+    assert.equal(result.closing, 1);
+    assert.equal(result.overall, 1);
+  });
+
+  it("attorney overall applies section weights when sections differ", () => {
+    // Pre-Lit 0, Lit 1, Closing 1 → 0*0.2 + 1*0.4 + 1*0.4 = 0.8
+    const result = scoreAttorneyWeek({
+      actualDemands: 0,
+      targetDemands: 2,
+      actualLawsuit: 2,
+      targetLawsuit: 2,
+      actualLitEventsScheduled: 4,
+      targetLitEventsScheduled: 4,
+      actualLitCompleted: 3,
+      targetLitCompleted: 3,
+      actualSettlements: 1,
+      targetSettlements: 1,
+      actualDisbursements: 1,
+      targetDisbursements: 1,
+    });
+    assert.equal(result.overall, 0.8);
+  });
+
+  it("weightedAverage re-normalizes when a section is missing", () => {
+    const result = weightedAverage([
+      { value: null, weight: 0.2 },
+      { value: 1, weight: 0.4 },
+      { value: 0.5, weight: 0.4 },
+    ]);
+    assert.ok(result != null);
+    assert.ok(Math.abs(result - 0.75) < 1e-9);
   });
 });

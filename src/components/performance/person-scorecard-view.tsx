@@ -10,47 +10,61 @@ import {
 
 function ScoreTable({ card, valueLabel }: { card: PersonWeekScorecard; valueLabel: string }) {
   let lastGroup: string | undefined;
+  const weightHint =
+    card.role === "attorney"
+      ? "Sections: Pre-Lit 20% · Litigation 40% · Closing 40% (Disengaged shown, not scored)"
+      : "Sections: Pre-Lit · Litigation · Scheduling (1/3 each)";
+
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Metric</TableHead>
-          <TableHead className="text-right">Target</TableHead>
-          <TableHead className="text-right">{valueLabel}</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {card.rows.map((row) => {
-          const showGroup = Boolean(row.group && row.group !== lastGroup);
-          if (row.group) lastGroup = row.group;
-          return (
-            <TableRow key={row.key}>
-              <TableCell>
-                {showGroup ? (
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    {row.group}
-                  </div>
-                ) : null}
-                <div className={showGroup ? "mt-0.5" : ""}>{row.label}</div>
-              </TableCell>
-              <TableCell className="text-right tabular-nums">{row.target}</TableCell>
-              <TableCell className="text-right tabular-nums font-medium">{row.actual}</TableCell>
-            </TableRow>
-          );
-        })}
-        <TableRow>
-          <TableCell className="font-semibold">Overall</TableCell>
-          <TableCell className="text-right text-muted-foreground">100%</TableCell>
-          <TableCell
-            className={`text-right font-semibold tabular-nums ${
-              card.overall != null && card.overall >= 1 ? "bg-emerald-50 text-emerald-800" : ""
-            }`}
-          >
-            {formatAttainmentPct(card.overall)}
-          </TableCell>
-        </TableRow>
-      </TableBody>
-    </Table>
+    <div className="space-y-2">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Metric</TableHead>
+            <TableHead className="text-right">Target</TableHead>
+            <TableHead className="text-right">{valueLabel}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {card.rows.map((row) => {
+            const showGroup = Boolean(row.group && row.group !== lastGroup);
+            if (row.group) lastGroup = row.group;
+            return (
+              <TableRow key={row.key}>
+                <TableCell>
+                  {showGroup ? (
+                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                      {row.group}
+                      {row.groupWeightLabel ? ` · ${row.groupWeightLabel}` : ""}
+                    </div>
+                  ) : null}
+                  <div className={showGroup ? "mt-0.5" : ""}>{row.label}</div>
+                  {!row.countsTowardScore ? (
+                    <div className="text-[10px] text-muted-foreground">Shown only — not in overall</div>
+                  ) : null}
+                </TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">
+                  {row.target == null ? "—" : row.target}
+                </TableCell>
+                <TableCell className="text-right tabular-nums font-medium">{row.actual}</TableCell>
+              </TableRow>
+            );
+          })}
+          <TableRow>
+            <TableCell className="font-semibold">Overall</TableCell>
+            <TableCell className="text-right text-muted-foreground">100%</TableCell>
+            <TableCell
+              className={`text-right font-semibold tabular-nums ${
+                card.overall != null && card.overall >= 1 ? "bg-emerald-50 text-emerald-800" : ""
+              }`}
+            >
+              {formatAttainmentPct(card.overall)}
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+      <p className="text-[11px] text-muted-foreground">{weightHint}</p>
+    </div>
   );
 }
 

@@ -5,12 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import {
-  getQuickExpectedDisburseQuarterOptions,
-  getTargetPeriodRelative,
-  toStandardTargetPeriodLabel,
-  type TargetPeriodRelative,
-} from "@/lib/case-options";
+import { getQuickExpectedDisburseQuarterOptions, toStandardTargetPeriodLabel } from "@/lib/case-options";
 import { type ExpectedDisbursementQuarterCase } from "@/lib/performance/pacing";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -22,12 +17,6 @@ const STAGE_LABELS: Record<string, string> = {
   Disengaged: "Disengaged",
   Terminated: "Terminated",
   Referred: "Referred",
-};
-
-const DISBURSE_Q_SELECT_TONE: Record<TargetPeriodRelative, string> = {
-  current: "bg-emerald-100 text-emerald-900 border-emerald-200",
-  past: "bg-rose-100 text-rose-900 border-rose-200",
-  future: "",
 };
 
 function money(n: number) {
@@ -131,8 +120,6 @@ export function ExpectedThisQuarterTable({
           const value =
             toStandardTargetPeriodLabel(row.targetResolutionQuarter) ??
             (row.targetResolutionQuarter?.trim() || "");
-          const relative = getTargetPeriodRelative(value);
-          const tone = relative ? DISBURSE_Q_SELECT_TONE[relative] : "";
           const options =
             value && !quarterOptions.includes(value) ? [value, ...quarterOptions] : quarterOptions;
           const saving = Boolean(savingIds[row.caseId]) || isPending;
@@ -154,7 +141,7 @@ export function ExpectedThisQuarterTable({
               <TableCell>{row.settlementDate?.trim() || "—"}</TableCell>
               <TableCell>
                 <Select
-                  className={`h-9 min-w-[6.5rem] text-xs font-medium ${tone}`}
+                  className="h-9 min-w-[6.5rem] text-xs"
                   value={value}
                   disabled={saving}
                   onChange={(event) => {
