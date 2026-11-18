@@ -1,9 +1,12 @@
 import { isAdminRole } from "@/lib/auth/access";
 import { type UserRole } from "@/lib/types";
 
-/** Broader than fee Goals — paralegals and LAs can use Performance. */
+/**
+ * Temporary: Performance is admin-only while the module is still being finished.
+ * Restore broader access (any signed-in role) when ready to roll out.
+ */
 export function canViewPerformance(role: UserRole | null | undefined) {
-  return Boolean(role);
+  return isAdminRole(role);
 }
 
 export function canManagePerformanceTargets(role: UserRole | null | undefined) {
