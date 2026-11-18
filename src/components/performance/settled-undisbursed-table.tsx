@@ -1,5 +1,6 @@
 "use client";
 
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, useTransition } from "react";
@@ -13,6 +14,7 @@ import {
 } from "@/lib/case-options";
 import { agingStatus } from "@/lib/performance/outstanding";
 import { type SettledUndisbursedCase } from "@/lib/performance/pacing";
+import { cn } from "@/lib/utils";
 
 const DISBURSE_Q_SELECT_TONE: Record<TargetPeriodRelative, string> = {
   current: "bg-emerald-100 text-emerald-900 border-emerald-200",
@@ -20,12 +22,27 @@ const DISBURSE_Q_SELECT_TONE: Record<TargetPeriodRelative, string> = {
   future: "",
 };
 
+type SortKey = "fees" | "days";
+type SortDirection = "asc" | "desc";
+
 function money(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
 
 function rowKey(row: SettledUndisbursedCase) {
   return row.disbursementId ?? row.caseId;
+}
+
+function sortRows(rows: SettledUndisbursedCase[], sortKey: SortKey, direction: SortDirection) {
+  const sign = direction === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const delta =
+      sortKey === "fees"
+        ? a.expectedAttorneyFees - b.expectedAttorneyFees
+        : a.daysOutstanding - b.daysOutstanding;
+    if (delta !== 0) return delta * sign;
+    return a.caseNumber.localeCompare(b.caseNumber, undefined, { numeric: true });
+  });
 }
 
 export function SettledUndisbursedTable({
@@ -42,12 +59,27 @@ export function SettledUndisbursedTable({
   const [workingRows, setWorkingRows] = useState(rows);
   const [savingIds, setSavingIds] = useState<Record<string, boolean>>({});
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [sortKey, setSortKey] = useState<SortKey>("days");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   useEffect(() => {
     setWorkingRows(rows);
   }, [rows]);
 
   const quarterOptions = useMemo(() => getQuickExpectedDisburseQuarterOptions(), []);
+  const sortedRows = useMemo(
+    () => sortRows(workingRows, sortKey, sortDirection),
+    [workingRows, sortKey, sortDirection],
+  );
+
+  function requestSort(nextKey: SortKey) {
+    if (nextKey === sortKey) {
+      setSortDirection((current) => (current === "desc" ? "asc" : "desc"));
+      return;
+    }
+    setSortKey(nextKey);
+    setSortDirection("desc");
+  }
 
   async function updateExpectedDisburseQuarter(caseId: string, nextQuarter: string) {
     const previousRows = workingRows.filter((row) => row.caseId === caseId);
@@ -110,14 +142,14 @@ export function SettledUndisbursedTable({
         <TableRow>
           <TableHead>Case</TableHead>
           <TableHead>Attorney</TableHead>
-          <TableHead>Fees</TableHead>
+          <SortableHead label="Fees" sortKey="fees" active={sortKey} direction={sortDirection} onSort={requestSort} />
           <TableHead>Settled</TableHead>
           <TableHead>Exp. disburse Q</TableHead>
-          <TableHead>Days</TableHead>
+          <SortableHead label="Days" sortKey="days" active={sortKey} direction={sortDirection} onSort={requestSort} />
         </TableRow>
       </TableHeader>
       <TableBody>
-        {workingRows.map((row) => {
+        {sortedRows.map((row) => {
           const value =
             toStandardTargetPeriodLabel(row.targetResolutionQuarter) ??
             (row.targetResolutionQuarter?.trim() || "");
@@ -169,7 +201,7 @@ export function SettledUndisbursedTable({
             </TableRow>
           );
         })}
-        {workingRows.length === 0 ? (
+        {sortedRows.length === 0 ? (
           <TableRow>
             <TableCell colSpan={6} className="text-muted-foreground">
               None
@@ -178,5 +210,34 @@ export function SettledUndisbursedTable({
         ) : null}
       </TableBody>
     </Table>
+  );
+}
+
+function SortableHead({
+  label,
+  sortKey,
+  active,
+  direction,
+  onSort,
+}: {
+  label: string;
+  sortKey: SortKey;
+  active: SortKey;
+  direction: SortDirection;
+  onSort: (key: SortKey) => void;
+}) {
+  const isActive = active === sortKey;
+  const Icon = !isActive ? ArrowUpDown : direction === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <TableHead>
+      <button
+        type="button"
+        className="inline-flex items-center gap-1 font-medium"
+        onClick={() => onSort(sortKey)}
+      >
+        {label}
+        <Icon className={cn("h-3.5 w-3.5", isActive ? "text-pink-500" : "text-muted-foreground")} />
+      </button>
+    </TableHead>
   );
 }

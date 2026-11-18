@@ -8,7 +8,7 @@ import {
   type ExpectedDisbursementQuarterCase,
   type SettledUndisbursedCase,
 } from "@/lib/performance/pacing";
-import { sortOutstandingByAge, sortOutstandingByFees, withDaysOutstanding } from "@/lib/performance/outstanding";
+import { sortOutstandingByAge, withDaysOutstanding } from "@/lib/performance/outstanding";
 import { chicagoDateParts, chicagoTodayYmd } from "@/lib/performance/weeks";
 import { type CaseDisbursement, type CaseRecord } from "@/lib/types";
 
@@ -203,7 +203,7 @@ export function buildJonFeeProjection(input: {
   return {
     bounds,
     projection,
-    settledUndisbursed: sortOutstandingByFees(settled),
+    settledUndisbursed: sortOutstandingByAge(settled),
     oldest: sortOutstandingByAge(settled),
     expectedThisQuarter,
   };

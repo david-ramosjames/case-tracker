@@ -143,7 +143,7 @@ export function OverviewView({
           <CardDescription>Settled, not disbursed · {tablesScopeLabel}</CardDescription>
           <CardTitle className="text-2xl">{money(settledUndisbursedTotal)}</CardTitle>
           <p className="text-sm text-muted-foreground">
-            {settledUndisbursed.length} settlements · sorted by expected attorney fees ·{" "}
+            {settledUndisbursed.length} settlements · default sort: days (high → low) ·{" "}
             {agingTargetDays}-day operating target
           </p>
         </CardHeader>
