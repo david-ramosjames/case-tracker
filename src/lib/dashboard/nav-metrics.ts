@@ -9,9 +9,11 @@ import {
   listLatestClientSentiments,
   worstSentimentByCaseNumber,
 } from "@/lib/client-contact/repository";
+import { getOpenStageSuggestions } from "@/lib/calculations";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { isLitigationTabCase } from "@/lib/litigation-events";
+import { type NavBadges } from "@/lib/navigation/nav-config";
 import { listOpenNeedsResponse } from "@/lib/needs-response/repository";
 import { type CaseRecord } from "@/lib/types";
 
@@ -20,6 +22,7 @@ export type DashboardNavMetrics = {
   clientsNeedingContact: number;
   negativeSentiment: number;
   needsResponse: number;
+  stageSuggestionsOpen: number;
 };
 
 /**
@@ -57,10 +60,25 @@ export async function getDashboardNavMetrics(
     }
   }
 
+  const stageSuggestionsOpen = records.reduce(
+    (total, record) => total + getOpenStageSuggestions(record).length,
+    0,
+  );
+
   return {
     litigationCases: records.filter(isLitigationTabCase).length,
     clientsNeedingContact,
     negativeSentiment,
     needsResponse: needsRows.length,
+    stageSuggestionsOpen,
+  };
+}
+
+/** Compact badge map for the app sidebar / mobile drawer. */
+export function toNavBadges(metrics: DashboardNavMetrics): NavBadges {
+  return {
+    suggestions: metrics.stageSuggestionsOpen,
+    contact: metrics.clientsNeedingContact,
+    needsResponse: metrics.needsResponse,
   };
 }

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { buildViewerContext, filterRecordsForViewer } from "@/lib/auth/access";
 import { getSessionUser } from "@/lib/auth/session";
@@ -16,7 +17,8 @@ export async function loadViewerDirectory() {
   return { sessionUser, users, goals };
 }
 
-export async function loadViewerCaseBundle() {
+/** Deduped per request so layout badges + page data share one case load. */
+export const loadViewerCaseBundle = cache(async () => {
   const sessionUser = await getSessionUser();
   if (!sessionUser) redirect("/login");
   const [allRecords, users, settings, goals] = await Promise.all([
@@ -30,4 +32,4 @@ export async function loadViewerCaseBundle() {
   const records = filterRecordsForViewer(allRecords, sessionUser, users, goals);
 
   return { sessionUser, records, allRecords, users, settings, goals, viewer };
-}
+});
