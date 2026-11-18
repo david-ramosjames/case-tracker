@@ -78,8 +78,82 @@ function num(value: unknown): number {
   if (value && typeof value === "object" && "result" in value) {
     return num((value as { result: unknown }).result);
   }
-  const n = Number(cellText(value));
+  const text = cellText(value).trim();
+  if (!text || /^n\/?a$/i.test(text) || /^tbd$/i.test(text) || text === "-" || text === "—") {
+    return 0;
+  }
+  // Cells like "1 Beatriz Hernandez" or "2 (Hector Escamilla 486)"
+  const leading = text.match(/^(-?\d+(?:\.\d+)?)/);
+  if (leading) return Number(leading[1]);
+  const n = Number(text);
   return Number.isFinite(n) ? n : 0;
+}
+
+/** Individual sheet: paralegal goal columns (skip NEW CASES / MEDICALS). */
+const INDIVIDUAL_PARA_COLUMNS: Record<number, WeekPairMetricKey> = {
+  5: "demand_sent",
+  7: "lawsuit_filed",
+  8: "discovery_responses",
+  9: "lit_event_scheduled",
+};
+
+/** Individual sheet: attorney + closing columns. */
+const INDIVIDUAL_ATTY_COLUMNS: Record<number, WeekPairMetricKey> = {
+  10: "deposition",
+  11: "mediation",
+  12: "hearing",
+  13: "disengagement",
+  14: "settlement",
+  15: "disbursement",
+};
+
+function isNaCell(value: unknown): boolean {
+  const text = cellText(value).trim();
+  return /^n\/?a$/i.test(text);
+}
+
+function classifySoloRole(
+  token: string,
+  contacts: Array<{ id: string; name: string; role?: string | null }>,
+  row: ExcelJS.Row,
+): "paralegal" | "attorney" {
+  const t = token.trim().toUpperCase();
+  const matched = contacts.find((c) => {
+    const first = c.name.split(/\s+/)[0]?.toUpperCase() ?? "";
+    const upper = c.name.toUpperCase();
+    return first === t || upper === t || upper.startsWith(`${t} `);
+  });
+  const role = (matched?.role ?? "").toLowerCase();
+  if (role === "attorney") return "attorney";
+  if (role === "paralegal" || role === "legal_assistant") return "paralegal";
+
+  // Fallback: which side has N/A in the sheet
+  const paraAllNa = Object.keys(INDIVIDUAL_PARA_COLUMNS).every((col) =>
+    isNaCell(row.getCell(Number(col)).value),
+  );
+  const attyAllNa = Object.keys(INDIVIDUAL_ATTY_COLUMNS).every((col) =>
+    isNaCell(row.getCell(Number(col)).value),
+  );
+  if (paraAllNa && !attyAllNa) return "attorney";
+  return "paralegal";
+}
+
+function readIndividualMetrics(
+  row: ExcelJS.Row,
+  mode: "paralegal" | "attorney" | "pair",
+): Record<WeekPairMetricKey, number> {
+  const metrics = emptyMetricBag();
+  if (mode === "paralegal" || mode === "pair") {
+    for (const [col, key] of Object.entries(INDIVIDUAL_PARA_COLUMNS)) {
+      metrics[key] = num(row.getCell(Number(col)).value);
+    }
+  }
+  if (mode === "attorney" || mode === "pair") {
+    for (const [col, key] of Object.entries(INDIVIDUAL_ATTY_COLUMNS)) {
+      metrics[key] = num(row.getCell(Number(col)).value);
+    }
+  }
+  return metrics;
 }
 
 export function splitTeamLabel(label: string): { paralegalToken: string; attorneyToken: string } {
@@ -170,4 +244,85 @@ export function emptyMetricBag(): Record<WeekPairMetricKey, number> {
     WeekPairMetricKey,
     number
   >;
+}
+
+/**
+ * Parse RJL GOALS "Individual" tab.
+ * - Solo rows (pre–Week 7): one seat per person; para metrics → paralegal, attorney/closing → attorney.
+ * - Pair rows (`PARA + ATTY`): one seat; para cols on paralegal side, attorney/closing on attorney side
+ *   (stored together on the week_pair, which is how Team rolls up).
+ * - N/A / TBD metric cells → 0.
+ * Meeting Monday − 1 week (same convention as Book1 / existing Team imports).
+ */
+export async function parseGoalsIndividualWorkbook(
+  filePath: string,
+  contacts: Array<{ id: string; name: string; role?: string | null }> = [],
+  options?: { year?: number },
+): Promise<ParsedWeeklyCheckRow[]> {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(filePath);
+  const sheet =
+    wb.getWorksheet("Individual") ??
+    wb.getWorksheet("Individuals") ??
+    wb.worksheets.find((s) => /individ/i.test(s.name));
+  if (!sheet) return [];
+
+  const year = options?.year ?? 2026;
+  const rows: ParsedWeeklyCheckRow[] = [];
+  const seatByWeek = new Map<string, number>();
+
+  for (let r = 4; r <= (sheet.rowCount || 0); r++) {
+    const row = sheet.getRow(r);
+    const weekLabel = cellText(row.getCell(1).value).trim();
+    const teamLabel = cellText(row.getCell(3).value).trim();
+    if (!weekLabel || !teamLabel) continue;
+
+    const meeting = row.getCell(2).value;
+    if (meeting instanceof Date) {
+      if (meeting.getUTCFullYear() !== year && meeting.getFullYear() !== year) continue;
+    } else {
+      const text = cellText(meeting);
+      if (!text.includes(String(year))) continue;
+    }
+
+    const weekStart = meetingDateToWorkWeekStart(meeting);
+    if (!weekStart) continue;
+
+    const seatIndex = seatByWeek.get(weekStart) ?? 0;
+    seatByWeek.set(weekStart, seatIndex + 1);
+
+    const isPair = teamLabel.includes("+");
+    let paralegalToken: string;
+    let attorneyToken: string;
+    let metrics: Record<WeekPairMetricKey, number>;
+
+    if (isPair) {
+      ({ paralegalToken, attorneyToken } = splitTeamLabel(teamLabel));
+      metrics = readIndividualMetrics(row, "pair");
+    } else {
+      const token = teamLabel.trim().toUpperCase();
+      const role = classifySoloRole(token, contacts, row);
+      if (role === "attorney") {
+        paralegalToken = "TBD";
+        attorneyToken = token;
+        metrics = readIndividualMetrics(row, "attorney");
+      } else {
+        paralegalToken = token;
+        attorneyToken = "TBD";
+        metrics = readIndividualMetrics(row, "paralegal");
+      }
+    }
+
+    rows.push({
+      weekStart,
+      weekLabel,
+      seatIndex,
+      teamLabel,
+      paralegalToken,
+      attorneyToken,
+      metrics,
+    });
+  }
+
+  return rows;
 }

@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   matchContactId,
   meetingDateToWorkWeekStart,
+  parseGoalsIndividualWorkbook,
   splitTeamLabel,
 } from "@/lib/performance/weekly-check-import";
 import { computeIsVacant } from "@/lib/performance/week-pairs";
@@ -45,5 +47,62 @@ describe("weekly check import helpers", () => {
       }),
       true,
     );
+  });
+
+  it("parses Individual solo vs pair weeks with role split and N/A→0", async (t) => {
+    const path = "C:/Users/david/Downloads/RJL 2026 GOALS (1).xlsx";
+    if (!existsSync(path)) {
+      t.skip("RJL 2026 GOALS workbook not present on this machine");
+      return;
+    }
+    const contacts = [
+      { id: "a", name: "Adrian", role: "paralegal" },
+      { id: "v", name: "Aivet Lopez", role: "paralegal" },
+      { id: "j", name: "Jorge", role: "paralegal" },
+      { id: "o", name: "Josslyn", role: "paralegal" },
+      { id: "l", name: "Lyliana", role: "paralegal" },
+      { id: "ar", name: "Arielle Allen", role: "attorney" },
+      { id: "k", name: "Kody Garza", role: "attorney" },
+      { id: "r", name: "Ryan Toomey", role: "attorney" },
+      { id: "la", name: "Laura Ramos James", role: "attorney" },
+    ];
+    const rows = await parseGoalsIndividualWorkbook(path, contacts, { year: 2026 });
+    const week6 = rows.filter((r) => r.weekLabel.includes("Week 6"));
+    assert.equal(week6.length, 8);
+    const adrian = week6.find((r) => r.teamLabel === "ADRIAN");
+    assert.ok(adrian);
+    assert.equal(adrian.paralegalToken, "ADRIAN");
+    assert.equal(adrian.attorneyToken, "TBD");
+    assert.equal(adrian.metrics.demand_sent, 0);
+    assert.equal(adrian.metrics.lawsuit_filed, 1);
+    assert.equal(adrian.metrics.discovery_responses, 2);
+    assert.equal(adrian.metrics.lit_event_scheduled, 2);
+    assert.equal(adrian.metrics.deposition, 0);
+    assert.equal(adrian.metrics.settlement, 0);
+
+    const arielle = week6.find((r) => r.teamLabel === "ARIELLE");
+    assert.ok(arielle);
+    assert.equal(arielle.paralegalToken, "TBD");
+    assert.equal(arielle.attorneyToken, "ARIELLE");
+    assert.equal(arielle.metrics.demand_sent, 0);
+    assert.equal(arielle.metrics.deposition, 2);
+    assert.equal(arielle.metrics.mediation, 1);
+    assert.equal(arielle.metrics.settlement, 4);
+
+    const week7 = rows.filter((r) => r.weekLabel.includes("Week 7"));
+    assert.equal(week7.length, 5);
+    const pair = week7.find((r) => r.teamLabel === "JOSSLYN + ARIELLE");
+    assert.ok(pair);
+    assert.equal(pair.paralegalToken, "JOSSLYN");
+    assert.equal(pair.attorneyToken, "ARIELLE");
+    assert.equal(pair.metrics.demand_sent, 2);
+    assert.equal(pair.metrics.deposition, 1);
+    assert.equal(pair.metrics.settlement, 2);
+    assert.equal(pair.metrics.disbursement, 2);
+
+    const lauraPair = week7.find((r) => r.teamLabel === "LYLIANA + LAURA");
+    assert.ok(lauraPair);
+    assert.equal(lauraPair.metrics.deposition, 0);
+    assert.equal(lauraPair.metrics.mediation, 0);
   });
 });
