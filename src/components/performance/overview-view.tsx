@@ -84,8 +84,9 @@ export function OverviewView({
               Projected attainment {pct(feeProjection.attainment)}
             </CardTitle>
             <p className="text-sm text-muted-foreground">
-              Disbursed + eligible settled (lag {feeProjection.lagDays}d) + unsettled expected this quarter.
-              Same firm totals for every role — goal from Performance Settings, not individual /goals.
+              Disbursed + settled planned this quarter (not yet disbursed) + unsettled expected this
+              quarter. Same firm totals for every role — goal from Performance Settings, not individual
+              /goals.
             </p>
           </CardHeader>
           <CardContent>

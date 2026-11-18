@@ -189,6 +189,7 @@ export function buildJonFeeProjection(input: {
     0,
   );
 
+  const currentQuarter = currentExpectedDisbursementQuarterLabel();
   const projection = computeJonQuarterlyFeeProjection({
     feesDisbursedInQuarter: feesDisbursed,
     settledUndisbursed: settled,
@@ -196,6 +197,7 @@ export function buildJonFeeProjection(input: {
     quarterlyGoal: input.quarterlyGoal,
     quarterEndYmd: bounds.endYmd,
     lagDays: input.lagDays,
+    currentQuarterLabel: currentQuarter,
   });
 
   return {

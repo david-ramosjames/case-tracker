@@ -57,7 +57,7 @@ describe("performance pacing", () => {
     );
   });
 
-  it("sums disbursed + eligible settled for Jon fee projection", () => {
+  it("sums disbursed + settled planned for current quarter only", () => {
     const result = computeJonQuarterlyFeeProjection({
       feesDisbursedInQuarter: 100_000,
       settledUndisbursed: [
@@ -76,20 +76,32 @@ describe("performance pacing", () => {
           caseNumber: "2",
           clientName: "B",
           attorneyName: "Y",
+          // Lag would include this, but Exp. disburse Q is next quarter — exclude.
           expectedAttorneyFees: 80_000,
-          settlementDate: "2026-03-20",
+          settlementDate: "2026-01-01",
           daysOutstanding: 5,
           targetResolutionQuarter: "Q2-26",
+        },
+        {
+          caseId: "c",
+          caseNumber: "3",
+          clientName: "C",
+          attorneyName: "Z",
+          expectedAttorneyFees: 40_000,
+          settlementDate: "2025-06-01",
+          daysOutstanding: 200,
+          targetResolutionQuarter: null,
         },
       ],
       quarterlyGoal: 200_000,
       quarterEndYmd: "2026-03-31",
       lagDays: 42,
+      currentQuarterLabel: "Q1-26",
     });
     assert.equal(result.eligibleSettledUndisbursedFees, 50_000);
     assert.equal(result.unsettledExpectedFees, 0);
     assert.equal(result.projectedQuarterlyFees, 150_000);
-    assert.equal(result.excludedCases.length, 1);
+    assert.equal(result.excludedCases.length, 2);
   });
 
   it("adds unsettled expected-this-quarter fees into projected total", () => {
@@ -111,6 +123,7 @@ describe("performance pacing", () => {
       quarterlyGoal: 200_000,
       quarterEndYmd: "2026-03-31",
       lagDays: 42,
+      currentQuarterLabel: "Q1-26",
     });
     assert.equal(result.eligibleSettledUndisbursedFees, 50_000);
     assert.equal(result.unsettledExpectedFees, 25_000);

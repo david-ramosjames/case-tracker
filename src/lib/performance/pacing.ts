@@ -73,7 +73,7 @@ export type ExpectedDisbursementQuarterCase = {
 
 export type QuarterlyFeeProjection = {
   feesDisbursedInQuarter: number;
-  /** Lag-eligible settled, not yet disbursed (stack segment 2). */
+  /** Settled, not disbursed, with Exp. disburse Q = current quarter (stack segment 2). */
   eligibleSettledUndisbursedFees: number;
   /** Expected this quarter but not yet settled (stack segment 3). */
   unsettledExpectedFees: number;
@@ -82,6 +82,8 @@ export type QuarterlyFeeProjection = {
   attainment: number | null;
   variance: number | null;
   lagDays: number;
+  /** Current Exp. disburse quarter label used for the settled segment filter (e.g. Q4-26). */
+  currentQuarterLabel: string;
   eligibleCases: SettledUndisbursedCase[];
   excludedCases: SettledUndisbursedCase[];
 };
@@ -103,8 +105,23 @@ export function isEligibleForQuarterProjection(input: {
 }
 
 /**
- * Jon fee pacing: disbursed + lag-eligible settled undisbursed + unsettled expected this quarter.
- * Distinct from /goals plan (pipeline targetResolutionQuarter).
+ * Normalize Exp. disburse labels like `Q4-26` / `2026 Q4` for equality checks.
+ * Kept local so pacing stays free of case-options imports.
+ */
+export function normalizeQuarterLabel(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  const short = trimmed.match(/^Q([1-4])[-/]?(\d{2})$/i);
+  if (short) return `Q${short[1]}-${short[2]}`;
+  const long = trimmed.match(/^(\d{4})\s*Q([1-4])$/i);
+  if (long) return `Q${long[2]}-${String(Number(long[1]) % 100).padStart(2, "0")}`;
+  return trimmed.toUpperCase();
+}
+
+/**
+ * Jon fee pacing: disbursed + settled planned this quarter (not disbursed)
+ * + unsettled expected this quarter.
+ * Settled stack segment uses Exp. disburse Q (targetResolutionQuarter), not lag-only.
  */
 export function computeJonQuarterlyFeeProjection(input: {
   feesDisbursedInQuarter: number;
@@ -114,17 +131,15 @@ export function computeJonQuarterlyFeeProjection(input: {
   quarterlyGoal: number;
   quarterEndYmd: string;
   lagDays: number;
+  /** Current calendar quarter as Exp. disburse label (e.g. Q4-26). */
+  currentQuarterLabel: string;
 }): QuarterlyFeeProjection {
+  const current = normalizeQuarterLabel(input.currentQuarterLabel);
   const eligibleCases: SettledUndisbursedCase[] = [];
   const excludedCases: SettledUndisbursedCase[] = [];
   for (const row of input.settledUndisbursed) {
-    if (
-      isEligibleForQuarterProjection({
-        settlementDate: row.settlementDate,
-        quarterEndYmd: input.quarterEndYmd,
-        lagDays: input.lagDays,
-      })
-    ) {
+    const planned = normalizeQuarterLabel(row.targetResolutionQuarter);
+    if (current && planned && planned === current) {
       eligibleCases.push(row);
     } else {
       excludedCases.push(row);
@@ -148,6 +163,7 @@ export function computeJonQuarterlyFeeProjection(input: {
     attainment,
     variance: projectedQuarterlyFees - input.quarterlyGoal,
     lagDays: input.lagDays,
+    currentQuarterLabel: current ?? input.currentQuarterLabel,
     eligibleCases,
     excludedCases,
   };
