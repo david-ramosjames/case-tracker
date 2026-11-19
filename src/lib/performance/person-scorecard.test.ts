@@ -115,4 +115,45 @@ describe("person scorecard", () => {
     assert.ok(bundle.lastWeek.overall != null);
     assert.equal(formatAttainmentPct(bundle.lastWeek.overall), "111%");
   });
+
+  it("uses historic pair actuals for 13-week attainment trend", () => {
+    const weekStart = "2026-11-16";
+    const lastWeekStart = "2026-11-09";
+    const historicActualsByWeek = new Map([
+      [
+        "2026-11-09",
+        {
+          demand_sent: 1,
+          lawsuit_filed: 2,
+          discovery_responses: 3,
+          lit_event_scheduled: 3,
+        },
+      ],
+      [
+        "2026-11-02",
+        {
+          demand_sent: 2,
+          lawsuit_filed: 1,
+          discovery_responses: 2,
+          lit_event_scheduled: 4,
+        },
+      ],
+    ]);
+    const bundle = buildPersonScorecardBundle({
+      role: "paralegal",
+      personId: "aivet",
+      weekStart,
+      lastWeekStart,
+      deliverables: [],
+      commitments: [],
+      targets: [],
+      historicActualsByWeek,
+      trendWeeks: 3,
+    });
+    const last = bundle.trend.find((t) => t.weekStart === "2026-11-09");
+    const prior = bundle.trend.find((t) => t.weekStart === "2026-11-02");
+    assert.ok(last?.overall != null && last.overall > 0);
+    assert.ok(prior?.overall != null && prior.overall > 0);
+    assert.equal(bundle.lastWeek.rows.find((r) => r.key === "lawsuit_filed")?.actual, 2);
+  });
 });

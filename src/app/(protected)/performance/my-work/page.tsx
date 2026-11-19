@@ -6,10 +6,12 @@ import {
   listCommitmentsForWeek,
   listDeliverablesForPerson,
 } from "@/lib/performance/deliverables";
+import { historicActualsByWeekForPerson } from "@/lib/performance/person-historic-actuals";
 import { buildPersonScorecardBundle } from "@/lib/performance/person-scorecard";
 import { filterParalegals, isParalegalRole, sortCasesByNumber } from "@/lib/performance/staff-roles";
 import { listPerformanceTargets } from "@/lib/performance/targets";
 import { shiftWeekStart } from "@/lib/performance/team-rollup";
+import { listWeekPairMetricsForPairs, listWeekPairsInRange } from "@/lib/performance/week-pairs";
 import { weekStartMondayCt } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 import { type AppUser } from "@/lib/types";
@@ -37,7 +39,9 @@ export default async function PerformanceParalegalsPage({
     selectedPerson = paralegals.find((u) => u.id === params.person) ?? selectedPerson;
   }
 
-  const [deliverables, commitments, targets] = await Promise.all([
+  const historyPairsPromise = listWeekPairsInRange(trendSince, lastWeekStart).catch(() => []);
+
+  const [deliverables, commitments, targets, historyPairs] = await Promise.all([
     selectedPerson
       ? listDeliverablesForPerson({
           contactId: selectedPerson.id,
@@ -47,7 +51,18 @@ export default async function PerformanceParalegalsPage({
       : Promise.resolve([]),
     listCommitmentsForWeek(weekStart),
     listPerformanceTargets(),
+    historyPairsPromise,
   ]);
+
+  const historyMetrics = await listWeekPairMetricsForPairs(historyPairs.map((p) => p.id)).catch(() => []);
+  const historicActualsByWeek = selectedPerson
+    ? historicActualsByWeekForPerson({
+        role: "paralegal",
+        personId: selectedPerson.id,
+        pairs: historyPairs,
+        metrics: historyMetrics,
+      })
+    : undefined;
 
   const scorecard = selectedPerson
     ? buildPersonScorecardBundle({
@@ -58,6 +73,7 @@ export default async function PerformanceParalegalsPage({
         deliverables,
         commitments,
         targets,
+        historicActualsByWeek,
       })
     : null;
 
@@ -75,6 +91,7 @@ export default async function PerformanceParalegalsPage({
 
   return (
     <MyWorkView
+      key={selectedPerson?.id ?? "none"}
       mode="paralegal"
       panel="board"
       initialDeliverables={deliverables}

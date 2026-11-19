@@ -379,6 +379,39 @@ function buildAttorneyScorecard(
   };
 }
 
+/**
+ * Weekly actuals from Individual/Team pair seats (goals sheet backfill).
+ * Used for 13-week attainment trend when deliverable history is sparse.
+ */
+export type HistoricWeekActuals = Partial<Record<string, number>>;
+
+function paralegalCountsFromHistoric(historic: HistoricWeekActuals | undefined) {
+  const counts = emptyParalegalCounts();
+  if (!historic) return null;
+  for (const key of Object.keys(counts) as ParalegalMetricKey[]) {
+    counts[key] = Number(historic[key]) || 0;
+  }
+  return counts;
+}
+
+function attorneyCountsFromHistoric(historic: HistoricWeekActuals | undefined) {
+  const counts = emptyAttorneyCounts();
+  if (!historic) return null;
+  for (const key of Object.keys(counts) as AttorneyMetricKey[]) {
+    if (key === "lit_completed_combined") {
+      counts.lit_completed_combined =
+        (Number(historic.deposition) || 0) +
+        (Number(historic.mediation) || 0) +
+        (Number(historic.hearing) || 0) +
+        (Number(historic.hearing_trial) || 0) +
+        (Number(historic.lit_completed_combined) || 0);
+      continue;
+    }
+    counts[key] = Number(historic[key]) || 0;
+  }
+  return counts;
+}
+
 export function buildPersonScorecardBundle(input: {
   role: "paralegal" | "attorney";
   personId: string;
@@ -388,12 +421,18 @@ export function buildPersonScorecardBundle(input: {
   commitments: PerformanceCommitment[];
   targets: PerformanceTarget[];
   trendWeeks?: number;
+  /** weekStart → metric actuals from performance_week_pairs (Individual sheet). */
+  historicActualsByWeek?: Map<string, HistoricWeekActuals>;
 }): PersonScorecardBundle {
   const trendWeeks = input.trendWeeks ?? 13;
+  const historic = input.historicActualsByWeek;
+
   if (input.role === "paralegal") {
     const lastGoals = resolveParalegalTargets(input.targets, input.personId, input.lastWeekStart);
     const thisGoals = resolveParalegalTargets(input.targets, input.personId, input.weekStart);
-    const lastCounts = countParalegalCompletions(input.deliverables, input.personId, input.lastWeekStart);
+    const lastFromPairs = paralegalCountsFromHistoric(historic?.get(input.lastWeekStart));
+    const lastCounts =
+      lastFromPairs ?? countParalegalCompletions(input.deliverables, input.personId, input.lastWeekStart);
     const expectedCounts = countParalegalExpected(
       input.deliverables,
       input.commitments,
@@ -405,7 +444,9 @@ export function buildPersonScorecardBundle(input: {
       const ws = shiftWeekStart(input.weekStart, -i);
       if (ws >= input.weekStart) continue;
       const goals = resolveParalegalTargets(input.targets, input.personId, ws);
-      const counts = countParalegalCompletions(input.deliverables, input.personId, ws);
+      const fromPairs = paralegalCountsFromHistoric(historic?.get(ws));
+      const counts =
+        fromPairs ?? countParalegalCompletions(input.deliverables, input.personId, ws);
       const card = buildParalegalScorecard(ws, counts, goals);
       trend.push({ weekStart: ws, weekLabel: card.weekLabel, overall: card.overall });
     }
@@ -418,7 +459,9 @@ export function buildPersonScorecardBundle(input: {
 
   const lastGoals = resolveAttorneyTargets(input.targets, input.personId, input.lastWeekStart);
   const thisGoals = resolveAttorneyTargets(input.targets, input.personId, input.weekStart);
-  const lastCounts = countAttorneyCompletions(input.deliverables, input.personId, input.lastWeekStart);
+  const lastFromPairs = attorneyCountsFromHistoric(historic?.get(input.lastWeekStart));
+  const lastCounts =
+    lastFromPairs ?? countAttorneyCompletions(input.deliverables, input.personId, input.lastWeekStart);
   const expectedCounts = countAttorneyExpected(
     input.deliverables,
     input.commitments,
@@ -430,7 +473,8 @@ export function buildPersonScorecardBundle(input: {
     const ws = shiftWeekStart(input.weekStart, -i);
     if (ws >= input.weekStart) continue;
     const goals = resolveAttorneyTargets(input.targets, input.personId, ws);
-    const counts = countAttorneyCompletions(input.deliverables, input.personId, ws);
+    const fromPairs = attorneyCountsFromHistoric(historic?.get(ws));
+    const counts = fromPairs ?? countAttorneyCompletions(input.deliverables, input.personId, ws);
     const card = buildAttorneyScorecard(ws, counts, goals);
     trend.push({ weekStart: ws, weekLabel: card.weekLabel, overall: card.overall });
   }

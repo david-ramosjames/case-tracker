@@ -12,10 +12,12 @@ import {
   listCommitmentsForWeek,
   listDeliverablesForPerson,
 } from "@/lib/performance/deliverables";
+import { historicActualsByWeekForPerson } from "@/lib/performance/person-historic-actuals";
 import { buildPersonScorecardBundle } from "@/lib/performance/person-scorecard";
 import { filterAttorneys, isAttorneyRole, sortCasesByNumber } from "@/lib/performance/staff-roles";
 import { listPerformanceTargets } from "@/lib/performance/targets";
 import { shiftWeekStart } from "@/lib/performance/team-rollup";
+import { listWeekPairMetricsForPairs, listWeekPairsInRange } from "@/lib/performance/week-pairs";
 import { weekStartMondayCt } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 import { listDocketFlowCaseEventsForCases } from "@/lib/supabase/services";
@@ -44,7 +46,9 @@ export default async function PerformanceAttorneysPage({
     selectedAttorney = attorneys.find((u) => u.id === params.person) ?? selectedAttorney;
   }
 
-  const [lines, deliverables, commitments, targets] = await Promise.all([
+  const historyPairsPromise = listWeekPairsInRange(trendSince, lastWeekStart).catch(() => []);
+
+  const [lines, deliverables, commitments, targets, historyPairs] = await Promise.all([
     selectedAttorney
       ? listAttorneyPlanLines({ attorneyContactId: selectedAttorney.id, weekStart })
       : Promise.resolve([]),
@@ -57,7 +61,18 @@ export default async function PerformanceAttorneysPage({
       : Promise.resolve([]),
     listCommitmentsForWeek(weekStart),
     listPerformanceTargets(),
+    historyPairsPromise,
   ]);
+
+  const historyMetrics = await listWeekPairMetricsForPairs(historyPairs.map((p) => p.id)).catch(() => []);
+  const historicActualsByWeek = selectedAttorney
+    ? historicActualsByWeekForPerson({
+        role: "attorney",
+        personId: selectedAttorney.id,
+        pairs: historyPairs,
+        metrics: historyMetrics,
+      })
+    : undefined;
 
   const scorecard = selectedAttorney
     ? buildPersonScorecardBundle({
@@ -68,6 +83,7 @@ export default async function PerformanceAttorneysPage({
         deliverables,
         commitments,
         targets,
+        historicActualsByWeek,
       })
     : null;
 
@@ -125,6 +141,7 @@ export default async function PerformanceAttorneysPage({
 
   return (
     <AttorneyView
+      key={selectedAttorney?.id ?? "none"}
       initialDeliverables={deliverables}
       initialCommitments={commitments}
       initialLines={lines}

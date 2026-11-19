@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
@@ -127,6 +127,14 @@ export function MyWorkView({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [coverOthers, setCoverOthers] = useState(false);
+
+  // PersonSwitcher uses client navigation; remount isn't guaranteed — reset board when person changes.
+  useEffect(() => {
+    setDeliverables(initialDeliverables);
+    setCommitments(initialCommitments);
+    // Only when the selected person changes; arrays are new every server render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional
+  }, [selectedPerson?.id]);
   const [form, setForm] = useState({
     caseId: "",
     category: "demand_sent" as ParalegalCategoryKey | AttorneyIdentifyCategoryKey,

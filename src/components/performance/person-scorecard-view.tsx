@@ -106,16 +106,22 @@ function ScoreTable({ card, valueLabel }: { card: PersonWeekScorecard; valueLabe
 function TrendChart({ trend }: { trend: PersonScorecardBundle["trend"] }) {
   const values = trend.map((t) => t.overall).filter((v): v is number => v != null);
   const max = Math.max(1.5, ...values, 1);
+  const goalHeightPx = Math.round((1 / max) * 120);
   return (
     <div className="space-y-3">
-      <div className="flex h-40 items-end gap-1.5">
+      <div className="relative flex h-40 items-end gap-1.5">
+        <div
+          className="pointer-events-none absolute inset-x-0 border-t border-dashed border-slate-300"
+          style={{ bottom: `${goalHeightPx}px` }}
+          aria-hidden
+        />
         {trend.map((point) => {
           const pct = point.overall == null ? 0 : Math.max(0.04, point.overall / max);
           const status = overallGoalStatus(point.overall);
           return (
-            <div key={point.weekStart} className="flex min-w-0 flex-1 flex-col items-center gap-1">
+            <div key={point.weekStart} className="relative z-[1] flex min-w-0 flex-1 flex-col items-center gap-1">
               <span className="text-[10px] tabular-nums text-muted-foreground">
-                {point.overall == null ? "—" : `${Math.round(point.overall * 100)}`}
+                {formatAttainmentPct(point.overall)}
               </span>
               <div
                 className={cn(
@@ -125,7 +131,7 @@ function TrendChart({ trend }: { trend: PersonScorecardBundle["trend"] }) {
                   (status === "met" || status === "neutral") && "bg-navy-800",
                 )}
                 style={{ height: `${Math.round(pct * 120)}px` }}
-                title={`${point.weekLabel}: ${formatAttainmentPct(point.overall)}`}
+                title={`${point.weekLabel}: ${formatAttainmentPct(point.overall)} attainment`}
               />
             </div>
           );
@@ -133,7 +139,7 @@ function TrendChart({ trend }: { trend: PersonScorecardBundle["trend"] }) {
       </div>
       <div className="flex justify-between text-[11px] text-muted-foreground">
         <span>{trend[0]?.weekLabel ?? ""}</span>
-        <span>Goal line = 100%</span>
+        <span>Attainment · goal = 100%</span>
         <span>{trend[trend.length - 1]?.weekLabel ?? ""}</span>
       </div>
     </div>
@@ -186,7 +192,9 @@ export function PersonScorecardView({
       <Card>
         <CardHeader>
           <CardTitle>13-week trend</CardTitle>
-          <CardDescription>Overall attainment by completed week (prior weeks only).</CardDescription>
+          <CardDescription>
+            Overall attainment % by completed week (from weekly goals history; prior weeks only).
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {bundle.trend.length === 0 ? (
