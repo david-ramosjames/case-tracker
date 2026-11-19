@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DerivedCaseStatusBadge } from "@/components/cases/case-status-badge";
 import { deriveCaseStatusFromTracker } from "@/lib/case-status";
+import { hasContactRole } from "@/lib/contacts/roles";
 import {
   CASE_STAGE_OPTIONS,
   CASE_TYPE_OPTIONS,
@@ -179,7 +180,7 @@ export function CaseTable({
 
   const attorneys = users.filter((user) => user.role === "attorney");
   const paralegals = users.filter((user) => user.role === "paralegal");
-  const legalAssistants = users.filter((user) => user.role === "legal_assistant");
+  const legalAssistants = users.filter((user) => hasContactRole(user, "legal_assistant"));
   const quarterFilterOptions = useMemo(() => getTargetPeriodFilterOptions(), []);
   const statusFilterOptions = useMemo(() => {
     const options: Array<{ value: CasePipelineFilter; label: string }> = [

@@ -1,4 +1,9 @@
 import { buildFieldValidationRowPatch } from "@/lib/attorney-score";
+import {
+  appUserRolesFromContact,
+  hasContactRole,
+  normalizeContactRoles,
+} from "@/lib/contacts/roles";
 import { caseNumbersMatch, cleanCaseNumber, compareCaseNumbers } from "@/lib/csv/parse";
 import { disbursementWeight, getAggregatedResultFromDisbursements } from "@/lib/disbursements";
 import { parseCaseBackfillCsv, type ParsedCaseBackfillRow } from "@/lib/csv/case-backfill";
@@ -101,6 +106,7 @@ type ContactRow = {
   name: string | null;
   email: string | null;
   role: string | null;
+  roles?: string[] | null;
   slack_user_id?: string | null;
   slack_display_name?: string | null;
 };
@@ -121,7 +127,7 @@ import {
 
 const DOCKETFLOW_CASE_COLUMNS =
   "id,case_number,client_name,name,status,case_type,date_of_incident,preferred_language,secondary_language,uses_eve,assigned_contact_ids,created_at,updated_at";
-const CONTACT_COLUMNS = "id,name,email,role,slack_user_id,slack_display_name";
+const CONTACT_COLUMNS = "id,name,email,role,roles,slack_user_id,slack_display_name";
 
 const DEFAULT_SETTINGS: CaseTrackerSettings = {
   staleReviewThresholdDays: 30,
@@ -378,29 +384,42 @@ export async function deleteTrackerCase(
   };
 }
 
-export async function getUsers(): Promise<AppUser[]> {
-  const client = await createSharedDataClient();
-  const { data } = await client.from("contacts").select("id,name,email,role,slack_user_id,slack_display_name").order("name");
-  return ((data ?? []) as ContactRow[])
-    .filter(
-      (row) =>
-        row.role === "attorney" ||
-        row.role === "paralegal" ||
-        row.role === "legal_assistant" ||
-        row.role === "manager",
-    )
-    .map(contactToUser);
+const CONTACT_USER_SELECT = "id,name,email,role,roles,slack_user_id,slack_display_name";
+
+function isListedStaffContact(row: ContactRow) {
+  return (
+    hasContactRole(row, "attorney") ||
+    hasContactRole(row, "paralegal") ||
+    hasContactRole(row, "legal_assistant") ||
+    hasContactRole(row, "manager")
+  );
 }
 
-/** Update Slack identity fields on a DocketFlow contact (used for topic handles / mentions). */
+export async function getUsers(): Promise<AppUser[]> {
+  const client = await createSharedDataClient();
+  const { data } = await client.from("contacts").select(CONTACT_USER_SELECT).order("name");
+  return ((data ?? []) as ContactRow[]).filter(isListedStaffContact).map(contactToUser);
+}
+
+/** Update Slack identity and/or multi-role checkboxes on a DocketFlow contact. */
 export async function updateContactSlackProfile(
   contactId: string,
-  input: { slackUserId?: string | null; slackDisplayName?: string | null },
+  input: {
+    slackUserId?: string | null;
+    slackDisplayName?: string | null;
+    role?: string | null;
+    roles?: string[] | null;
+  },
 ): Promise<AppUser> {
   const admin = createSupabaseAdminClient();
   if (!admin) throw new Error("Service role required to update contact Slack fields.");
 
-  const payload: { slack_user_id?: string | null; slack_display_name?: string | null } = {};
+  const payload: {
+    slack_user_id?: string | null;
+    slack_display_name?: string | null;
+    role?: string | null;
+    roles?: string[];
+  } = {};
   if (input.slackUserId !== undefined) {
     const trimmed = input.slackUserId?.trim() || null;
     if (trimmed && !/^U[A-Z0-9]+$/i.test(trimmed)) {
@@ -411,12 +430,18 @@ export async function updateContactSlackProfile(
   if (input.slackDisplayName !== undefined) {
     payload.slack_display_name = input.slackDisplayName?.trim() || null;
   }
+  if (input.roles !== undefined || input.role !== undefined) {
+    const normalized = normalizeContactRoles(input.roles, input.role);
+    if (!normalized.role) throw new Error("At least one contact role is required.");
+    payload.role = normalized.role;
+    payload.roles = normalized.roles;
+  }
 
   const { data, error } = await admin
     .from("contacts")
     .update(payload)
     .eq("id", contactId)
-    .select("id,name,email,role,slack_user_id,slack_display_name")
+    .select(CONTACT_USER_SELECT)
     .maybeSingle();
 
   if (error) throw error;
@@ -3199,7 +3224,7 @@ export async function getAttorneyGoals(year?: number): Promise<AttorneyGoal[]> {
   const sharedClient = await createSharedDataClient();
   const [{ data: goalRows }, { data: contactRows }] = await Promise.all([
     goalsQuery,
-    sharedClient.from("contacts").select("id,name,email,role"),
+    sharedClient.from("contacts").select("id,name,email,role,roles"),
   ]);
   const attorneys = ((contactRows ?? []) as ContactRow[]).filter((row) => row.role === "attorney");
 
@@ -3533,11 +3558,11 @@ function rowToCaseRecord(
   const assignedContacts = contacts.filter((contact) => caseRow?.assigned_contact_ids?.includes(contact.id));
   const attorneyContact =
     contacts.find((contact) => contact.id === toStringOrNull(trackerRow.attorney_contact_id)) ??
-    assignedContacts.find((contact) => contact.role === "attorney") ??
+    assignedContacts.find((contact) => hasContactRole(contact, "attorney")) ??
     makeTemporaryContact("unassigned-attorney", toString(trackerRow.attorney_name, "Unassigned Attorney"), "attorney");
   const paralegalContact =
     contacts.find((contact) => contact.id === toStringOrNull(trackerRow.paralegal_contact_id)) ??
-    assignedContacts.find((contact) => contact.role === "paralegal") ??
+    assignedContacts.find((contact) => hasContactRole(contact, "paralegal")) ??
     makeTemporaryContact("unassigned-paralegal", toString(trackerRow.paralegal_name, "Unassigned Paralegal"), "paralegal");
   const legalAssistantContact = assignedLegalAssistant(caseRow?.assigned_contact_ids, contacts);
   const sharedId = caseRow?.id ?? toString(trackerRow.id, "unlinked-case");
@@ -3577,7 +3602,7 @@ function assignedLegalAssistant(assignedIds: string[] | null | undefined, contac
   const byId = new Map(contacts.map((contact) => [contact.id, contact]));
   for (const id of assignedIds) {
     const contact = byId.get(id);
-    if (contact?.role === "legal_assistant") return contact;
+    if (contact && hasContactRole(contact, "legal_assistant")) return contact;
   }
   return null;
 }
@@ -3993,6 +4018,7 @@ function suggestionRowToSuggestion(row: SuggestionRow): StageSuggestion {
 }
 
 function contactToUser(row: ContactRow): AppUser {
+  const roles = appUserRolesFromContact(row);
   const role =
     row.role === "paralegal"
       ? "paralegal"
@@ -4002,12 +4028,18 @@ function contactToUser(row: ContactRow): AppUser {
           ? "legal_assistant"
           : row.role === "manager"
             ? "manager"
-            : "attorney";
+            : roles[0] === "paralegal" ||
+                roles[0] === "legal_assistant" ||
+                roles[0] === "manager" ||
+                roles[0] === "paralegal_manager"
+              ? roles[0]
+              : "attorney";
   return {
     id: row.id,
     name: row.name ?? "Unknown",
     email: row.email ?? `${slug(row.name ?? row.id)}@ramosjameslaw.local`,
     role,
+    roles: roles.length ? roles : [role],
     avatarInitials: initials(row.name ?? "Unknown"),
     active: true,
     slackUserId: row.slack_user_id ?? null,
@@ -4016,7 +4048,7 @@ function contactToUser(row: ContactRow): AppUser {
 }
 
 function makeTemporaryContact(id: string, name: string, role: string): ContactRow {
-  return { id, name, email: null, role, slack_user_id: null, slack_display_name: null };
+  return { id, name, email: null, role, roles: [role], slack_user_id: null, slack_display_name: null };
 }
 
 function groupBy(rows: SuggestionRow[], key: string) {

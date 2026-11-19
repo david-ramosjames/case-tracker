@@ -14,7 +14,8 @@ import {
 } from "@/lib/performance/deliverables";
 import { historicActualsByWeekForPerson } from "@/lib/performance/person-historic-actuals";
 import { buildPersonScorecardBundle } from "@/lib/performance/person-scorecard";
-import { filterAttorneys, isAttorneyRole, sortCasesByNumber } from "@/lib/performance/staff-roles";
+import { hasContactRole } from "@/lib/contacts/roles";
+import { filterAttorneys, sortCasesByNumber } from "@/lib/performance/staff-roles";
 import { listPerformanceTargets } from "@/lib/performance/targets";
 import { shiftWeekStart } from "@/lib/performance/team-rollup";
 import { listWeekPairMetricsForPairs, listWeekPairsInRange } from "@/lib/performance/week-pairs";
@@ -41,7 +42,7 @@ export default async function PerformanceAttorneysPage({
 
   const attorneys = filterAttorneys(users);
   let selectedAttorney: AppUser | null =
-    contact && isAttorneyRole(contact.role) ? contact : attorneys[0] ?? null;
+    contact && hasContactRole(contact, "attorney") ? contact : attorneys[0] ?? null;
   if (canBrowsePeople && params.person) {
     selectedAttorney = attorneys.find((u) => u.id === params.person) ?? selectedAttorney;
   }

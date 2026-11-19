@@ -181,9 +181,14 @@ function classifySoloRole(
     const upper = c.name.toUpperCase();
     return first === t || upper === t || upper.startsWith(`${t} `);
   });
-  const role = (matched?.role ?? "").toLowerCase();
-  if (role === "attorney") return "attorney";
-  if (role === "paralegal" || role === "legal_assistant") return "paralegal";
+  const matchedRoles = [
+    ...(((matched as { roles?: string[] | null } | undefined)?.roles ?? []) as string[]),
+    matched?.role ?? "",
+  ]
+    .map((value) => String(value).toLowerCase())
+    .filter(Boolean);
+  if (matchedRoles.includes("attorney")) return "attorney";
+  if (matchedRoles.includes("paralegal") || matchedRoles.includes("legal_assistant")) return "paralegal";
 
   // Fallback: which side has N/A in the sheet
   const paraAllNa = Object.keys(INDIVIDUAL_PARA_COLUMNS).every((col) =>

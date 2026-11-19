@@ -8,11 +8,19 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatUserRoleLabel } from "@/lib/auth/constants";
+import {
+  CONTACT_CAPABILITY_ROLES,
+  contactRoleList,
+  type ContactCapabilityRole,
+  withToggledContactRole,
+} from "@/lib/contacts/roles";
 import { type AppUser } from "@/lib/types";
 
 type DraftRow = {
   slackUserId: string;
   slackDisplayName: string;
+  role: string;
+  roles: string[];
 };
 
 function draftsFromUsers(users: AppUser[]) {
@@ -22,10 +30,19 @@ function draftsFromUsers(users: AppUser[]) {
       {
         slackUserId: user.slackUserId ?? "",
         slackDisplayName: user.slackDisplayName ?? "",
+        role: user.role,
+        roles: contactRoleList(user),
       },
     ]),
   ) as Record<string, DraftRow>;
 }
+
+const ROLE_CHECKBOX_LABEL: Record<ContactCapabilityRole, string> = {
+  attorney: "Attorney",
+  paralegal: "Paralegal",
+  legal_assistant: "Legal assistant",
+  manager: "Manager",
+};
 
 export function UserRolesCard({ users: initialUsers }: { users: AppUser[] }) {
   const [users, setUsers] = useState(initialUsers);
@@ -41,12 +58,23 @@ export function UserRolesCard({ users: initialUsers }: { users: AppUser[] }) {
     }));
   }
 
+  function toggleRole(user: AppUser, role: ContactCapabilityRole, enabled: boolean) {
+    const draft = drafts[user.id];
+    if (!draft) return;
+    const next = withToggledContactRole(draft, role, enabled);
+    updateDraft(user.id, next);
+  }
+
   function isDirty(user: AppUser) {
     const draft = drafts[user.id];
     if (!draft) return false;
+    const currentRoles = contactRoleList(user).slice().sort().join(",");
+    const draftRoles = [...draft.roles].sort().join(",");
     return (
       (draft.slackUserId.trim() || "") !== (user.slackUserId ?? "") ||
-      (draft.slackDisplayName.trim() || "") !== (user.slackDisplayName ?? "")
+      (draft.slackDisplayName.trim() || "") !== (user.slackDisplayName ?? "") ||
+      draft.role !== user.role ||
+      draftRoles !== currentRoles
     );
   }
 
@@ -64,6 +92,8 @@ export function UserRolesCard({ users: initialUsers }: { users: AppUser[] }) {
         body: JSON.stringify({
           slackUserId: draft.slackUserId,
           slackDisplayName: draft.slackDisplayName,
+          role: draft.role,
+          roles: draft.roles,
         }),
       });
       const body = (await response.json()) as { user?: AppUser; error?: string };
@@ -76,9 +106,11 @@ export function UserRolesCard({ users: initialUsers }: { users: AppUser[] }) {
         [nextUser.id]: {
           slackUserId: nextUser.slackUserId ?? "",
           slackDisplayName: nextUser.slackDisplayName ?? "",
+          role: nextUser.role,
+          roles: contactRoleList(nextUser),
         },
       }));
-      setMessage(`Saved Slack profile for ${nextUser.name}.`);
+      setMessage(`Saved roles / Slack profile for ${nextUser.name}.`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed.");
     } finally {
@@ -91,9 +123,9 @@ export function UserRolesCard({ users: initialUsers }: { users: AppUser[] }) {
       <CardHeader>
         <CardTitle>User Roles</CardTitle>
         <CardDescription>
-          DocketFlow contacts used for case assignment. Set each person’s Slack user ID and display name for channel
-          topics (`Attorney @Ryan`). Find IDs in Slack → profile → ⋯ → Copy member ID. Performance staffing dates live
-          under Performance → Settings (not here).
+          DocketFlow contacts used for case assignment. Check every role a person can fill (e.g. Valeria as paralegal
+          and legal assistant). Primary role is used for display; case seats match any checked role. Slack fields power
+          channel topics (`Attorney @Ryan`).
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 overflow-x-auto">
@@ -102,7 +134,8 @@ export function UserRolesCard({ users: initialUsers }: { users: AppUser[] }) {
             <TableRow>
               <TableHead>User</TableHead>
               <TableHead>Email</TableHead>
-              <TableHead>Role</TableHead>
+              <TableHead>Roles</TableHead>
+              <TableHead>Primary</TableHead>
               <TableHead>Slack display name</TableHead>
               <TableHead>Slack user ID</TableHead>
               <TableHead className="w-[6rem]" />
@@ -110,24 +143,59 @@ export function UserRolesCard({ users: initialUsers }: { users: AppUser[] }) {
           </TableHeader>
           <TableBody>
             {users.map((user) => {
-              const draft = drafts[user.id] ?? { slackUserId: "", slackDisplayName: "" };
+              const draft = drafts[user.id] ?? {
+                slackUserId: "",
+                slackDisplayName: "",
+                role: user.role,
+                roles: contactRoleList(user),
+              };
               const dirty = isDirty(user);
               return (
                 <TableRow key={user.id}>
                   <TableCell className="font-semibold whitespace-nowrap">{user.name}</TableCell>
                   <TableCell className="whitespace-nowrap">{user.email}</TableCell>
                   <TableCell>
-                    <Badge
-                      variant={
-                        user.role === "manager" ||
-                        user.role === "paralegal_manager" ||
-                        user.role === "admin"
-                          ? "pink"
-                          : "outline"
-                      }
+                    <div className="flex min-w-[12rem] flex-col gap-1 py-1">
+                      {CONTACT_CAPABILITY_ROLES.map((role) => (
+                        <label key={role} className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={draft.roles.includes(role)}
+                            disabled={savingId === user.id}
+                            onChange={(event) => toggleRole(user, role, event.target.checked)}
+                          />
+                          {ROLE_CHECKBOX_LABEL[role]}
+                        </label>
+                      ))}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <select
+                      className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                      value={draft.role}
+                      disabled={savingId === user.id || draft.roles.length === 0}
+                      onChange={(event) => updateDraft(user.id, { role: event.target.value })}
                     >
-                      {formatUserRoleLabel(user.role)}
-                    </Badge>
+                      {draft.roles.map((role) => (
+                        <option key={role} value={role}>
+                          {formatUserRoleLabel(role)}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {draft.roles.map((role) => (
+                        <Badge
+                          key={role}
+                          variant={
+                            role === "manager" || role === "paralegal_manager" || role === "admin"
+                              ? "pink"
+                              : "outline"
+                          }
+                        >
+                          {formatUserRoleLabel(role)}
+                        </Badge>
+                      ))}
+                    </div>
                   </TableCell>
                   <TableCell>
                     <Input

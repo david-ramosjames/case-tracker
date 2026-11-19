@@ -8,6 +8,7 @@ import { createPerformanceClient } from "@/lib/performance/db";
 import { rowToDeliverable } from "@/lib/performance/deliverables";
 import { buildPairWeekRollup, buildWeekSeatRollup } from "@/lib/performance/pair-rollup";
 import { listPerformancePairs } from "@/lib/performance/pairs";
+import { hasContactRole } from "@/lib/contacts/roles";
 import { filterAttorneys, filterParalegals } from "@/lib/performance/staff-roles";
 import { listPerformanceTargets } from "@/lib/performance/targets";
 import { firmMetricsByWeek, listFirmWeekMetricsInRange } from "@/lib/performance/firm-week-metrics";
@@ -154,7 +155,7 @@ export default async function PerformanceTeamPage({
 
   const attorneys = filterAttorneys(users);
   const pairParalegals = users
-    .filter((u) => u.role === "paralegal" || u.role === "legal_assistant")
+    .filter((u) => hasContactRole(u, "paralegal") || hasContactRole(u, "legal_assistant"))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const weekLabel = `Week ${isoWeekNumber(selectedWeek)}`;

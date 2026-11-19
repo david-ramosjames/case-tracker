@@ -1,5 +1,6 @@
 import { getAttorneyDisbursementVisibility } from "@/lib/disbursements";
 import { deriveCaseStatusFromTracker } from "@/lib/case-status";
+import { hasContactRole } from "@/lib/contacts/roles";
 import { FIRM_OUTPERFORM_GOAL_ATTORNEY_ID } from "@/lib/firm-goals";
 import { type SessionUser } from "@/lib/auth/types";
 import { type AppUser, type AttorneyGoal, type CaseRecord, type UserRole } from "@/lib/types";
@@ -27,7 +28,7 @@ export function findContactForSession(users: AppUser[], session: SessionUser): A
 }
 
 function paralegalAssigneeIds(users: AppUser[]) {
-  return new Set(users.filter((user) => user.role === "paralegal").map((user) => user.id));
+  return new Set(users.filter((user) => hasContactRole(user, "paralegal")).map((user) => user.id));
 }
 
 export function buildViewerContext(session: SessionUser, users: AppUser[]): ViewerContext {

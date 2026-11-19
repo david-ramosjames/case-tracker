@@ -14,11 +14,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ co
     const body = (await request.json()) as {
       slackUserId?: string | null;
       slackDisplayName?: string | null;
+      role?: string | null;
+      roles?: string[] | null;
     };
 
     const user = await updateContactSlackProfile(contactId, {
       slackUserId: body.slackUserId,
       slackDisplayName: body.slackDisplayName,
+      role: body.role,
+      roles: body.roles,
     });
 
     return NextResponse.json({ user });

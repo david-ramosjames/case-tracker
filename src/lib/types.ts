@@ -86,7 +86,10 @@ export type AppUser = {
   id: string;
   name: string;
   email: string;
+  /** Primary role (contacts.role) for display / login fallback. */
   role: UserRole;
+  /** Capability roles from contacts.roles (includes primary). */
+  roles?: UserRole[];
   avatarInitials: string;
   active: boolean;
   /** Slack user id (U…) when linked on contacts. */

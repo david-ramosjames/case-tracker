@@ -1,3 +1,4 @@
+import { hasContactRole } from "@/lib/contacts/roles";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getCaseById, updateSharedCaseFields, updateTrackerEntry } from "@/lib/supabase/services";
@@ -11,6 +12,7 @@ type ContactMatchRow = {
   id: string;
   name: string | null;
   role: string | null;
+  roles?: string[] | null;
   slack_user_id: string | null;
   slack_display_name: string | null;
 };
@@ -36,7 +38,8 @@ function matchContactBySlackUserId(
   const target = slackUserId.trim().toUpperCase();
   return (
     contacts.find(
-      (contact) => contact.role === role && contact.slack_user_id?.trim().toUpperCase() === target,
+      (contact) =>
+        hasContactRole(contact, role) && contact.slack_user_id?.trim().toUpperCase() === target,
     ) ?? null
   );
 }
@@ -49,7 +52,7 @@ function matchContactByHandle(
   const target = normalizeHandle(handle);
   if (!target) return null;
 
-  const roleMatches = contacts.filter((contact) => contact.role === role);
+  const roleMatches = contacts.filter((contact) => hasContactRole(contact, role));
   for (const contact of roleMatches) {
     const candidates = [
       contact.slack_display_name,
@@ -179,7 +182,7 @@ export async function applySlackChannelTopicChange(input: {
 
   const { data: contacts } = await admin
     .from("contacts")
-    .select("id,name,role,slack_user_id,slack_display_name")
+    .select("id,name,role,roles,slack_user_id,slack_display_name")
     .in("role", ["attorney", "paralegal", "legal_assistant"]);
 
   const contactRows = (contacts ?? []) as ContactMatchRow[];

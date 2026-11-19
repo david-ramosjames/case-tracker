@@ -77,7 +77,7 @@ export async function reassignCaseTeam(caseId: string, input: CaseAssignmentInpu
   if (input.legalAssistantContactId) contactIds.push(input.legalAssistantContactId);
   const { data: contacts, error: contactsError } = await admin
     .from("contacts")
-    .select("id,name,email,role,slack_user_id,slack_display_name")
+    .select("id,name,email,role,roles,slack_user_id,slack_display_name")
     .in("id", contactIds);
   if (contactsError) throw contactsError;
 

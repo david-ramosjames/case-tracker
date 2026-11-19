@@ -8,7 +8,8 @@ import {
 } from "@/lib/performance/deliverables";
 import { historicActualsByWeekForPerson } from "@/lib/performance/person-historic-actuals";
 import { buildPersonScorecardBundle } from "@/lib/performance/person-scorecard";
-import { filterParalegals, isParalegalRole, sortCasesByNumber } from "@/lib/performance/staff-roles";
+import { hasContactRole } from "@/lib/contacts/roles";
+import { filterParalegals, sortCasesByNumber } from "@/lib/performance/staff-roles";
 import { listPerformanceTargets } from "@/lib/performance/targets";
 import { shiftWeekStart } from "@/lib/performance/team-rollup";
 import { listWeekPairMetricsForPairs, listWeekPairsInRange } from "@/lib/performance/week-pairs";
@@ -34,7 +35,7 @@ export default async function PerformanceParalegalsPage({
 
   const paralegals = filterParalegals(users);
   let selectedPerson: AppUser | null =
-    contact && isParalegalRole(contact.role) ? contact : paralegals[0] ?? null;
+    contact && hasContactRole(contact, "paralegal") ? contact : paralegals[0] ?? null;
   if (canBrowsePeople && params.person) {
     selectedPerson = paralegals.find((u) => u.id === params.person) ?? selectedPerson;
   }

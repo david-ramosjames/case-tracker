@@ -6,11 +6,10 @@ import {
   listCommitmentsForWeek,
   listDeliverablesForPerson,
 } from "@/lib/performance/deliverables";
+import { hasContactRole } from "@/lib/contacts/roles";
 import {
   filterAttorneys,
   filterParalegals,
-  isAttorneyRole,
-  isParalegalRole,
   sortCasesByNumber,
 } from "@/lib/performance/staff-roles";
 import { shiftWeekStart } from "@/lib/performance/team-rollup";
@@ -40,12 +39,15 @@ export default async function PerformanceIdentifyPage({
   let selectedPerson: AppUser | null = contact ?? null;
   if (canBrowsePeople && params.person) {
     selectedPerson = switcherPeople.find((u) => u.id === params.person) ?? selectedPerson;
-  } else if (!selectedPerson || (!isAttorneyRole(selectedPerson.role) && !isParalegalRole(selectedPerson.role))) {
+  } else if (
+    !selectedPerson ||
+    (!hasContactRole(selectedPerson, "attorney") && !hasContactRole(selectedPerson, "paralegal"))
+  ) {
     // Managers without a staff seat: default to first switchable person when browsing.
     selectedPerson = canBrowsePeople ? switcherPeople[0] ?? null : null;
   }
 
-  const isAttorney = selectedPerson ? isAttorneyRole(selectedPerson.role) : false;
+  const isAttorney = selectedPerson ? hasContactRole(selectedPerson, "attorney") : false;
   const deliverables = selectedPerson
     ? await listDeliverablesForPerson({
         contactId: selectedPerson.id,
