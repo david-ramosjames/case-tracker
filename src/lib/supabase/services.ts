@@ -463,12 +463,19 @@ export async function listDocketFlowCaseEventsForCases(input: {
 }): Promise<DocketFlowScheduledEvent[]> {
   if (input.caseIds.length === 0) return [];
   const client = await createSharedDataClient();
-  let query = client.from("case_events").select(CASE_EVENT_COLUMNS).in("case_id", input.caseIds);
-  if (input.dateFrom) query = query.gte("date", input.dateFrom);
-  if (input.dateTo) query = query.lte("date", input.dateTo);
-  const { data, error } = await query.order("date", { ascending: true }).order("id", { ascending: true });
-  if (error) throw error;
-  return mapCaseEventRows(data ?? []);
+  // Chunk `.in()` to avoid PostgREST URL/body limits on large attorney caseloads.
+  const chunkSize = 100;
+  const rows: unknown[] = [];
+  for (let i = 0; i < input.caseIds.length; i += chunkSize) {
+    const chunk = input.caseIds.slice(i, i + chunkSize);
+    let query = client.from("case_events").select(CASE_EVENT_COLUMNS).in("case_id", chunk);
+    if (input.dateFrom) query = query.gte("date", input.dateFrom);
+    if (input.dateTo) query = query.lte("date", input.dateTo);
+    const { data, error } = await query.order("date", { ascending: true }).order("id", { ascending: true });
+    if (error) throw error;
+    if (data?.length) rows.push(...data);
+  }
+  return mapCaseEventRows(rows as Parameters<typeof mapCaseEventRows>[0]);
 }
 
 export type TrackerActor = {

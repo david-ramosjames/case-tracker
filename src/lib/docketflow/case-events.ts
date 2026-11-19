@@ -90,12 +90,12 @@ export function pickEventsCreatedInWeek(
 }
 
 function compareScheduledEvents(a: DocketFlowScheduledEvent, b: DocketFlowScheduledEvent): number {
-  const d = a.date.localeCompare(b.date);
+  const d = (a.date ?? "").localeCompare(b.date ?? "");
   if (d !== 0) return d;
   const ta = a.startDateTime ?? "";
   const tb = b.startDateTime ?? "";
   if (ta !== tb) return ta.localeCompare(tb);
-  return a.title.localeCompare(b.title);
+  return (a.title ?? "").localeCompare(b.title ?? "");
 }
 
 function isUpcomingEvent(ev: DocketFlowScheduledEvent, now = new Date()): boolean {

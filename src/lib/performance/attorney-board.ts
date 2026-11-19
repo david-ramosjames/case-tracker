@@ -35,8 +35,8 @@ export type AttorneyBoardBuckets = {
 
 function settlementDateFor(record: CaseRecord) {
   return (
-    record.tracker.result.settlementDate ??
-    record.tracker.disbursements.find((d) => d.settlementDate)?.settlementDate ??
+    record.tracker?.result?.settlementDate ??
+    record.tracker?.disbursements?.find((d) => d.settlementDate)?.settlementDate ??
     null
   );
 }
@@ -304,7 +304,7 @@ export function buildAttorneyBoardBuckets(input: {
   const sortFinished = (a: PerformanceDeliverable, b: PerformanceDeliverable) =>
     (b.completedAt ?? "").localeCompare(a.completedAt ?? "");
   const sortPlanned = (a: PerformanceDeliverable, b: PerformanceDeliverable) =>
-    (a.plannedDate ?? a.createdAt).localeCompare(b.plannedDate ?? b.createdAt);
+    (a.plannedDate ?? a.createdAt ?? "").localeCompare(b.plannedDate ?? b.createdAt ?? "");
 
   return {
     finished: dedupeById(finished).sort(sortFinished),
@@ -313,8 +313,8 @@ export function buildAttorneyBoardBuckets(input: {
   };
 }
 
-export function isSyntheticBoardDeliverable(id: string) {
-  return id.startsWith("docket:") || id.startsWith("settlement-case:");
+export function isSyntheticBoardDeliverable(id: string | null | undefined) {
+  return typeof id === "string" && (id.startsWith("docket:") || id.startsWith("settlement-case:"));
 }
 
 export function attorneyBoardDateWindow(weekStart: string, lastWeekStart: string) {

@@ -1,11 +1,11 @@
 import { findContactForSession } from "@/lib/auth/access";
 import { requireSessionUser } from "@/lib/auth/session";
 import { AttorneyView } from "@/components/performance/attorney-view";
-import { type ConfirmEventRow } from "@/components/performance/confirm-events-panel";
 import { canBrowsePerformancePeople } from "@/lib/performance/access";
 import {
   attorneyBoardDateWindow,
   buildAttorneyBoardBuckets,
+  type AttorneyBoardBuckets,
 } from "@/lib/performance/attorney-board";
 import { listAttorneyPlanLines } from "@/lib/performance/attorney-plans";
 import {
@@ -18,10 +18,7 @@ import { listPerformanceTargets } from "@/lib/performance/targets";
 import { shiftWeekStart } from "@/lib/performance/team-rollup";
 import { weekStartMondayCt } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
-import {
-  getNextScheduledDocketFlowEvents,
-  listDocketFlowCaseEventsForCases,
-} from "@/lib/supabase/services";
+import { listDocketFlowCaseEventsForCases } from "@/lib/supabase/services";
 import { type AppUser } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -108,8 +105,10 @@ export default async function PerformanceAttorneysPage({
     eventsByCaseId = {};
   }
 
-  const boardBuckets = selectedAttorney
-    ? buildAttorneyBoardBuckets({
+  let boardBuckets: AttorneyBoardBuckets | null = null;
+  if (selectedAttorney) {
+    try {
+      boardBuckets = buildAttorneyBoardBuckets({
         weekStart,
         lastWeekStart,
         personId: selectedAttorney.id,
@@ -117,27 +116,10 @@ export default async function PerformanceAttorneysPage({
         commitments,
         records: attorneyRecords,
         eventsByCaseId,
-      })
-    : null;
-
-  const confirmRows: ConfirmEventRow[] = [];
-  if (selectedAttorney) {
-    for (const record of attorneyRecords.slice(0, 25)) {
-      try {
-        const events = await getNextScheduledDocketFlowEvents(record.shared.id, 2);
-        for (const event of events) {
-          confirmRows.push({
-            caseId: record.shared.id,
-            caseNumber: record.shared.caseNumber,
-            clientName: record.shared.clientName,
-            attorneyUserId: record.shared.attorneyId,
-            assigneeUserId: record.shared.paralegalId,
-            event,
-          });
-        }
-      } catch {
-        // Calendar read is best-effort for confirmation queue.
-      }
+      });
+    } catch {
+      // Keep Output tab up even if calendar/settlement board assembly fails.
+      boardBuckets = { finished: [], committed: [], backlog: [] };
     }
   }
 
@@ -154,7 +136,7 @@ export default async function PerformanceAttorneysPage({
       caseOptions={caseOptions}
       nameById={nameById}
       viewerContactId={contact?.id ?? null}
-      confirmRows={confirmRows}
+      confirmRows={[]}
       scorecard={scorecard}
       boardBuckets={boardBuckets}
     />

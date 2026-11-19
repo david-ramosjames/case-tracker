@@ -73,7 +73,9 @@ export function AttorneyPlanView({
       lawsuit: [],
       settlement: [],
     };
-    for (const line of lines) map[line.kind].push(line);
+    for (const line of lines) {
+      if (line.kind in map) map[line.kind].push(line);
+    }
     return map;
   }, [lines]);
 
