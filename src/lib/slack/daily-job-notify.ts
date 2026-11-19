@@ -119,10 +119,12 @@ function formatAllJobLines(body: Record<string, unknown>): string[] {
   }
 
   const fieldReminders = body.fieldReminders as
-    | { posted?: number; skipped?: number; fields?: number; error?: string }
+    | { posted?: number; skipped?: number; fields?: number; skippedReason?: string; error?: string }
     | undefined;
   if (fieldReminders?.error) {
     lines.push(`Field reminders failed: ${fieldReminders.error}`);
+  } else if (fieldReminders?.skippedReason) {
+    lines.push(`Field reminders: skipped (${fieldReminders.skippedReason})`);
   } else if (fieldReminders) {
     lines.push(
       `Field reminders: ${fieldReminders.posted ?? 0} posted, ${fieldReminders.fields ?? 0} field(s) (${fieldReminders.skipped ?? 0} cases skipped)`,

@@ -80,7 +80,8 @@ const JOB_ROWS: JobRow[] = [
   {
     step: "fieldReminders",
     title: "Field reminders",
-    description: "Post one Slack reminder per overdue validation field (quarter, minimum, policy limits, etc.).",
+    description:
+      "Post 90-day field reminders (quarter, minimum, policy limits, etc.). Scheduled cadence is set under Slack field alerts; this manual run always sends.",
   },
   {
     step: "smsTimeTriggers",

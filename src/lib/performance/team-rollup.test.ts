@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildFirmWeekRollup,
+  buildFirmWeekRollupFromPairActuals,
   buildFirmWeekRollupFromPairRows,
   shiftWeekStart,
   sumPairRowsToFirmActuals,
@@ -61,5 +62,32 @@ describe("firm weekly rollup", () => {
     });
     assert.equal(rollup.metrics.find((m) => m.key === "demand_sent")?.actual, 2);
     assert.equal(rollup.metrics.find((m) => m.key === "new_case")?.actual, 3);
+  });
+
+  it("prefers Team-sheet firm actuals over summed pair seats", () => {
+    const rollup = buildFirmWeekRollupFromPairActuals({
+      weekStart: "2026-11-09",
+      pairActuals: { demand_sent: 2, lawsuit_filed: 9, settlement: 1 },
+      newCaseCount: 99,
+      targets: [],
+      firmSheetActuals: {
+        demand_sent: 3,
+        lawsuit_filed: 7,
+        discovery_responses: 10,
+        lit_event_scheduled: 15,
+        deposition: 1,
+        mediation: 1,
+        hearing: 0,
+        disengagement: 0,
+        settlement: 5,
+        disbursement: 3.5,
+        new_case: 10,
+      },
+    });
+    assert.equal(rollup.metrics.find((m) => m.key === "demand_sent")?.actual, 3);
+    assert.equal(rollup.metrics.find((m) => m.key === "lawsuit_filed")?.actual, 7);
+    assert.equal(rollup.metrics.find((m) => m.key === "settlement")?.actual, 5);
+    assert.equal(rollup.metrics.find((m) => m.key === "disbursement")?.actual, 3.5);
+    assert.equal(rollup.metrics.find((m) => m.key === "new_case")?.actual, 10);
   });
 });

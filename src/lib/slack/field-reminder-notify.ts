@@ -7,7 +7,11 @@ import { loadSlackChannelMapByCaseNumber } from "@/lib/slack/channels";
 import { isSlackEnabled } from "@/lib/slack/config";
 import { getSlackFieldAlertSkipReason } from "@/lib/slack/field-alert-guards";
 import {
-  FIELD_REMINDER_COOLDOWN_DAYS,
+  DEFAULT_FIELD_REMINDER_FREQUENCY_DAYS,
+  getFieldReminderScheduleSkipReason,
+  nextFieldReminderAllowedOnAfterSend,
+} from "@/lib/slack/field-reminder-schedule";
+import {
   buildFieldReminderMessage,
   getDueFieldReminders,
 } from "@/lib/slack/field-reminders";
@@ -16,8 +20,17 @@ import {
   dismissFieldReminder,
   getOpenFieldReminder,
 } from "@/lib/supabase/field-reminders";
+import { getSettings, updateSlackFieldAlertSettings } from "@/lib/supabase/services";
 import { type CaseRecord, type CaseTrackerSettings } from "@/lib/types";
 import { daysSince } from "@/lib/utils";
+
+type FieldReminderAlertSettings = Pick<
+  CaseTrackerSettings,
+  | "slackFieldAlertGraceDays"
+  | "attorneySlackFieldAlertsDisabled"
+  | "fieldReminderFrequencyDays"
+  | "fieldReminderNextAllowedOn"
+>;
 
 function getSlackContextForRecord(
   record: CaseRecord,
@@ -49,21 +62,48 @@ export async function sendSlackFieldReminders(
     forceSend?: boolean;
     caseNumber?: string;
     dryRun?: boolean;
-    settings?: Pick<
-      CaseTrackerSettings,
-      "slackFieldAlertGraceDays" | "attorneySlackFieldAlertsDisabled"
-    >;
+    /** When true (cron), respect next-batch date. Manual force bypasses. */
+    scheduleOnly?: boolean;
+    settings?: FieldReminderAlertSettings;
   },
 ) {
-  if (!isSlackEnabled()) return { posted: 0, skipped: 0, fields: 0, dryRun: Boolean(options?.dryRun), previewItems: [] as FieldReminderPreviewItem[] };
+  if (!isSlackEnabled()) {
+    return {
+      posted: 0,
+      skipped: 0,
+      fields: 0,
+      dryRun: Boolean(options?.dryRun),
+      previewItems: [] as FieldReminderPreviewItem[],
+    };
+  }
 
   const appUrl = getAppOriginForNotifications();
   if (!appUrl) throw new Error("Set NEXT_PUBLIC_SITE_URL for Slack links.");
 
-  const alertSettings = options?.settings ?? {
-    slackFieldAlertGraceDays: 7,
-    attorneySlackFieldAlertsDisabled: [],
+  const loadedSettings = options?.settings ?? (await getSettings());
+  const alertSettings: FieldReminderAlertSettings = {
+    slackFieldAlertGraceDays: loadedSettings.slackFieldAlertGraceDays,
+    attorneySlackFieldAlertsDisabled: loadedSettings.attorneySlackFieldAlertsDisabled,
+    fieldReminderFrequencyDays:
+      loadedSettings.fieldReminderFrequencyDays ?? DEFAULT_FIELD_REMINDER_FREQUENCY_DAYS,
+    fieldReminderNextAllowedOn: loadedSettings.fieldReminderNextAllowedOn ?? null,
   };
+  const cooldownDays = alertSettings.fieldReminderFrequencyDays;
+
+  const scheduleOnly = Boolean(options?.scheduleOnly) && !options?.force && !options?.forceSend;
+  if (scheduleOnly) {
+    const scheduleSkip = getFieldReminderScheduleSkipReason(alertSettings);
+    if (scheduleSkip) {
+      return {
+        posted: 0,
+        skipped: records.length,
+        fields: 0,
+        dryRun: Boolean(options?.dryRun),
+        skippedReason: scheduleSkip,
+        previewItems: [] as FieldReminderPreviewItem[],
+      };
+    }
+  }
 
   const channelMap = await loadSlackChannelMapByCaseNumber();
   let posted = 0;
@@ -166,7 +206,7 @@ export async function sendSlackFieldReminders(
       fields += 1;
 
       const open = await getOpenFieldReminder(record.shared.id, fieldKey);
-      if (open?.postedAt && !options?.force && daysSince(open.postedAt) < FIELD_REMINDER_COOLDOWN_DAYS) {
+      if (open?.postedAt && !options?.force && daysSince(open.postedAt) < cooldownDays) {
         skipped += 1;
         continue;
       }
@@ -193,6 +233,17 @@ export async function sendSlackFieldReminders(
 
       posted += 1;
     }
+  }
+
+  // After a scheduled batch runs in its window, hold until frequency days later.
+  if (scheduleOnly && !options?.dryRun) {
+    const nextOn = nextFieldReminderAllowedOnAfterSend(alertSettings.fieldReminderFrequencyDays);
+    await updateSlackFieldAlertSettings({
+      graceDays: alertSettings.slackFieldAlertGraceDays,
+      disabledAttorneyIds: alertSettings.attorneySlackFieldAlertsDisabled,
+      fieldReminderFrequencyDays: alertSettings.fieldReminderFrequencyDays,
+      fieldReminderNextAllowedOn: nextOn,
+    });
   }
 
   return { posted, skipped, fields, dryRun: Boolean(options?.dryRun), previewItems };

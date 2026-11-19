@@ -251,16 +251,28 @@ export function buildFirmWeekRollupFromPairActuals(input: {
   pairActuals: Partial<Record<FirmWeeklyMetricKey, number>>;
   newCaseCount: number;
   targets: PerformanceTarget[];
+  /**
+   * When set (Team sheet backfill), these win over pair sums — including new_case.
+   * Pair/Individual seats can include past employees; firm totals should match Team sheet.
+   */
+  firmSheetActuals?: Partial<Record<FirmWeeklyMetricKey, number>> | null;
 }): FirmWeekRollup {
   const actuals = Object.fromEntries(FIRM_WEEKLY_METRICS.map((m) => [m.key, 0])) as Record<
     FirmWeeklyMetricKey,
     number
   >;
-  for (const metric of FIRM_WEEKLY_METRICS) {
-    if (metric.key === "new_case") {
-      actuals.new_case = input.newCaseCount;
-    } else {
-      actuals[metric.key] = Number(input.pairActuals[metric.key]) || 0;
+  const sheet = input.firmSheetActuals;
+  if (sheet) {
+    for (const metric of FIRM_WEEKLY_METRICS) {
+      actuals[metric.key] = Number(sheet[metric.key]) || 0;
+    }
+  } else {
+    for (const metric of FIRM_WEEKLY_METRICS) {
+      if (metric.key === "new_case") {
+        actuals.new_case = input.newCaseCount;
+      } else {
+        actuals[metric.key] = Number(input.pairActuals[metric.key]) || 0;
+      }
     }
   }
   return cellsFromActuals({
@@ -275,12 +287,14 @@ export function buildFirmWeekRollupFromPairRows(input: {
   pairRows: Array<{ isVacant: boolean; counts: Partial<Record<string, number>> }>;
   newCaseCount: number;
   targets: PerformanceTarget[];
+  firmSheetActuals?: Partial<Record<FirmWeeklyMetricKey, number>> | null;
 }): FirmWeekRollup {
   return buildFirmWeekRollupFromPairActuals({
     weekStart: input.weekStart,
     pairActuals: sumPairRowsToFirmActuals(input.pairRows),
     newCaseCount: input.newCaseCount,
     targets: input.targets,
+    firmSheetActuals: input.firmSheetActuals,
   });
 }
 

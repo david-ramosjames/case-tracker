@@ -80,6 +80,8 @@ async function runFieldReminders(options: DailyJobOptions) {
     force,
     forceSend: force && Boolean(options.caseNumber?.trim()),
     dryRun: options.dryRun,
+    // Cron (force=false) respects the settings next-batch date; manual force bypasses.
+    scheduleOnly: !force,
     settings,
   });
 }

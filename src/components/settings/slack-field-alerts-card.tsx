@@ -21,10 +21,13 @@ export function SlackFieldAlertsCard({
   );
 
   const [graceDays, setGraceDays] = useState(String(settings.slackFieldAlertGraceDays));
+  const [frequencyDays, setFrequencyDays] = useState(String(settings.fieldReminderFrequencyDays));
+  const [nextAllowedOn, setNextAllowedOn] = useState(settings.fieldReminderNextAllowedOn ?? "");
   const [disabledAttorneyIds, setDisabledAttorneyIds] = useState(
     () => new Set(settings.attorneySlackFieldAlertsDisabled),
   );
   const [saving, setSaving] = useState(false);
+  const [pushing, setPushing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,6 +52,8 @@ export function SlackFieldAlertsCard({
         body: JSON.stringify({
           graceDays: Number(graceDays),
           disabledAttorneyIds: [...disabledAttorneyIds],
+          fieldReminderFrequencyDays: Number(frequencyDays),
+          fieldReminderNextAllowedOn: nextAllowedOn.trim() || null,
         }),
       });
 
@@ -56,14 +61,20 @@ export function SlackFieldAlertsCard({
         error?: string;
         graceDays?: number;
         disabledAttorneyIds?: string[];
+        fieldReminderFrequencyDays?: number;
+        fieldReminderNextAllowedOn?: string | null;
       };
 
       if (!response.ok) {
         throw new Error(body.error ?? "Unable to save settings.");
       }
 
-      if (typeof body.graceDays === "number") {
-        setGraceDays(String(body.graceDays));
+      if (typeof body.graceDays === "number") setGraceDays(String(body.graceDays));
+      if (typeof body.fieldReminderFrequencyDays === "number") {
+        setFrequencyDays(String(body.fieldReminderFrequencyDays));
+      }
+      if ("fieldReminderNextAllowedOn" in body) {
+        setNextAllowedOn(body.fieldReminderNextAllowedOn ?? "");
       }
       if (Array.isArray(body.disabledAttorneyIds)) {
         setDisabledAttorneyIds(new Set(body.disabledAttorneyIds));
@@ -74,6 +85,38 @@ export function SlackFieldAlertsCard({
       setError(errorMessage(saveError));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleManualPush(dryRun: boolean) {
+    setPushing(true);
+    setMessage(null);
+    setError(null);
+    try {
+      const response = await fetch("/api/admin/daily-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          step: "fieldReminders",
+          force: true,
+          dryRun,
+        }),
+      });
+      const body = (await response.json()) as {
+        error?: string;
+        fieldReminders?: { posted?: number; skipped?: number; fields?: number; dryRun?: boolean };
+      };
+      if (!response.ok) throw new Error(body.error ?? "Field reminder push failed.");
+      const fr = body.fieldReminders;
+      setMessage(
+        dryRun
+          ? `Preview: ${fr?.posted ?? 0} case(s) would get reminders (${fr?.fields ?? 0} field(s)).`
+          : `Posted ${fr?.posted ?? 0} reminder(s) across ${fr?.fields ?? 0} field(s) (${fr?.skipped ?? 0} skipped). Next scheduled batch still waits for the date above.`,
+      );
+    } catch (pushError) {
+      setError(errorMessage(pushError));
+    } finally {
+      setPushing(false);
     }
   }
 
@@ -103,6 +146,37 @@ export function SlackFieldAlertsCard({
           </span>
         </label>
 
+        <div className="grid gap-4 sm:grid-cols-2">
+          <label className="block max-w-xs">
+            <span className="mb-2 block text-sm font-medium text-navy-950">90-day reminder frequency</span>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={1}
+                max={90}
+                value={frequencyDays}
+                onChange={(event) => setFrequencyDays(event.target.value)}
+              />
+              <span className="text-sm text-muted-foreground">days</span>
+            </div>
+            <span className="mt-2 block text-xs text-muted-foreground">
+              How often the scheduled batch may post (default weekly). Also used as per-case cooldown.
+            </span>
+          </label>
+
+          <label className="block max-w-xs">
+            <span className="mb-2 block text-sm font-medium text-navy-950">Next scheduled batch on</span>
+            <Input
+              type="date"
+              value={nextAllowedOn}
+              onChange={(event) => setNextAllowedOn(event.target.value)}
+            />
+            <span className="mt-2 block text-xs text-muted-foreground">
+              Cron stays quiet until this Central date. Cleared/blank means allowed on the next cron run.
+            </span>
+          </label>
+        </div>
+
         <div>
           <p className="mb-3 text-sm font-medium text-navy-950">Attorney field alerts</p>
           <div className="space-y-2">
@@ -129,8 +203,8 @@ export function SlackFieldAlertsCard({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <Button type="button" onClick={handleSave} disabled={saving}>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" onClick={handleSave} disabled={saving || pushing}>
             {saving ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -140,9 +214,32 @@ export function SlackFieldAlertsCard({
               "Save alert settings"
             )}
           </Button>
-          {message ? <p className="text-sm text-emerald-700">{message}</p> : null}
-          {error ? <p className="text-sm text-red-600">{error}</p> : null}
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => handleManualPush(true)}
+            disabled={saving || pushing}
+          >
+            Preview reminders
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => handleManualPush(false)}
+            disabled={saving || pushing}
+          >
+            {pushing ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Pushing...
+              </>
+            ) : (
+              "Send reminders now"
+            )}
+          </Button>
         </div>
+        {message ? <p className="text-sm text-emerald-700">{message}</p> : null}
+        {error ? <p className="text-sm text-red-600">{error}</p> : null}
       </CardContent>
     </Card>
   );

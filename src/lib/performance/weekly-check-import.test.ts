@@ -5,7 +5,9 @@ import {
   matchContactId,
   meetingDateToWorkWeekStart,
   parseGoalsIndividualWorkbook,
+  parseGoalsTeamWorkbook,
   splitTeamLabel,
+  teamWeekEndToWorkWeekStart,
 } from "@/lib/performance/weekly-check-import";
 import { computeIsVacant } from "@/lib/performance/week-pairs";
 
@@ -15,6 +17,12 @@ describe("weekly check import helpers", () => {
     assert.equal(meetingDateToWorkWeekStart(new Date("2026-06-01T00:00:00.000Z")), "2026-05-25");
     // Spreadsheet Week 44 / meeting 11/9/26 → work week Monday 11/2 (ISO 44).
     assert.equal(meetingDateToWorkWeekStart(new Date("2026-11-09T01:00:00.000Z")), "2026-11-02");
+  });
+
+  it("maps Team sheet WEEK END to the same work-week Monday (no meeting−1)", () => {
+    // Week 45 ending Sunday 2026-11-15 → Monday 2026-11-09.
+    assert.equal(teamWeekEndToWorkWeekStart(new Date("2026-11-15T00:00:00.000Z")), "2026-11-09");
+    assert.equal(teamWeekEndToWorkWeekStart(new Date("2026-10-25T00:00:00.000Z")), "2026-10-19");
   });
 
   it("splits team labels and matches contact first names", () => {
@@ -31,6 +39,9 @@ describe("weekly check import helpers", () => {
     assert.equal(matchContactId("JESUS", contacts), "2");
     assert.equal(matchContactId("VALERIA", contacts), "3");
     assert.equal(matchContactId("TBD", contacts), null);
+    // Past Individual names (Eric, Katie, etc.) stay unmatched → stored as seat labels.
+    assert.equal(matchContactId("ERIC", contacts), null);
+    assert.equal(matchContactId("KATIE", contacts), null);
   });
 
   it("treats one TBD as a team and both TBD as vacant", () => {
@@ -49,8 +60,36 @@ describe("weekly check import helpers", () => {
     );
   });
 
+  it("parses Team sheet firm totals for 2026 (not Individual sums)", async (t) => {
+    const path = "C:/Users/david/Downloads/RJL 2026 GOALS (2).xlsx";
+    if (!existsSync(path)) {
+      t.skip("RJL 2026 GOALS (2) workbook not present on this machine");
+      return;
+    }
+    const rows = await parseGoalsTeamWorkbook(path, { year: 2026 });
+    assert.ok(rows.length > 0);
+    const week45 = rows.find((r) => /week\s*45/i.test(r.weekLabel));
+    assert.ok(week45);
+    assert.equal(week45.weekStart, "2026-11-09");
+    assert.equal(week45.metrics.demand_sent, 3);
+    assert.equal(week45.metrics.lawsuit_filed, 7);
+    assert.equal(week45.metrics.discovery_responses, 10);
+    assert.equal(week45.metrics.lit_event_scheduled, 15);
+    assert.equal(week45.metrics.deposition, 1);
+    assert.equal(week45.metrics.mediation, 1);
+    assert.equal(week45.metrics.hearing, 0);
+    assert.equal(week45.metrics.settlement, 5);
+    assert.equal(week45.metrics.disbursement, 3.5);
+    assert.equal(week45.metrics.new_case, 10);
+    assert.equal(week45.metrics.disengagement, 0);
+    // Blank future weeks are omitted.
+    assert.equal(rows.some((r) => /week\s*46/i.test(r.weekLabel)), false);
+  });
+
   it("parses Individual solo vs pair weeks with role split and N/A→0", async (t) => {
-    const path = "C:/Users/david/Downloads/RJL 2026 GOALS (1).xlsx";
+    const path = existsSync("C:/Users/david/Downloads/RJL 2026 GOALS (2).xlsx")
+      ? "C:/Users/david/Downloads/RJL 2026 GOALS (2).xlsx"
+      : "C:/Users/david/Downloads/RJL 2026 GOALS (1).xlsx";
     if (!existsSync(path)) {
       t.skip("RJL 2026 GOALS workbook not present on this machine");
       return;

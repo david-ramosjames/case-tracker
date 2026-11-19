@@ -18,7 +18,8 @@ import {
 import { type CaseRecord, type FieldReminderKey } from "@/lib/types";
 import { formatCurrency } from "@/lib/utils";
 
-export const FIELD_REMINDER_COOLDOWN_DAYS = 3;
+/** @deprecated Prefer settings.fieldReminderFrequencyDays (wired in sendSlackFieldReminders). */
+export const FIELD_REMINDER_COOLDOWN_DAYS = 7;
 
 export const FIELD_REMINDER_META: Record<
   FieldReminderKey,

@@ -370,6 +370,10 @@ export type CaseTrackerSettings = {
   slackFieldAlertGraceDays: number;
   /** Attorney contact IDs that should not receive Slack field-input alerts on their cases. */
   attorneySlackFieldAlertsDisabled: string[];
+  /** Days between scheduled 90-day field-reminder Slack batches (default 7). */
+  fieldReminderFrequencyDays: number;
+  /** Central-date YYYY-MM-DD — scheduled field reminders stay quiet until this day. */
+  fieldReminderNextAllowedOn: string | null;
   /**
    * Attorney contact IDs shown on the Contact scoreboard.
    * Null means the list has not been saved yet, so every attorney is shown.

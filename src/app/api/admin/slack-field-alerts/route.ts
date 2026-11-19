@@ -20,6 +20,8 @@ export async function GET() {
     return NextResponse.json({
       graceDays: settings.slackFieldAlertGraceDays,
       disabledAttorneyIds: settings.attorneySlackFieldAlertsDisabled,
+      fieldReminderFrequencyDays: settings.fieldReminderFrequencyDays,
+      fieldReminderNextAllowedOn: settings.fieldReminderNextAllowedOn,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to load Slack field alert settings.";
@@ -38,11 +40,26 @@ export async function PUT(request: Request) {
     const disabledAttorneyIds = Array.isArray(body.disabledAttorneyIds)
       ? body.disabledAttorneyIds.filter((id): id is string => typeof id === "string")
       : [];
+    const fieldReminderFrequencyDays =
+      body.fieldReminderFrequencyDays === undefined ? undefined : Number(body.fieldReminderFrequencyDays);
+    const fieldReminderNextAllowedOn =
+      body.fieldReminderNextAllowedOn === undefined
+        ? undefined
+        : body.fieldReminderNextAllowedOn === null || body.fieldReminderNextAllowedOn === ""
+          ? null
+          : String(body.fieldReminderNextAllowedOn);
 
-    const updated = await updateSlackFieldAlertSettings({ graceDays, disabledAttorneyIds });
+    const updated = await updateSlackFieldAlertSettings({
+      graceDays,
+      disabledAttorneyIds,
+      fieldReminderFrequencyDays,
+      fieldReminderNextAllowedOn,
+    });
     return NextResponse.json({
       graceDays: updated.slackFieldAlertGraceDays,
       disabledAttorneyIds: updated.attorneySlackFieldAlertsDisabled,
+      fieldReminderFrequencyDays: updated.fieldReminderFrequencyDays,
+      fieldReminderNextAllowedOn: updated.fieldReminderNextAllowedOn,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unable to save Slack field alert settings.";

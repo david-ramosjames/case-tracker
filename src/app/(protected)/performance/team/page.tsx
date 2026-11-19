@@ -10,12 +10,13 @@ import { buildPairWeekRollup, buildWeekSeatRollup } from "@/lib/performance/pair
 import { listPerformancePairs } from "@/lib/performance/pairs";
 import { filterAttorneys, filterParalegals } from "@/lib/performance/staff-roles";
 import { listPerformanceTargets } from "@/lib/performance/targets";
+import { firmMetricsByWeek, listFirmWeekMetricsInRange } from "@/lib/performance/firm-week-metrics";
 import {
   buildFirmWeekRollupFromPairActuals,
-  buildFirmWeekRollupFromPairRows,
   countNewCasesInWeek,
   listRecentWeekStarts,
   shiftWeekStart,
+  sumPairRowsToFirmActuals,
   sumStoredPairMetricsByWeek,
 } from "@/lib/performance/team-rollup";
 import {
@@ -115,21 +116,28 @@ export default async function PerformanceTeamPage({
     };
   });
 
-  // Firm activity = sum of team/pair cells (not a separate hard-filled rollup).
-  const firmWeek = buildFirmWeekRollupFromPairRows({
-    weekStart: selectedWeek,
-    pairRows,
-    newCaseCount: countNewCasesInWeek(records, selectedWeek),
-    targets,
-  });
-
   const historyPairs = await listWeekPairsInRange(oldestWeek, currentMonday);
-  const historyMetrics = await listWeekPairMetricsForPairs(historyPairs.map((p) => p.id));
+  const [historyMetrics, firmMetricRows] = await Promise.all([
+    listWeekPairMetricsForPairs(historyPairs.map((p) => p.id)),
+    listFirmWeekMetricsInRange(oldestWeek, currentMonday).catch(() => []),
+  ]);
+  const firmByWeek = firmMetricsByWeek(firmMetricRows);
   const sumsByWeek = sumStoredPairMetricsByWeek({
     weekPairs: historyPairs,
     metrics: historyMetrics,
   });
+
+  // Prefer Team-sheet firm totals when present; otherwise sum Individual/pair seats.
+  const firmWeek = buildFirmWeekRollupFromPairActuals({
+    weekStart: selectedWeek,
+    pairActuals: sumPairRowsToFirmActuals(pairRows),
+    newCaseCount: countNewCasesInWeek(records, selectedWeek),
+    targets,
+    firmSheetActuals: firmByWeek.get(selectedWeek) ?? null,
+  });
+
   const seatWeekStarts = new Set(historyPairs.map((p) => p.weekStart));
+  for (const weekStart of firmByWeek.keys()) seatWeekStarts.add(weekStart);
   seatWeekStarts.add(selectedWeek);
   seatWeekStarts.add(currentMonday);
 
@@ -140,6 +148,7 @@ export default async function PerformanceTeamPage({
       pairActuals: sumsByWeek.get(ws) ?? {},
       newCaseCount: countNewCasesInWeek(records, ws),
       targets,
+      firmSheetActuals: firmByWeek.get(ws) ?? null,
     });
   });
 

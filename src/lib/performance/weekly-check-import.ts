@@ -1,4 +1,8 @@
 import ExcelJS from "exceljs";
+import {
+  FIRM_WEEKLY_METRICS,
+  type FirmWeeklyMetricKey,
+} from "@/lib/performance/firm-metrics";
 import { WEEK_PAIR_METRIC_KEYS, type WeekPairMetricKey } from "@/lib/performance/week-pair-types";
 import { formatYmd, shiftWeekStart } from "@/lib/performance/weeks";
 
@@ -10,6 +14,28 @@ export type ParsedWeeklyCheckRow = {
   paralegalToken: string;
   attorneyToken: string;
   metrics: Partial<Record<WeekPairMetricKey, number>>;
+};
+
+/** One firm-total row from the RJL GOALS "Team" sheet. */
+export type ParsedFirmWeekTotals = {
+  weekStart: string;
+  weekLabel: string;
+  weekEndYmd: string;
+  metrics: Partial<Record<FirmWeeklyMetricKey, number>>;
+};
+
+/** Team sheet columns (row 7 header): DEMANDS…NEW CASES. No DISENGAGE column. */
+const TEAM_SHEET_COLUMN_TO_METRIC: Record<number, FirmWeeklyMetricKey> = {
+  3: "demand_sent",
+  4: "lawsuit_filed",
+  5: "discovery_responses",
+  6: "lit_event_scheduled",
+  7: "deposition",
+  8: "mediation",
+  9: "hearing",
+  10: "settlement",
+  11: "disbursement",
+  12: "new_case",
 };
 
 const COLUMN_TO_METRIC: Record<number, WeekPairMetricKey> = {
@@ -53,6 +79,38 @@ function utcMondayFromDate(d: Date): string {
   const monday = new Date(asUtc);
   monday.setUTCDate(monday.getUTCDate() + offset);
   return formatYmd(monday.getUTCFullYear(), monday.getUTCMonth() + 1, monday.getUTCDate());
+}
+
+function parseExcelDate(value: unknown): Date | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  const text = cellText(value).trim();
+  if (!text) return null;
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
+ * Team sheet "WEEK END" → work-week Monday (no meeting−1 shift).
+ * e.g. Week 45 ending 2026-11-15 → 2026-11-09.
+ */
+export function teamWeekEndToWorkWeekStart(value: unknown): string | null {
+  const d = parseExcelDate(value);
+  if (!d) return null;
+  return utcMondayFromDate(d);
+}
+
+function teamCellNumber(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (value && typeof value === "object" && "result" in value) {
+    return teamCellNumber((value as { result: unknown }).result);
+  }
+  const text = cellText(value).trim();
+  if (!text || text === "-" || text === "—" || /^n\/?a$/i.test(text)) return null;
+  const leading = text.match(/^(-?\d+(?:\.\d+)?)/);
+  if (leading) return Number(leading[1]);
+  const n = Number(text);
+  return Number.isFinite(n) ? n : null;
 }
 
 /**
@@ -254,6 +312,68 @@ export function emptyMetricBag(): Record<WeekPairMetricKey, number> {
  * - N/A / TBD metric cells → 0.
  * Meeting Monday − 1 week (same convention as Book1 / existing Team imports).
  */
+/**
+ * Parse RJL GOALS "Team" tab — one official firm-total row per week.
+ * Used for Team → Weekly history (not a sum of Individual seats).
+ */
+export async function parseGoalsTeamWorkbook(
+  filePath: string,
+  options?: { year?: number },
+): Promise<ParsedFirmWeekTotals[]> {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(filePath);
+  const sheet =
+    wb.getWorksheet("Team") ??
+    wb.worksheets.find((s) => /^team$/i.test(s.name)) ??
+    null;
+  if (!sheet) return [];
+
+  const year = options?.year;
+  const rows: ParsedFirmWeekTotals[] = [];
+
+  for (let r = 8; r <= (sheet.rowCount || 0); r++) {
+    const row = sheet.getRow(r);
+    const weekLabel = cellText(row.getCell(1).value).trim();
+    if (!/^week\s*\d+/i.test(weekLabel)) continue;
+
+    const endValue = row.getCell(2).value;
+    const endDate = parseExcelDate(endValue);
+    if (!endDate) continue;
+    if (year != null && endDate.getUTCFullYear() !== year && endDate.getFullYear() !== year) {
+      continue;
+    }
+
+    const weekStart = teamWeekEndToWorkWeekStart(endValue);
+    if (!weekStart) continue;
+
+    const metrics: Partial<Record<FirmWeeklyMetricKey, number>> = {
+      disengagement: 0,
+    };
+    let sawValue = false;
+    for (const [col, key] of Object.entries(TEAM_SHEET_COLUMN_TO_METRIC)) {
+      const value = teamCellNumber(row.getCell(Number(col)).value);
+      if (value == null) continue;
+      metrics[key] = value;
+      sawValue = true;
+    }
+    // Skip future / blank weeks (e.g. Week 46 with empty cells).
+    if (!sawValue) continue;
+
+    for (const metric of FIRM_WEEKLY_METRICS) {
+      if (metrics[metric.key] == null) metrics[metric.key] = 0;
+    }
+
+    rows.push({
+      weekStart,
+      weekLabel,
+      weekEndYmd: formatYmd(endDate.getUTCFullYear(), endDate.getUTCMonth() + 1, endDate.getUTCDate()),
+      metrics,
+    });
+  }
+
+  return rows;
+}
+
 export async function parseGoalsIndividualWorkbook(
   filePath: string,
   contacts: Array<{ id: string; name: string; role?: string | null }> = [],

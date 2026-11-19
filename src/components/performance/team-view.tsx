@@ -562,7 +562,8 @@ export function TeamView({
                 <div>
                   <CardTitle className="text-lg">Weekly history</CardTitle>
                   <CardDescription>
-                    Firm totals summed from team pairs. Em dash means no pair seats for that week.
+                    Firm totals from the Team goals sheet (not a sum of Individual seats). Em dash means
+                    that week has no Team or pair backfill yet.
                   </CardDescription>
                 </div>
                 <Link href="/performance/history" className="text-sm font-medium text-pink-700 hover:underline">

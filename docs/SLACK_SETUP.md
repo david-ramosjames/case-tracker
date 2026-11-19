@@ -181,7 +181,7 @@ Each overdue field gets **its own Slack post** in the case channel (not one bund
 
 **Result quarter** on the Results tab is separate — it is auto-set from the actual disburse date on the settlements sheet.
 
-Field posts respect a **3-day cooldown** per field (`FIELD_REMINDER_COOLDOWN_DAYS`) so the same field is not reposted daily while waiting for a reply.
+Field-reminder batches are gated by Settings → Slack field alerts (`field_reminder_frequency_days`, default weekly, plus `field_reminder_next_allowed_on`). Cron stays quiet until that date; manual “Send reminders now” bypasses the hold. Per-case cooldown matches the frequency setting.
 
 **Alert throttling (Settings → Slack field alerts):**
 

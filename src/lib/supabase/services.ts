@@ -113,6 +113,11 @@ type DisbursementRow = UnknownRow;
 type SuggestionRow = UnknownRow;
 
 import { DEFAULT_SLACK_FIELD_ALERT_GRACE_DAYS } from "@/lib/slack/field-alert-guards";
+import {
+  DEFAULT_FIELD_REMINDER_FREQUENCY_DAYS,
+  normalizeFieldReminderFrequencyDays,
+  normalizeFieldReminderNextAllowedOn,
+} from "@/lib/slack/field-reminder-schedule";
 
 const DOCKETFLOW_CASE_COLUMNS =
   "id,case_number,client_name,name,status,case_type,date_of_incident,preferred_language,secondary_language,uses_eve,assigned_contact_ids,created_at,updated_at";
@@ -140,6 +145,8 @@ const DEFAULT_SETTINGS: CaseTrackerSettings = {
   paralegalLimitedEditEnabled: false,
   slackFieldAlertGraceDays: DEFAULT_SLACK_FIELD_ALERT_GRACE_DAYS,
   attorneySlackFieldAlertsDisabled: [],
+  fieldReminderFrequencyDays: DEFAULT_FIELD_REMINDER_FREQUENCY_DAYS,
+  fieldReminderNextAllowedOn: null,
   contactScoreboardAttorneyIds: null,
 };
 
@@ -3264,6 +3271,12 @@ export async function getSettings(): Promise<CaseTrackerSettings> {
       slackFieldAlerts.grace_days ?? DEFAULT_SETTINGS.slackFieldAlertGraceDays,
     ),
     attorneySlackFieldAlertsDisabled: asStringArray(slackFieldAlerts.disabled_attorney_ids),
+    fieldReminderFrequencyDays: normalizeFieldReminderFrequencyDays(
+      slackFieldAlerts.field_reminder_frequency_days ?? DEFAULT_SETTINGS.fieldReminderFrequencyDays,
+    ),
+    fieldReminderNextAllowedOn: normalizeFieldReminderNextAllowedOn(
+      slackFieldAlerts.field_reminder_next_allowed_on ?? DEFAULT_SETTINGS.fieldReminderNextAllowedOn,
+    ),
     contactScoreboardAttorneyIds: contactScoreboard ? asStringArray(contactScoreboard.attorney_ids) : null,
   };
 }
@@ -3271,15 +3284,36 @@ export async function getSettings(): Promise<CaseTrackerSettings> {
 export async function updateSlackFieldAlertSettings(input: {
   graceDays: number;
   disabledAttorneyIds: string[];
-}): Promise<Pick<CaseTrackerSettings, "slackFieldAlertGraceDays" | "attorneySlackFieldAlertsDisabled">> {
+  fieldReminderFrequencyDays?: number;
+  fieldReminderNextAllowedOn?: string | null;
+}): Promise<
+  Pick<
+    CaseTrackerSettings,
+    | "slackFieldAlertGraceDays"
+    | "attorneySlackFieldAlertsDisabled"
+    | "fieldReminderFrequencyDays"
+    | "fieldReminderNextAllowedOn"
+  >
+> {
   if (!Number.isFinite(input.graceDays) || input.graceDays < 0) {
     throw new Error("Grace period must be a non-negative number of days.");
   }
+
+  const current = await getSettings();
+  const frequencyDays = normalizeFieldReminderFrequencyDays(
+    input.fieldReminderFrequencyDays ?? current.fieldReminderFrequencyDays,
+  );
+  const nextAllowedOn =
+    input.fieldReminderNextAllowedOn === undefined
+      ? current.fieldReminderNextAllowedOn
+      : normalizeFieldReminderNextAllowedOn(input.fieldReminderNextAllowedOn);
 
   const client = await createTrackerClient();
   const value = {
     grace_days: Math.round(input.graceDays),
     disabled_attorney_ids: [...new Set(input.disabledAttorneyIds.filter(Boolean))],
+    field_reminder_frequency_days: frequencyDays,
+    field_reminder_next_allowed_on: nextAllowedOn,
   };
 
   const { error } = await client.from("case_tracker_settings").upsert(
@@ -3296,6 +3330,8 @@ export async function updateSlackFieldAlertSettings(input: {
   return {
     slackFieldAlertGraceDays: value.grace_days,
     attorneySlackFieldAlertsDisabled: value.disabled_attorney_ids,
+    fieldReminderFrequencyDays: value.field_reminder_frequency_days,
+    fieldReminderNextAllowedOn: value.field_reminder_next_allowed_on,
   };
 }
 

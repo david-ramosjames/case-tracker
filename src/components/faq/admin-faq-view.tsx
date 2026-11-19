@@ -104,7 +104,7 @@ export function AdminFaqView() {
         <BulletList
           items={[
             "Liability — set once to Accepted, Denied, or Disputed (no recurring Slack reminder).",
-            "Expected disbursement quarter, minimum value, policy limits — every 90 days.",
+            "Expected disbursement quarter, minimum value, policy limits — remind when stale (90-day window); Slack batches are weekly by default (Settings → Slack field alerts), not every day.",
             "Each post shows Case Tracker Score and which fields still need attention.",
             "Attorney confirms with ✅ or replies confirmed / yes, or posts an update (e.g. Minimum: 85000).",
           ]}
