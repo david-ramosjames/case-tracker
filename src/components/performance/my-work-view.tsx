@@ -18,6 +18,8 @@ import {
   DEPOSITION_PARTY_ROLES,
   LIT_EVENT_KINDS,
   PARALEGAL_CATEGORIES,
+  completedLitEventDeliverableType,
+  isLitEventIdentifyCategory,
   litEventKindLabel,
   type AttorneyIdentifyCategoryKey,
   type LitEventKind,
@@ -203,7 +205,7 @@ export function MyWorkView({
   function resolveCreateFields() {
     const category = form.category;
 
-    if (category === "lit_event_scheduled") {
+    if (category === "lit_event_scheduled" || category === "completed_lit_event") {
       if (!form.litEventKind) throw new Error("Select a Type for the lit event.");
       if (form.litEventKind === "deposition" && !form.subType.trim()) {
         throw new Error("Select a Sub-type for the deposition.");
@@ -212,13 +214,28 @@ export function MyWorkView({
         throw new Error("Enter a Sub-type for the hearing.");
       }
       if (!form.notes.trim()) throw new Error("Add notes with further details.");
+      const subType = form.subType.trim() || null;
+      if (category === "completed_lit_event") {
+        // Off-calendar completion → counts as attended lit event (scorecard / attorney board).
+        return {
+          deliverableType: completedLitEventDeliverableType(form.litEventKind),
+          hearingType:
+            form.litEventKind === "deposition" || form.litEventKind === "hearing"
+              ? subType
+              : form.litEventKind === "trial"
+                ? "trial"
+                : null,
+          documentLabel: subType,
+          litPersonName: null,
+          roundNumber: null,
+          notes: form.notes.trim(),
+        };
+      }
       return {
         deliverableType: "lit_event_scheduled" as const,
         hearingType: form.litEventKind === "trial" ? "trial" : form.litEventKind,
         documentLabel:
-          form.litEventKind === "deposition" || form.litEventKind === "hearing"
-            ? form.subType.trim()
-            : null,
+          form.litEventKind === "deposition" || form.litEventKind === "hearing" ? subType : null,
         litPersonName: null,
         roundNumber: null,
         notes: form.notes.trim(),
@@ -241,6 +258,10 @@ export function MyWorkView({
     setBusyId(`create:${destination}`);
     try {
       if (!form.caseId) throw new Error("Select a case.");
+      // Off-calendar completed lit events are last-week-only — never backlog / this week.
+      if (form.category === "completed_lit_event" && destination !== "last_week") {
+        throw new Error("Completed Lit Event can only be added to completed last week.");
+      }
       const selected = caseOptions.find((c) => c.id === form.caseId);
       const fields = resolveCreateFields();
       const res = await fetch("/api/performance/deliverables", {
@@ -442,11 +463,11 @@ export function MyWorkView({
           </TableRow>
         </TableHeader>
         <TableBody>
-          {rows.map((d) => {
+          {(rows ?? []).map((d, index) => {
             const startYmd = deliverableStartYmd(d);
             const ageDays = daysSinceStarted(d);
             return (
-              <TableRow key={d.id}>
+              <TableRow key={d.id || `row-${index}`}>
                 <TableCell className="whitespace-nowrap">
                   {d.assigneeUserId ? nameById[d.assigneeUserId] ?? "—" : "—"}
                 </TableCell>
@@ -607,7 +628,7 @@ export function MyWorkView({
             ))}
           </select>
         </label>
-        {form.category === "lit_event_scheduled" ? (
+        {isLitEventIdentifyCategory(form.category) ? (
           <label className="space-y-1 text-sm">
             <span className="font-medium">Type</span>
             <select
@@ -630,7 +651,7 @@ export function MyWorkView({
             </select>
           </label>
         ) : null}
-        {form.category === "lit_event_scheduled" && form.litEventKind === "deposition" ? (
+        {isLitEventIdentifyCategory(form.category) && form.litEventKind === "deposition" ? (
           <label className="space-y-1 text-sm">
             <span className="font-medium">Sub-type</span>
             <select
@@ -647,7 +668,7 @@ export function MyWorkView({
             </select>
           </label>
         ) : null}
-        {form.category === "lit_event_scheduled" && form.litEventKind === "hearing" ? (
+        {isLitEventIdentifyCategory(form.category) && form.litEventKind === "hearing" ? (
           <label className="space-y-1 text-sm">
             <span className="font-medium">Sub-type</span>
             <Input
@@ -657,14 +678,23 @@ export function MyWorkView({
             />
           </label>
         ) : null}
-        <label className="space-y-1 text-sm">
-          <span className="font-medium">Requested date</span>
-          <Input
-            type="date"
-            value={form.requestedCompletionDate}
-            onChange={(e) => setForm((f) => ({ ...f, requestedCompletionDate: e.target.value }))}
-          />
-        </label>
+        {form.category === "completed_lit_event" ? (
+          <p className="text-xs text-muted-foreground md:col-span-2 lg:col-span-3">
+            Use only for lit events that were completed but not on the calendar. They go straight to
+            Completed last week and count toward lit events completed — not scheduling or this week’s
+            plan.
+          </p>
+        ) : null}
+        {form.category !== "completed_lit_event" ? (
+          <label className="space-y-1 text-sm">
+            <span className="font-medium">Requested date</span>
+            <Input
+              type="date"
+              value={form.requestedCompletionDate}
+              onChange={(e) => setForm((f) => ({ ...f, requestedCompletionDate: e.target.value }))}
+            />
+          </label>
+        ) : null}
         <label className="space-y-1 text-sm md:col-span-2 lg:col-span-3">
           <span className="font-medium">Notes</span>
           <Input
@@ -674,20 +704,24 @@ export function MyWorkView({
           />
         </label>
         <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-3">
+          {form.category !== "completed_lit_event" ? (
+            <>
+              <Button
+                variant="outline"
+                disabled={creating || !form.caseId}
+                onClick={() => void createItem("backlog")}
+              >
+                {busyId === "create:backlog" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Add to in progress
+              </Button>
+              <Button disabled={creating || !form.caseId} onClick={() => void createItem("this_week")}>
+                {busyId === "create:this_week" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                Add to this week
+              </Button>
+            </>
+          ) : null}
           <Button
-            variant="outline"
-            disabled={creating || !form.caseId}
-            onClick={() => void createItem("backlog")}
-          >
-            {busyId === "create:backlog" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Add to in progress
-          </Button>
-          <Button disabled={creating || !form.caseId} onClick={() => void createItem("this_week")}>
-            {busyId === "create:this_week" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-            Add to this week
-          </Button>
-          <Button
-            variant="secondary"
+            variant={form.category === "completed_lit_event" ? "default" : "secondary"}
             disabled={creating || !form.caseId}
             onClick={() => void createItem("last_week")}
           >
