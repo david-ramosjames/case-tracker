@@ -1,3 +1,4 @@
+import { asDateText, asYmdPrefix } from "@/lib/performance/weeks";
 import type { DocketFlowScheduledEvent } from "@/lib/types";
 
 type CaseEventRow = {
@@ -14,7 +15,7 @@ type CaseEventRow = {
   included?: boolean | null;
   completed?: boolean | null;
   calendar_origin?: string | null;
-  created_at?: string | null;
+  created_at?: string | Date | null;
 };
 
 function todayYmd(date = new Date()): string {
@@ -51,7 +52,7 @@ function rowToScheduledEvent(row: CaseEventRow): DocketFlowScheduledEvent {
     included: row.included !== false,
     completed: Boolean(row.completed),
     calendarOrigin: row.calendar_origin === "google_ics_mirror" ? "google_ics_mirror" : "docketflow",
-    createdAt: row.created_at ?? null,
+    createdAt: asDateText(row.created_at) || null,
   };
 }
 
@@ -66,8 +67,8 @@ export function pickEventsByDateInWeek(
     .filter((ev) => {
       if (!ev.included) return false;
       if (ev.calendarOrigin === "google_ics_mirror") return false;
-      const day = (ev.date || ev.startDateTime || "").slice(0, 10);
-      return day >= weekStart && day <= weekEnd;
+      const day = asYmdPrefix(ev.date) || asYmdPrefix(ev.startDateTime) || "";
+      return Boolean(day) && day >= weekStart && day <= weekEnd;
     })
     .sort(compareScheduledEvents);
 }
@@ -83,7 +84,7 @@ export function pickEventsCreatedInWeek(
     .filter((ev) => {
       if (!ev.included) return false;
       if (ev.calendarOrigin === "google_ics_mirror") return false;
-      const day = (ev.createdAt || "").slice(0, 10);
+      const day = asYmdPrefix(ev.createdAt) || "";
       return Boolean(day) && day >= weekStart && day <= weekEnd;
     })
     .sort(compareScheduledEvents);

@@ -83,6 +83,25 @@ export function formatYmd(year: number, month: number, day: number) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
+/** Coerce Date / string / null into text safe for .slice / comparisons. */
+export function asDateText(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value.toISOString();
+  return String(value);
+}
+
+/** First YYYY-MM-DD found in a date-like value, or null. */
+export function asYmdPrefix(value: unknown): string | null {
+  const text = asDateText(value).trim();
+  if (!text) return null;
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1] ?? null;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+}
+
 /** Monday 9:30 CT is a snapshot checkpoint, not an edit lock. */
 export function isPastMondaySnapshotCheckpoint(date: Date = new Date()) {
   const p = chicagoDateParts(date);

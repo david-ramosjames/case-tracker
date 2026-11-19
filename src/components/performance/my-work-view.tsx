@@ -39,18 +39,18 @@ import {
   type PerformanceDeliverableType,
 } from "@/lib/performance/types";
 import { daysBetweenYmd } from "@/lib/performance/pacing";
-import { chicagoTodayYmd, weekEndFromStart } from "@/lib/performance/weeks";
+import { asYmdPrefix, chicagoTodayYmd, weekEndFromStart } from "@/lib/performance/weeks";
 import { type AppUser } from "@/lib/types";
 
 function deliverableStartYmd(d: PerformanceDeliverable) {
-  return (d.createdAt || d.identifiedAt || "").slice(0, 10) || null;
+  return asYmdPrefix(d.createdAt) || asYmdPrefix(d.identifiedAt);
 }
 
 /** Days from create/start until complete (finished) or today (still open). */
 function daysSinceStarted(d: PerformanceDeliverable, todayYmd = chicagoTodayYmd()) {
   const start = deliverableStartYmd(d);
   if (!start) return null;
-  const end = (d.completedAt || "").slice(0, 10) || todayYmd;
+  const end = asYmdPrefix(d.completedAt) || todayYmd;
   return Math.max(0, daysBetweenYmd(start, end));
 }
 
@@ -90,8 +90,8 @@ function typeLabel(type: PerformanceDeliverableType) {
 }
 
 function inWeek(ymd: string | null | undefined, weekStart: string) {
-  if (!ymd) return false;
-  const day = ymd.slice(0, 10);
+  const day = asYmdPrefix(ymd);
+  if (!day) return false;
   return day >= weekStart && day <= weekEndFromStart(weekStart);
 }
 

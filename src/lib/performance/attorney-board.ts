@@ -7,7 +7,13 @@ import {
   type PerformanceDeliverable,
   type PerformanceDeliverableType,
 } from "@/lib/performance/types";
-import { isDateInWeek, shiftWeekStart, weekEndFromStart } from "@/lib/performance/weeks";
+import {
+  asDateText,
+  asYmdPrefix,
+  isDateInWeek,
+  shiftWeekStart,
+  weekEndFromStart,
+} from "@/lib/performance/weeks";
 import { type CaseRecord, type DocketFlowScheduledEvent } from "@/lib/types";
 
 const LIT_COMPLETED_TYPES: PerformanceDeliverableType[] = [
@@ -42,7 +48,7 @@ function settlementDateFor(record: CaseRecord) {
 }
 
 function eventDay(event: DocketFlowScheduledEvent) {
-  return (event.date || event.startDateTime || "").slice(0, 10);
+  return asYmdPrefix(event.date) || asYmdPrefix(event.startDateTime);
 }
 
 function syntheticBase(partial: {
@@ -102,7 +108,8 @@ function fromDocketEvent(input: {
   completedAt: string | null;
 }): PerformanceDeliverable {
   const day = eventDay(input.event);
-  const created = input.event.createdAt || `${day}T12:00:00.000Z`;
+  const created =
+    asDateText(input.event.createdAt) || (day ? `${day}T12:00:00.000Z` : new Date().toISOString());
   const type = classifyLitDeliverableType(input.event.title, input.event.eventKind);
   return syntheticBase({
     id: `docket:${input.event.id}`,
@@ -202,8 +209,8 @@ export function buildAttorneyBoardBuckets(input: {
   for (const d of input.deliverables) {
     if (d.attorneyUserId !== input.personId) continue;
     if (d.workflowStatus !== "done") continue;
-    const completedDay = (d.completedAt || "").slice(0, 10);
-    if (!isDateInWeek(completedDay, input.lastWeekStart)) continue;
+    const completedDay = asYmdPrefix(d.completedAt);
+    if (!completedDay || !isDateInWeek(completedDay, input.lastWeekStart)) continue;
     if (LIT_COMPLETED_TYPES.includes(d.deliverableType) || d.deliverableType === "settlement") {
       finished.push(d);
     }
@@ -212,7 +219,7 @@ export function buildAttorneyBoardBuckets(input: {
   const finishedSettlementKeys = new Set(
     finished
       .filter((d) => d.deliverableType === "settlement")
-      .map((d) => `${d.caseId}:${(d.completedAt || d.plannedDate || "").slice(0, 10)}`),
+      .map((d) => `${d.caseId}:${asYmdPrefix(d.completedAt) || asYmdPrefix(d.plannedDate) || ""}`),
   );
 
   const assigned = input.records.filter((r) => r.shared.attorneyId === input.personId);
@@ -230,14 +237,15 @@ export function buildAttorneyBoardBuckets(input: {
     }
 
     if (settleDay && isDateInWeek(settleDay, input.weekStart)) {
-      const already = input.deliverables.some(
-        (d) =>
-          d.attorneyUserId === input.personId &&
-          d.deliverableType === "settlement" &&
-          d.caseId === record.shared.id &&
-          (d.workflowStatus === "committed" ||
-            (d.workflowStatus === "done" && isDateInWeek((d.completedAt || "").slice(0, 10), input.weekStart))),
-      );
+      const already = input.deliverables.some((d) => {
+        if (d.attorneyUserId !== input.personId) return false;
+        if (d.deliverableType !== "settlement") return false;
+        if (d.caseId !== record.shared.id) return false;
+        if (d.workflowStatus === "committed") return true;
+        if (d.workflowStatus !== "done") return false;
+        const completedDay = asYmdPrefix(d.completedAt);
+        return Boolean(completedDay && isDateInWeek(completedDay, input.weekStart));
+      });
       if (!already) {
         committed.push(
           fromSettlement({
@@ -293,8 +301,8 @@ export function buildAttorneyBoardBuckets(input: {
     if (d.attorneyUserId !== input.personId) continue;
     if (isAttorneyOnlyBoardType(d.deliverableType)) continue;
     if (d.workflowStatus === "done") {
-      const completedDay = (d.completedAt || "").slice(0, 10);
-      if (isDateInWeek(completedDay, input.lastWeekStart)) finished.push(d);
+      const completedDay = asYmdPrefix(d.completedAt);
+      if (completedDay && isDateInWeek(completedDay, input.lastWeekStart)) finished.push(d);
       continue;
     }
     if (d.workflowStatus === "committed" && committedIds.has(d.id)) committed.push(d);

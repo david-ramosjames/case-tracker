@@ -1,4 +1,4 @@
-import { weekEndFromStart } from "@/lib/performance/weeks";
+import { asYmdPrefix, weekEndFromStart } from "@/lib/performance/weeks";
 import {
   type PerformanceCommitment,
   type PerformanceDeliverable,
@@ -73,8 +73,8 @@ export function isLitigationCalendarEvent(event: Pick<DocketFlowScheduledEvent, 
 }
 
 function inWeek(day: string | null | undefined, weekStart: string) {
-  if (!day) return false;
-  const ymd = day.slice(0, 10);
+  const ymd = asYmdPrefix(day);
+  if (!ymd) return false;
   return ymd >= weekStart && ymd <= weekEndFromStart(weekStart);
 }
 
@@ -183,7 +183,7 @@ export function buildAutoProgress(input: {
     if (input.role === "attorney") {
       for (const event of events) {
         if (!isLitigationCalendarEvent(event)) continue;
-        const eventDay = (event.date || event.startDateTime || "").slice(0, 10);
+        const eventDay = asYmdPrefix(event.date) || asYmdPrefix(event.startDateTime) || "";
         if (!inWeek(eventDay, input.weekStart)) continue;
         if (doneKeys.has(`docket:${event.id}`)) continue;
         const type = classifyLitDeliverableType(event.title, event.eventKind);
@@ -300,7 +300,7 @@ export function buildAutoProgress(input: {
       for (const event of events) {
         if (!isLitigationCalendarEvent(event)) continue;
         // Scheduling credit requires DocketFlow created_at in the week (not event date).
-        const createdDay = (event.createdAt || "").slice(0, 10);
+        const createdDay = asYmdPrefix(event.createdAt) || "";
         if (!createdDay || !inWeek(createdDay, input.weekStart)) continue;
         if (doneKeys.has(`docket:${event.id}`)) continue;
         const matched = matchDeliverable({
@@ -338,7 +338,7 @@ export function buildAutoProgress(input: {
     const recordSuggestions = record.tracker.detectedStageSignals ?? [];
     for (const suggestion of recordSuggestions) {
       if (suggestion.dismissedAt) continue;
-      const signalDay = (suggestion.confirmedAt || suggestion.detectedAt || "").slice(0, 10);
+      const signalDay = asYmdPrefix(suggestion.confirmedAt) || asYmdPrefix(suggestion.detectedAt) || "";
       const isOpen = !suggestion.confirmedAt && !suggestion.dismissedAt;
       if (!isOpen && !inWeek(signalDay, input.weekStart)) continue;
 
@@ -441,7 +441,7 @@ export function buildAutoProgress(input: {
 
     // Disengagements (attorney informational; verify).
     if (input.role === "attorney" && record.tracker.caseStage === "Disengaged") {
-      const closedDay = (record.tracker.closedAt || "").slice(0, 10);
+      const closedDay = asYmdPrefix(record.tracker.closedAt) || "";
       if (inWeek(closedDay, input.weekStart) || !closedDay) {
         const matched = matchDeliverable({
           open,

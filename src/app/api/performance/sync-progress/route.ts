@@ -9,7 +9,7 @@ import {
   listCommitmentsForWeek,
   listDeliverablesForPerson,
 } from "@/lib/performance/deliverables";
-import { weekEndFromStart, weekStartMondayCt } from "@/lib/performance/weeks";
+import { asYmdPrefix, weekEndFromStart, weekStartMondayCt } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 import { listDocketFlowCaseEvents, getUsers } from "@/lib/supabase/services";
 import { errorMessage } from "@/lib/utils";
@@ -63,8 +63,8 @@ export async function POST(request: Request) {
         try {
           const events = await listDocketFlowCaseEvents(record.shared.id);
           eventsByCaseId[record.shared.id] = events.filter((ev) => {
-            const dateDay = (ev.date || ev.startDateTime || "").slice(0, 10);
-            const createdDay = (ev.createdAt || "").slice(0, 10);
+            const dateDay = asYmdPrefix(ev.date) || asYmdPrefix(ev.startDateTime) || "";
+            const createdDay = asYmdPrefix(ev.createdAt) || "";
             return (
               (dateDay >= weekStart && dateDay <= weekEnd) ||
               (createdDay >= weekStart && createdDay <= weekEnd)

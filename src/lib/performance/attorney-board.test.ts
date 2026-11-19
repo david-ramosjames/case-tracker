@@ -134,4 +134,33 @@ describe("buildAttorneyBoardBuckets", () => {
     });
     assert.equal(buckets.finished.some((r) => r.id === "d-demand"), true);
   });
+
+  it("accepts Date createdAt from DocketFlow without throwing", () => {
+    const weekStart = "2026-11-16";
+    const lastWeekStart = "2026-11-09";
+    const personId = "atty";
+    const buckets = buildAttorneyBoardBuckets({
+      weekStart,
+      lastWeekStart,
+      personId,
+      deliverables: [],
+      commitments: [],
+      records: [record({ id: "c1", caseNumber: "100", attorneyId: personId })],
+      eventsByCaseId: {
+        c1: [
+          event({
+            id: "ev-date",
+            date: "2026-11-18",
+            title: "Deposition",
+            caseId: "c1",
+            createdAt: new Date("2026-11-10T15:00:00.000Z") as unknown as string,
+          }),
+        ],
+      },
+    });
+    const row = buckets.committed.find((r) => r.id === "docket:ev-date");
+    assert.ok(row);
+    assert.equal(typeof row!.createdAt, "string");
+    assert.match(row!.createdAt, /^\d{4}-\d{2}-\d{2}/);
+  });
 });
