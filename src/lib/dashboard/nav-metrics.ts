@@ -9,12 +9,14 @@ import {
   listLatestClientSentiments,
   worstSentimentByCaseNumber,
 } from "@/lib/client-contact/repository";
+import { isReferredCase } from "@/lib/client-contact/referred";
 import { getOpenStageSuggestions } from "@/lib/calculations";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { isLitigationTabCase } from "@/lib/litigation-events";
 import { type NavBadges } from "@/lib/navigation/nav-config";
 import { listOpenNeedsResponse } from "@/lib/needs-response/repository";
+import { loadSlackChannelMapByCaseNumber } from "@/lib/slack/channels";
 import { type CaseRecord } from "@/lib/types";
 
 export type DashboardNavMetrics = {
@@ -27,22 +29,28 @@ export type DashboardNavMetrics = {
 
 /**
  * Counts for top-nav destinations that aren't already covered by pipeline metrics.
- * Uses the same open-matter definition as Contact (ongoing updates).
+ * Contact badge uses the same open set as /client-contact (ongoing updates, no referred-out).
  */
 export async function getDashboardNavMetrics(
   records: CaseRecord[],
   options?: { needsResponseFirmwide?: boolean },
 ): Promise<DashboardNavMetrics> {
-  const open = records.filter((record) => caseRequiresOngoingUpdates(record));
-  const caseNumbers = open.map((record) => record.shared.caseNumber);
-  const openByCase = new Map(open.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
+  const ongoing = records.filter((record) => caseRequiresOngoingUpdates(record));
+  const ongoingCaseNumbers = ongoing.map((record) => record.shared.caseNumber);
 
-  const [summaries, sentiments, needsRows, qualifyingRule] = await Promise.all([
-    listClientContactSummaries(caseNumbers),
-    listLatestClientSentiments(caseNumbers),
-    listOpenNeedsResponse(options?.needsResponseFirmwide ? undefined : caseNumbers).catch(() => []),
+  const [summaries, sentiments, needsRows, qualifyingRule, slackChannels] = await Promise.all([
+    listClientContactSummaries(ongoingCaseNumbers),
+    listLatestClientSentiments(ongoingCaseNumbers),
+    listOpenNeedsResponse(options?.needsResponseFirmwide ? undefined : ongoingCaseNumbers).catch(() => []),
     isQualifyingContactRuleReady(),
+    loadSlackChannelMapByCaseNumber().catch(() => new Map()),
   ]);
+
+  const open = ongoing.filter((record) => {
+    const topicStage = slackChannels.get(cleanCaseNumber(record.shared.caseNumber))?.topicStage;
+    return !isReferredCase(record, topicStage);
+  });
+  const openByCase = new Map(open.map((record) => [cleanCaseNumber(record.shared.caseNumber), record]));
 
   let clientsNeedingContact = 0;
   for (const record of open) {

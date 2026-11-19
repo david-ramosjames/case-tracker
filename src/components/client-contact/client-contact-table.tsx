@@ -538,12 +538,51 @@ export function ClientContactView({
               {counted.notAttemptedRecently} Not Attempted Recently
             </Badge>
           </button>
-          <Badge variant="danger" className="px-2 py-0 text-[11px]">
-            {counted.over30} {CLIENT_CONTACT_WINDOW_DAYS}+ days
-          </Badge>
-          <Badge variant="outline" className="px-2 py-0 text-[11px]">
-            {counted.never} never
-          </Badge>
+          <button
+            type="button"
+            title={`Cases with no qualifying contact in ${CLIENT_CONTACT_WINDOW_DAYS}+ days (includes never contacted)`}
+            onClick={() => {
+              setContactStatuses([]);
+              setOverdueOnly(false);
+              setDayRanges((current) => {
+                const preset = ["30+", "never"];
+                const same =
+                  current.length === preset.length && preset.every((value) => current.includes(value));
+                return same ? [] : preset;
+              });
+            }}
+            className="rounded-full"
+          >
+            <Badge
+              variant={
+                dayRanges.length === 2 && dayRanges.includes("30+") && dayRanges.includes("never")
+                  ? "danger"
+                  : "outline"
+              }
+              className="px-2 py-0 text-[11px]"
+            >
+              {counted.over30} {CLIENT_CONTACT_WINDOW_DAYS}+ days
+            </Badge>
+          </button>
+          <button
+            type="button"
+            title="Cases with no recorded qualifying contact"
+            onClick={() => {
+              setContactStatuses([]);
+              setOverdueOnly(false);
+              setDayRanges((current) =>
+                current.length === 1 && current[0] === "never" ? [] : ["never"],
+              );
+            }}
+            className="rounded-full"
+          >
+            <Badge
+              variant={dayRanges.length === 1 && dayRanges[0] === "never" ? "danger" : "outline"}
+              className="px-2 py-0 text-[11px]"
+            >
+              {counted.never} never
+            </Badge>
+          </button>
           <HeaderMultiFilter
             label="Status"
             options={CONTACT_STATUS_FILTERS.map((value) => ({

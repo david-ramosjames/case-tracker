@@ -14,6 +14,7 @@ import {
   attachSentimentEvidenceSlackLinks,
   evidenceNeedsSlackResolve,
 } from "@/lib/client-contact/evidence-slack";
+import { isReferredCase } from "@/lib/client-contact/referred";
 import { clientContactDates, type ClientContactSummary } from "@/lib/client-contact/types";
 import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
@@ -29,21 +30,6 @@ function isAssignedToViewer(record: CaseRecord, contactId: string) {
     record.shared.attorneyId === contactId ||
     record.shared.paralegalId === contactId ||
     record.shared.legalAssistantId === contactId
-  );
-}
-
-/** Referred-out cases are stored under the placeholder attorney/paralegal named Referred. */
-function isReferredAssignment(name: string | null | undefined) {
-  return /^\s*referred\b/i.test(name ?? "");
-}
-
-function isReferredCase(record: CaseRecord, topicStage: string | null | undefined) {
-  if (record.tracker.caseStage === "Referred") return true;
-  if (topicStage && /\breferred\b/i.test(topicStage)) return true;
-  return (
-    isReferredAssignment(record.attorney.name) ||
-    isReferredAssignment(record.paralegal.name) ||
-    isReferredAssignment(record.legalAssistant?.name)
   );
 }
 
