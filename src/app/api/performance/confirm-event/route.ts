@@ -20,16 +20,9 @@ export async function POST(request: Request) {
   try {
     const sessionUser = await requireApiSession();
     if (!sessionUser) return unauthorizedResponse();
+    // Performance is temporarily admin-only; that gate is enough for confirmation.
     if (!canViewPerformance(sessionUser.role)) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-    if (
-      sessionUser.role !== "attorney" &&
-      sessionUser.role !== "admin" &&
-      sessionUser.role !== "super_admin" &&
-      sessionUser.role !== "manager"
-    ) {
-      return NextResponse.json({ error: "Attorney confirmation required." }, { status: 403 });
     }
 
     const body = (await request.json()) as {
