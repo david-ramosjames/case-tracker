@@ -46,7 +46,7 @@ export type FirmWeekMetricCell = {
   label: string;
   actual: number;
   goal: number;
-  status: "behind" | "met" | "ahead";
+  status: "critical" | "behind" | "met" | "ahead";
 };
 
 export type FirmWeekRollup = {

@@ -653,7 +653,7 @@ export function PerformanceSettingsView({
           <div className="space-y-3">
             <h3 className="text-sm font-semibold text-navy-950">Attorney role defaults</h3>
             <p className="text-xs text-muted-foreground">
-              Score weights: Pre-Lit 20% · Litigation 40% · Closing 40%. Disengaged is tracked on the
+              Score weights: Pre-Lit 20% · Litigation 40% · Closing 40%. Disengagements are tracked on the
               board but has no target.
             </p>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

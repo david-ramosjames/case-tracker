@@ -23,6 +23,23 @@ export function weightedAverage(parts: Array<{ value: number | null | undefined;
   return sum / weight;
 }
 
+/** Section % = sum(actuals) / sum(targets); zero/empty target sum → null. */
+export function sectionAttainment(
+  parts: Array<{ actual: number; target: number | null | undefined }>,
+): number | null {
+  let actualSum = 0;
+  let targetSum = 0;
+  let hasTarget = false;
+  for (const part of parts) {
+    actualSum += part.actual;
+    if (part.target == null || part.target === 0) continue;
+    hasTarget = true;
+    targetSum += part.target;
+  }
+  if (!hasTarget || targetSum === 0) return null;
+  return actualSum / targetSum;
+}
+
 export type ParalegalScoreInputs = {
   actualDemands: number;
   targetDemands: number;
@@ -41,12 +58,13 @@ export type ParalegalScoreResult = {
   overall: number | null;
 };
 
-/** Three equal buckets (1/3 each); no 100% cap. */
+/** Three equal buckets (1/3 each); Litigation sums lawsuit + discovery. No 100% cap. */
 export function scoreParalegalWeek(input: ParalegalScoreInputs): ParalegalScoreResult {
   const preLit = attainmentRatio(input.actualDemands, input.targetDemands);
-  const litActual = input.actualLawsuit + input.actualDiscovery;
-  const litTarget = input.targetLawsuit + input.targetDiscovery;
-  const litigation = attainmentRatio(litActual, litTarget);
+  const litigation = sectionAttainment([
+    { actual: input.actualLawsuit, target: input.targetLawsuit },
+    { actual: input.actualDiscovery, target: input.targetDiscovery },
+  ]);
   const scheduling = attainmentRatio(input.actualLitEventsScheduled, input.targetLitEventsScheduled);
   return {
     preLit,
@@ -92,7 +110,8 @@ export const ATTORNEY_SECTION_WEIGHTS = {
 
 /**
  * Attorney scorecard: Pre-Lit 20% · Litigation 40% · Closing 40%.
- * Within Litigation / Closing, metrics average equally. Disengaged is display-only.
+ * Within Litigation / Closing, sum actuals ÷ sum targets (goals-sheet style).
+ * Disengagements are display-only.
  */
 export function scoreAttorneyWeek(input: AttorneyScoreInputs): AttorneyScoreResult {
   const demands = attainmentRatio(input.actualDemands, input.targetDemands);
@@ -103,8 +122,15 @@ export function scoreAttorneyWeek(input: AttorneyScoreInputs): AttorneyScoreResu
   const disbursements = attainmentRatio(input.actualDisbursements, input.targetDisbursements);
 
   const preLit = demands;
-  const litigation = averageNonNull([lawsuit, litScheduled, litCompleted]);
-  const closing = averageNonNull([settlements, disbursements]);
+  const litigation = sectionAttainment([
+    { actual: input.actualLawsuit, target: input.targetLawsuit },
+    { actual: input.actualLitEventsScheduled, target: input.targetLitEventsScheduled },
+    { actual: input.actualLitCompleted, target: input.targetLitCompleted },
+  ]);
+  const closing = sectionAttainment([
+    { actual: input.actualSettlements, target: input.targetSettlements },
+    { actual: input.actualDisbursements, target: input.targetDisbursements },
+  ]);
   const overall = weightedAverage([
     { value: preLit, weight: ATTORNEY_SECTION_WEIGHTS.preLit },
     { value: litigation, weight: ATTORNEY_SECTION_WEIGHTS.litigation },

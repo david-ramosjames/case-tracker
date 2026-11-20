@@ -82,6 +82,32 @@ describe("performance scoring", () => {
     assert.equal(result.overall, 0.8);
   });
 
+  it("attorney litigation/closing use sum actual ÷ sum target (goals sheet)", () => {
+    // Exact: 0.5*0.2 + (6/9)*0.4 + 1.75*0.4 ≈ 106.67% (displays as 107%)
+    const result = scoreAttorneyWeek({
+      actualDemands: 1,
+      targetDemands: 2,
+      actualLawsuit: 1,
+      targetLawsuit: 2,
+      actualLitEventsScheduled: 4,
+      targetLitEventsScheduled: 4,
+      actualLitCompleted: 1,
+      targetLitCompleted: 3,
+      actualSettlements: 2,
+      targetSettlements: 1,
+      actualDisbursements: 1.5,
+      targetDisbursements: 1,
+    });
+    const expectedOverall = 0.5 * 0.2 + (6 / 9) * 0.4 + 1.75 * 0.4;
+    assert.ok(result.litigation != null);
+    assert.ok(Math.abs(result.litigation - 6 / 9) < 1e-9);
+    assert.ok(result.closing != null);
+    assert.ok(Math.abs(result.closing - 3.5 / 2) < 1e-9);
+    assert.ok(result.overall != null);
+    assert.ok(Math.abs(result.overall - expectedOverall) < 1e-9);
+    assert.equal(Math.round(result.overall * 100), 107);
+  });
+
   it("weightedAverage re-normalizes when a section is missing", () => {
     const result = weightedAverage([
       { value: null, weight: 0.2 },

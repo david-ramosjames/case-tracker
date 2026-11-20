@@ -84,7 +84,17 @@ export type PairWeekRow = {
 /** @deprecated use PAIR_PARALEGAL_METRICS */
 export const PAIR_CHECK_METRICS = PAIR_PARALEGAL_METRICS;
 
-export type GoalStatus = "behind" | "met" | "ahead" | "neutral";
+/**
+ * Attainment bands (actual ÷ goal):
+ * <60% critical (red) · 60–90% behind (yellow) · 90–110% met · >110% ahead (green)
+ */
+export type GoalStatus = "critical" | "behind" | "met" | "ahead" | "neutral";
+
+export const GOAL_BANDS = {
+  criticalBelow: 0.6,
+  behindBelow: 0.9,
+  metThrough: 1.1,
+} as const;
 
 export function goalStatus(
   actual: number,
@@ -93,7 +103,10 @@ export function goalStatus(
 ): GoalStatus {
   if (options?.vacant) return "neutral";
   if (goal == null || goal <= 0) return "neutral";
-  if (actual < goal) return "behind";
-  if (actual > goal) return "ahead";
-  return "met";
+  if (!Number.isFinite(actual)) return "neutral";
+  const ratio = actual / goal;
+  if (ratio < GOAL_BANDS.criticalBelow) return "critical";
+  if (ratio < GOAL_BANDS.behindBelow) return "behind";
+  if (ratio <= GOAL_BANDS.metThrough) return "met";
+  return "ahead";
 }

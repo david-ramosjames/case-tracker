@@ -15,22 +15,22 @@ import {
 import { formatWeekRangeLabel, shiftWeekStart, weekEndFromStart } from "@/lib/performance/weeks";
 
 export const PARALEGAL_SCORE_METRICS = [
-  { key: "demand_sent" as const, label: "Demands SENT", group: "Pre-Lit", groupWeightLabel: "1/3" },
+  { key: "demand_sent" as const, label: "Demands Sent", group: "Pre-Lit", groupWeightLabel: "1/3" },
   {
     key: "lawsuit_filed" as const,
-    label: "Lawsuit Drafted and Filed",
+    label: "Lawsuits Filed",
     group: "Litigation",
     groupWeightLabel: "1/3",
   },
   {
     key: "discovery_responses" as const,
-    label: "Set of Discovery Responses Answered",
+    label: "Discovery Responses Answered",
     group: "Litigation",
     groupWeightLabel: "1/3",
   },
   {
     key: "lit_event_scheduled" as const,
-    label: "Litigation events scheduled",
+    label: "Lit Events Scheduled",
     group: "Scheduling",
     groupWeightLabel: "1/3",
   },
@@ -39,28 +39,28 @@ export const PARALEGAL_SCORE_METRICS = [
 export const ATTORNEY_SCORE_METRICS = [
   {
     key: "demand_sent" as const,
-    label: "Demands sent",
+    label: "Demands Sent",
     group: "Pre-Lit",
     groupWeightLabel: "20%",
     countsTowardScore: true,
   },
   {
     key: "lawsuit_filed" as const,
-    label: "Lawsuits filed",
+    label: "Lawsuits Filed",
     group: "Litigation",
     groupWeightLabel: "40%",
     countsTowardScore: true,
   },
   {
     key: "lit_event_scheduled" as const,
-    label: "Lit events scheduled",
+    label: "Lit Events Scheduled",
     group: "Litigation",
     groupWeightLabel: "40%",
     countsTowardScore: true,
   },
   {
     key: "lit_completed_combined" as const,
-    label: "Lit events completed (depo / med / hearing)",
+    label: "Lit Events Completed",
     group: "Litigation",
     groupWeightLabel: "40%",
     countsTowardScore: true,
@@ -81,14 +81,14 @@ export const ATTORNEY_SCORE_METRICS = [
   },
   {
     key: "disengagement" as const,
-    label: "Disengaged",
+    label: "Disengagements",
     group: "Closing",
     groupWeightLabel: "40%",
     countsTowardScore: false,
   },
 ] as const;
 
-/** Metrics that have editable weekly targets (excludes display-only rows like Disengaged). */
+/** Metrics that have editable weekly targets (excludes display-only rows like Disengagements). */
 export const ATTORNEY_TARGET_METRICS = ATTORNEY_SCORE_METRICS.filter((m) => m.countsTowardScore);
 
 export type ParalegalMetricKey = (typeof PARALEGAL_SCORE_METRICS)[number]["key"];

@@ -7,17 +7,19 @@ import {
   formatAttainmentPct,
   type PersonScorecardBundle,
   type PersonWeekScorecard,
+  type ScoreMetricRow,
 } from "@/lib/performance/person-scorecard";
 import { cn } from "@/lib/utils";
 
 function valueCellClass(status: GoalStatus) {
+  if (status === "critical") return "bg-red-50 font-semibold text-red-900";
   if (status === "behind") return "bg-amber-50 font-semibold text-amber-900";
   if (status === "ahead") return "bg-emerald-50 font-semibold text-emerald-900";
-  if (status === "met") return "bg-white font-medium text-navy-950";
   return "font-medium text-navy-950";
 }
 
 function titleClass(status: GoalStatus) {
+  if (status === "critical") return "text-red-800";
   if (status === "behind") return "text-amber-800";
   if (status === "ahead") return "text-emerald-800";
   return "text-navy-950";
@@ -28,11 +30,25 @@ function overallGoalStatus(overall: number | null): GoalStatus {
   return goalStatus(overall, 1);
 }
 
+function groupRows(rows: ScoreMetricRow[]) {
+  const groups: Array<{ name: string; weightLabel?: string; rows: ScoreMetricRow[] }> = [];
+  for (const row of rows) {
+    const name = row.group ?? "";
+    const last = groups[groups.length - 1];
+    if (!last || last.name !== name) {
+      groups.push({ name, weightLabel: row.groupWeightLabel, rows: [row] });
+    } else {
+      last.rows.push(row);
+    }
+  }
+  return groups;
+}
+
 function ScoreTable({ card, valueLabel }: { card: PersonWeekScorecard; valueLabel: string }) {
-  let lastGroup: string | undefined;
+  const groups = groupRows(card.rows);
   const weightHint =
     card.role === "attorney"
-      ? "Sections: Pre-Lit 20% · Litigation 40% · Closing 40% (Disengaged shown, not scored)"
+      ? "Sections: Pre-Lit 20% · Litigation 40% · Closing 40% (Disengagements shown, not scored)"
       : "Sections: Pre-Lit · Litigation · Scheduling (1/3 each)";
   const overallStatus = overallGoalStatus(card.overall);
 
@@ -42,44 +58,59 @@ function ScoreTable({ card, valueLabel }: { card: PersonWeekScorecard; valueLabe
         <TableHeader>
           <TableRow>
             <TableHead>Metric</TableHead>
-            <TableHead className="text-right">Target</TableHead>
-            <TableHead className="text-right">{valueLabel}</TableHead>
+            <TableHead className="text-center">Target</TableHead>
+            <TableHead className="text-center">{valueLabel}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {card.rows.map((row) => {
-            const showGroup = Boolean(row.group && row.group !== lastGroup);
-            if (row.group) lastGroup = row.group;
-            const status = row.countsTowardScore
-              ? goalStatus(row.actual, row.target)
-              : ("neutral" as const);
-            return (
-              <TableRow key={row.key}>
-                <TableCell>
-                  {showGroup ? (
-                    <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      {row.group}
-                      {row.groupWeightLabel ? ` · ${row.groupWeightLabel}` : ""}
+          {groups.map((group) =>
+            [
+              group.name ? (
+                <TableRow
+                  key={`group-${group.name}`}
+                  className="border-t-2 border-slate-200 bg-slate-50 hover:bg-slate-50"
+                >
+                  <TableCell colSpan={3} className="py-2">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-700">
+                        {group.name}
+                      </span>
+                      {group.weightLabel ? (
+                        <span className="text-[11px] font-medium tabular-nums text-slate-500">
+                          Weight {group.weightLabel}
+                        </span>
+                      ) : null}
                     </div>
-                  ) : null}
-                  <div className={showGroup ? "mt-0.5" : ""}>{row.label}</div>
-                  {!row.countsTowardScore ? (
-                    <div className="text-[10px] text-muted-foreground">Shown only — not in overall</div>
-                  ) : null}
-                </TableCell>
-                <TableCell className="text-right tabular-nums text-muted-foreground">
-                  {row.target == null ? "—" : row.target}
-                </TableCell>
-                <TableCell className={cn("text-right tabular-nums", valueCellClass(status))}>
-                  {row.actual}
-                </TableCell>
-              </TableRow>
-            );
-          })}
-          <TableRow>
+                  </TableCell>
+                </TableRow>
+              ) : null,
+              ...group.rows.map((row) => {
+                const status = row.countsTowardScore
+                  ? goalStatus(row.actual, row.target)
+                  : ("neutral" as const);
+                return (
+                  <TableRow key={row.key}>
+                    <TableCell className="pl-4">
+                      <div>{row.label}</div>
+                      {!row.countsTowardScore ? (
+                        <div className="text-[10px] text-muted-foreground">Shown only — not in overall</div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="text-center tabular-nums text-muted-foreground">
+                      {row.target == null ? "—" : row.target}
+                    </TableCell>
+                    <TableCell className={cn("text-center tabular-nums", valueCellClass(status))}>
+                      {row.actual}
+                    </TableCell>
+                  </TableRow>
+                );
+              }),
+            ].filter(Boolean),
+          )}
+          <TableRow className="border-t-2 border-slate-300">
             <TableCell className="font-semibold">Overall</TableCell>
-            <TableCell className="text-right text-muted-foreground">100%</TableCell>
-            <TableCell className={cn("text-right tabular-nums", valueCellClass(overallStatus))}>
+            <TableCell className="text-center text-muted-foreground">100%</TableCell>
+            <TableCell className={cn("text-center tabular-nums", valueCellClass(overallStatus))}>
               {formatAttainmentPct(card.overall)}
             </TableCell>
           </TableRow>
@@ -89,13 +120,16 @@ function ScoreTable({ card, valueLabel }: { card: PersonWeekScorecard; valueLabe
         <p className="text-[11px] text-muted-foreground">{weightHint}</p>
         <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm bg-amber-50 ring-1 ring-amber-200" /> Behind
+            <span className="h-2.5 w-2.5 rounded-sm bg-red-50 ring-1 ring-red-200" /> &lt;60%
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm bg-white ring-1 ring-slate-200" /> At target
+            <span className="h-2.5 w-2.5 rounded-sm bg-amber-50 ring-1 ring-amber-200" /> 60–90%
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-sm bg-emerald-50 ring-1 ring-emerald-200" /> Ahead
+            <span className="h-2.5 w-2.5 rounded-sm bg-white ring-1 ring-slate-200" /> 90–110%
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-sm bg-emerald-50 ring-1 ring-emerald-200" /> &gt;110%
           </span>
         </div>
       </div>
@@ -126,8 +160,9 @@ function TrendChart({ trend }: { trend: PersonScorecardBundle["trend"] }) {
               <div
                 className={cn(
                   "w-full max-w-[1.75rem] rounded-t-sm",
-                  status === "ahead" && "bg-emerald-600",
+                  status === "critical" && "bg-red-600",
                   status === "behind" && "bg-amber-500",
+                  status === "ahead" && "bg-emerald-600",
                   (status === "met" || status === "neutral") && "bg-navy-800",
                 )}
                 style={{ height: `${Math.round(pct * 120)}px` }}

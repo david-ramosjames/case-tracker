@@ -25,7 +25,8 @@ type TeamTab = "firm" | "paralegals" | "attorneys" | "closings";
 
 const HISTORY_DEFAULT = 5;
 
-function cellClass(status: GoalStatus | "behind" | "met" | "ahead") {
+function cellClass(status: GoalStatus) {
+  if (status === "critical") return "bg-red-50 font-semibold text-red-900";
   if (status === "behind") return "bg-amber-50 font-semibold text-amber-900";
   if (status === "ahead") return "bg-emerald-50 text-emerald-900";
   return "bg-white text-navy-950";
@@ -67,6 +68,7 @@ function KpiBar({ actual, goal, status }: { actual: number; goal: number; status
       <div
         className={cn(
           "h-full rounded-full transition-all",
+          status === "critical" && "bg-red-500",
           status === "behind" && "bg-amber-500",
           status === "met" && "bg-slate-400",
           status === "ahead" && "bg-emerald-500",
@@ -81,13 +83,16 @@ function StatusLegend({ showNotTracked = false }: { showNotTracked?: boolean }) 
   return (
     <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
       <span className="inline-flex items-center gap-1.5">
-        <span className="h-3 w-3 rounded-sm bg-amber-50 ring-1 ring-amber-200" /> Behind
+        <span className="h-3 w-3 rounded-sm bg-red-50 ring-1 ring-red-200" /> &lt;60%
       </span>
       <span className="inline-flex items-center gap-1.5">
-        <span className="h-3 w-3 rounded-sm bg-white ring-1 ring-slate-200" /> Met
+        <span className="h-3 w-3 rounded-sm bg-amber-50 ring-1 ring-amber-200" /> 60–90%
       </span>
       <span className="inline-flex items-center gap-1.5">
-        <span className="h-3 w-3 rounded-sm bg-emerald-50 ring-1 ring-emerald-200" /> Ahead
+        <span className="h-3 w-3 rounded-sm bg-white ring-1 ring-slate-200" /> 90–110%
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-3 w-3 rounded-sm bg-emerald-50 ring-1 ring-emerald-200" /> &gt;110%
       </span>
       {showNotTracked ? (
         <span className="inline-flex items-center gap-1.5">
@@ -524,6 +529,7 @@ export function TeamView({
                             key={metric.key}
                             className={cn(
                               "rounded-md border px-3 py-2.5",
+                              hasGoal && metric.status === "critical" && "border-red-200 bg-red-50/60",
                               hasGoal && metric.status === "behind" && "border-amber-200 bg-amber-50/60",
                               hasGoal && metric.status === "ahead" && "border-emerald-200 bg-emerald-50/40",
                               (!hasGoal || metric.status === "met") && "border-slate-200 bg-white",

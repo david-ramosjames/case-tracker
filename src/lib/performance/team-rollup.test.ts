@@ -9,7 +9,7 @@ import {
 } from "./team-rollup";
 
 describe("firm weekly rollup", () => {
-  it("marks metrics behind when actual < goal", () => {
+  it("marks metrics critical when attainment is under 60%", () => {
     const rollup = buildFirmWeekRollup({
       weekStart: "2026-11-10",
       deliverables: [],
@@ -32,7 +32,7 @@ describe("firm weekly rollup", () => {
     const lawsuit = rollup.metrics.find((m) => m.key === "lawsuit_filed");
     assert.equal(lawsuit?.goal, 5);
     assert.equal(lawsuit?.actual, 0);
-    assert.equal(lawsuit?.status, "behind");
+    assert.equal(lawsuit?.status, "critical");
   });
 
   it("shifts week starts by whole weeks", () => {

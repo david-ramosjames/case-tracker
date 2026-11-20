@@ -6,6 +6,7 @@ import {
   type FirmWeekRollup,
   type FirmWeeklyMetricKey,
 } from "@/lib/performance/firm-metrics";
+import { goalStatus } from "@/lib/performance/pair-metrics";
 import { resolveTargetValue } from "@/lib/performance/target-resolve";
 import { type PerformanceDeliverable, type PerformanceTarget } from "@/lib/performance/types";
 import {
@@ -194,14 +195,13 @@ function cellsFromActuals(input: {
     });
     const actual = input.actuals[metric.key] ?? 0;
     // Metrics with no weekly target (e.g. disengagements) are informational only.
-    const status =
-      goal <= 0 ? "met" : actual < goal ? "behind" : actual > goal ? "ahead" : "met";
+    const status = goal <= 0 ? "met" : goalStatus(actual, goal);
     return {
       key: metric.key,
       label: metric.label,
       actual,
       goal,
-      status,
+      status: status === "neutral" ? "met" : status,
     };
   });
 
@@ -210,7 +210,7 @@ function cellsFromActuals(input: {
     weekEnd,
     weekLabel: weekLabel(input.weekStart),
     metrics,
-    behindCount: metrics.filter((m) => m.status === "behind").length,
+    behindCount: metrics.filter((m) => m.status === "behind" || m.status === "critical").length,
   };
 }
 
