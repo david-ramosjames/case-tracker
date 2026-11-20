@@ -1,6 +1,6 @@
 import {
   classifyLitDeliverableType,
-  isLitigationCalendarEvent,
+  isLitigationAttendanceEvent,
 } from "@/lib/performance/auto-progress";
 import {
   type PerformanceCommitment,
@@ -106,12 +106,15 @@ function fromDocketEvent(input: {
   record: CaseRecord;
   workflowStatus: PerformanceDeliverable["workflowStatus"];
   completedAt: string | null;
+  /** Paralegal scheduling credit uses lit_event_scheduled; attorneys use attendance type. */
+  asScheduledCredit?: boolean;
 }): PerformanceDeliverable {
   const day = eventDay(input.event);
   const created =
     asDateText(input.event.createdAt) || (day ? `${day}T12:00:00.000Z` : new Date().toISOString());
-  const type = classifyLitDeliverableType(input.event.title, input.event.eventKind);
-  return syntheticBase({
+  const attendanceType = classifyLitDeliverableType(input.event.title, input.event.eventKind);
+  const type = input.asScheduledCredit ? "lit_event_scheduled" : attendanceType;
+  const row = syntheticBase({
     id: `docket:${input.event.id}`,
     caseId: input.record.shared.id,
     caseNumber: input.record.shared.caseNumber,
@@ -130,6 +133,13 @@ function fromDocketEvent(input: {
     identityKey: `docket:${input.event.id}`,
     identityLabel: input.event.title || "Litigation event",
   });
+  if (input.asScheduledCredit) {
+    const kind =
+      input.event.eventKind?.trim() ||
+      (attendanceType === "hearing_trial" ? "trial" : attendanceType);
+    return { ...row, hearingType: kind };
+  }
+  return row;
 }
 
 function fromSettlement(input: {
@@ -204,6 +214,11 @@ export function buildAttorneyBoardBuckets(input: {
       .filter((d) => d.workflowStatus === "done" && d.docketEventId)
       .map((d) => d.docketEventId as string),
   );
+  const dismissedDocketIds = new Set(
+    input.deliverables
+      .filter((d) => d.workflowStatus === "cancelled" && d.docketEventId)
+      .map((d) => d.docketEventId as string),
+  );
 
   // Verified completed lit events (confirmation creates done deliverables).
   for (const d of input.deliverables) {
@@ -258,13 +273,14 @@ export function buildAttorneyBoardBuckets(input: {
     }
 
     for (const event of input.eventsByCaseId[record.shared.id] ?? []) {
-      if (!isLitigationCalendarEvent(event)) continue;
+      // Attendance events only — ignore DF deadlines/notices/motions around a trial.
+      if (!isLitigationAttendanceEvent(event)) continue;
       if (!event.included || event.calendarOrigin === "google_ics_mirror") continue;
       const day = eventDay(event);
       if (!day) continue;
 
-      // Already verified/completed — belongs in finished when completed last week, skip calendar buckets.
-      if (doneDocketIds.has(event.id)) continue;
+      // Already verified/completed or removed from the board — skip calendar buckets.
+      if (doneDocketIds.has(event.id) || dismissedDocketIds.has(event.id)) continue;
 
       if (isDateInWeek(day, input.weekStart)) {
         committed.push(
@@ -303,6 +319,8 @@ export function buildAttorneyBoardBuckets(input: {
     if (d.workflowStatus === "done") {
       const completedDay = asYmdPrefix(d.completedAt);
       if (completedDay && isDateInWeek(completedDay, input.lastWeekStart)) finished.push(d);
+      // Still show on Committed this week when they finished a this-week commitment.
+      if (committedIds.has(d.id)) committed.push(d);
       continue;
     }
     if (d.workflowStatus === "committed" && committedIds.has(d.id)) committed.push(d);
@@ -313,10 +331,16 @@ export function buildAttorneyBoardBuckets(input: {
     (b.completedAt ?? "").localeCompare(a.completedAt ?? "");
   const sortPlanned = (a: PerformanceDeliverable, b: PerformanceDeliverable) =>
     (a.plannedDate ?? a.createdAt ?? "").localeCompare(b.plannedDate ?? b.createdAt ?? "");
+  const sortCommitted = (a: PerformanceDeliverable, b: PerformanceDeliverable) => {
+    const aDone = a.workflowStatus === "done" ? 1 : 0;
+    const bDone = b.workflowStatus === "done" ? 1 : 0;
+    if (aDone !== bDone) return aDone - bDone;
+    return sortPlanned(a, b);
+  };
 
   return {
     finished: dedupeById(finished).sort(sortFinished),
-    committed: dedupeById(committed).sort(sortPlanned),
+    committed: dedupeById(committed).sort(sortCommitted),
     backlog: dedupeById(backlog).sort(sortPlanned),
   };
 }
@@ -329,5 +353,107 @@ export function attorneyBoardDateWindow(weekStart: string, lastWeekStart: string
   return {
     dateFrom: lastWeekStart,
     dateTo: weekEndFromStart(shiftWeekStart(weekStart, 2)),
+  };
+}
+
+/**
+ * Paralegal board:
+ * - Finished last week: completed deliverables + DF attendance events *created* last week
+ *   (event date may be any future date). No deadlines/reminders.
+ * - Committed / In progress: deliverables only — never DF calendar synthetics.
+ */
+export function buildParalegalBoardBuckets(input: {
+  weekStart: string;
+  lastWeekStart: string;
+  personId: string;
+  deliverables: PerformanceDeliverable[];
+  commitments: PerformanceCommitment[];
+  records: CaseRecord[];
+  eventsByCaseId: Record<string, DocketFlowScheduledEvent[]>;
+}): AttorneyBoardBuckets {
+  const committedIds = new Set(
+    input.commitments
+      .filter((c) => c.weekStart === input.weekStart && (c.outcome === "promised" || c.outcome === "completed"))
+      .map((c) => c.deliverableId),
+  );
+
+  const dismissedDocketIds = new Set(
+    input.deliverables
+      .filter((d) => d.workflowStatus === "cancelled" && d.docketEventId)
+      .map((d) => d.docketEventId as string),
+  );
+  const doneDocketIds = new Set(
+    input.deliverables
+      .filter((d) => d.workflowStatus === "done" && d.docketEventId)
+      .map((d) => d.docketEventId as string),
+  );
+
+  const mine = input.deliverables.filter(
+    (d) => d.assigneeUserId === input.personId && isVisibleOnParalegalBoard(d),
+  );
+
+  const finished: PerformanceDeliverable[] = mine.filter((d) => {
+    if (d.workflowStatus !== "done") return false;
+    const completedDay = asYmdPrefix(d.completedAt);
+    return Boolean(completedDay && isDateInWeek(completedDay, input.lastWeekStart));
+  });
+
+  const committed: PerformanceDeliverable[] = mine.filter((d) => {
+    if (d.workflowStatus === "committed") {
+      const c = input.commitments.find((row) => row.deliverableId === d.id);
+      return !c || c.weekStart === input.weekStart;
+    }
+    if (d.workflowStatus === "done") return committedIds.has(d.id);
+    return false;
+  });
+
+  const backlog: PerformanceDeliverable[] = mine.filter((d) => d.workflowStatus === "backlog");
+
+  const assigned = input.records.filter((r) => r.shared.paralegalId === input.personId);
+  for (const record of assigned) {
+    for (const event of input.eventsByCaseId[record.shared.id] ?? []) {
+      if (!isLitigationAttendanceEvent(event)) continue;
+      if (!event.included || event.calendarOrigin === "google_ics_mirror") continue;
+      if (doneDocketIds.has(event.id) || dismissedDocketIds.has(event.id)) continue;
+
+      const createdDay = asYmdPrefix(event.createdAt);
+      if (!createdDay || !isDateInWeek(createdDay, input.lastWeekStart)) continue;
+
+      const completedAt = asDateText(event.createdAt) || `${createdDay}T18:00:00.000Z`;
+      finished.push(
+        fromDocketEvent({
+          event,
+          record,
+          workflowStatus: "done",
+          completedAt,
+          asScheduledCredit: true,
+        }),
+      );
+    }
+  }
+
+  const sortFinished = (a: PerformanceDeliverable, b: PerformanceDeliverable) =>
+    (b.completedAt ?? b.createdAt ?? "").localeCompare(a.completedAt ?? a.createdAt ?? "");
+  const sortPlanned = (a: PerformanceDeliverable, b: PerformanceDeliverable) =>
+    (a.plannedDate ?? a.createdAt ?? "").localeCompare(b.plannedDate ?? b.createdAt ?? "");
+  const sortCommitted = (a: PerformanceDeliverable, b: PerformanceDeliverable) => {
+    const aDone = a.workflowStatus === "done" ? 1 : 0;
+    const bDone = b.workflowStatus === "done" ? 1 : 0;
+    if (aDone !== bDone) return aDone - bDone;
+    return sortPlanned(a, b);
+  };
+
+  return {
+    finished: dedupeById(finished).sort(sortFinished),
+    committed: dedupeById(committed).sort(sortCommitted),
+    backlog: dedupeById(backlog).sort(sortPlanned),
+  };
+}
+
+/** Fetch window for paralegal Finished DF pull: created last week; event date unrestricted. */
+export function paralegalFinishedDocketCreatedWindow(lastWeekStart: string, weekStart: string) {
+  return {
+    createdFrom: lastWeekStart,
+    createdToExclusive: weekStart,
   };
 }

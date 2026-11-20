@@ -221,8 +221,6 @@ export function countParalegalExpected(
   for (const item of deliverables) {
     if (!belongsToPerson(item, personId, "paralegal")) continue;
     if (!committedIds.has(item.id)) continue;
-    // Goals spreadsheet imports are not manual commitments.
-    if ((item.notes ?? "").includes("[goals-import]")) continue;
     addParalegalActual(counts, item);
   }
   return counts;
@@ -241,7 +239,6 @@ export function countAttorneyExpected(
   for (const item of deliverables) {
     if (!belongsToPerson(item, personId, "attorney")) continue;
     if (!committedIds.has(item.id)) continue;
-    if ((item.notes ?? "").includes("[goals-import]")) continue;
     addAttorneyActual(counts, item);
   }
   return counts;

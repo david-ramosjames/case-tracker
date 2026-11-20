@@ -4,8 +4,7 @@
  * Attorneys sheet → performance_attorney_plan_lines (weeks 2026-11-09 and 2026-11-16)
  * Paralegal pair tabs → performance_deliverables (+ commitments)
  *   Last Week              → done (week 11/09)
- *   To Be Completed This Week → backlog (manual “To this week” only; not auto-committed),
- *                            or done if struck / Completed This Week
+ *   To Be Completed This Week → committed (week 11/16), or done if struck / Completed This Week
  *   In Progress            → backlog
  *
  * Usage:
@@ -305,25 +304,18 @@ function parseParalegalSheet(sheet, meta) {
       completedAt = dateYmd || LAST_WEEK;
       plannedDate = dateYmd || LAST_WEEK;
       commitmentOutcome = "completed";
-    } else if (sectionKey.startsWith("completed this week")) {
+    } else if (sectionKey.startsWith("to be completed") || sectionKey.startsWith("completed this week")) {
       weekStart = THIS_WEEK;
-      workflowStatus = "done";
-      completedAt = dateYmd || THIS_WEEK;
-      plannedDate = dateYmd || THIS_WEEK;
-      commitmentOutcome = "completed";
-    } else if (sectionKey.startsWith("to be completed")) {
-      // Spreadsheet plan lines stay in backlog — Committed this week is manual entry only.
-      if (struck) {
-        weekStart = THIS_WEEK;
+      if (struck || sectionKey.startsWith("completed")) {
         workflowStatus = "done";
         completedAt = dateYmd || THIS_WEEK;
         plannedDate = dateYmd || THIS_WEEK;
         commitmentOutcome = "completed";
       } else {
-        workflowStatus = "backlog";
-        weekStart = null;
-        plannedDate = dateYmd;
-        commitmentOutcome = null;
+        // Sheet "To Be Completed This Week" feeds Committed for this week.
+        workflowStatus = "committed";
+        plannedDate = dateYmd || THIS_WEEK;
+        commitmentOutcome = "promised";
       }
     } else {
       // In Progress → backlog for future weeks

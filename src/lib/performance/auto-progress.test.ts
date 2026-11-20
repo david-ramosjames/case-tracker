@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import {
   buildAutoProgress,
   classifyLitDeliverableType,
-  isLitigationCalendarEvent,
+  isLitigationAttendanceEvent,
 } from "./auto-progress";
 import { type PerformanceCommitment, type PerformanceDeliverable } from "./types";
 import { type CaseRecord, type DocketFlowScheduledEvent } from "@/lib/types";
@@ -59,7 +59,62 @@ describe("auto-progress", () => {
     assert.equal(classifyLitDeliverableType("Plaintiff Deposition"), "deposition");
     assert.equal(classifyLitDeliverableType("Mediation"), "mediation");
     assert.equal(classifyLitDeliverableType("Jury Trial"), "hearing_trial");
-    assert.ok(isLitigationCalendarEvent({ title: "Depo of Defendant", eventKind: null, category: null }));
+    assert.ok(
+      isLitigationAttendanceEvent({
+        title: "Depo of Defendant",
+        eventKind: "deposition",
+        category: null,
+        scheduleKind: "meeting",
+      }),
+    );
+  });
+
+  it("ignores trial deadlines and motion filings — only attendance events count", () => {
+    assert.equal(
+      isLitigationAttendanceEvent({
+        title: "Exchange of Expert Witnesses",
+        eventKind: "trial",
+        category: "Litigation",
+        scheduleKind: "deadline",
+      }),
+      false,
+    );
+    assert.equal(
+      isLitigationAttendanceEvent({
+        title: "File motions in limine",
+        eventKind: "trial",
+        category: "Litigation",
+        scheduleKind: "meeting",
+      }),
+      false,
+    );
+    assert.equal(
+      isLitigationAttendanceEvent({
+        title: "Electronic Evidence Notice Deadline",
+        eventKind: "trial",
+        category: "Litigation",
+        scheduleKind: "deadline",
+      }),
+      false,
+    );
+    assert.equal(
+      isLitigationAttendanceEvent({
+        title: "Jury Trial",
+        eventKind: "trial",
+        category: "Litigation",
+        scheduleKind: "meeting",
+      }),
+      true,
+    );
+    assert.equal(
+      isLitigationAttendanceEvent({
+        title: "Plaintiff Deposition",
+        eventKind: "deposition",
+        category: "Litigation",
+        scheduleKind: "meeting",
+      }),
+      true,
+    );
   });
 
   it("auto-completes planned settlements from case tracker dates", () => {

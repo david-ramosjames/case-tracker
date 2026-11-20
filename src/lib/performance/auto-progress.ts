@@ -1,10 +1,11 @@
+import { getDocketFlowCaseUrl } from "@/lib/docketflow/links";
 import { asYmdPrefix, weekEndFromStart } from "@/lib/performance/weeks";
 import {
   type PerformanceCommitment,
   type PerformanceDeliverable,
   type PerformanceDeliverableType,
 } from "@/lib/performance/types";
-import { type CaseRecord, type DocketFlowScheduledEvent } from "@/lib/types";
+import { type CaseRecord, type DocketFlowScheduledEvent, type StageSuggestion } from "@/lib/types";
 
 export type AutoProgressKind =
   | "lit_completed"
@@ -14,6 +15,8 @@ export type AutoProgressKind =
   | "demand_sent"
   | "lawsuit_filed"
   | "disengagement";
+
+export type AutoProgressEvidenceSource = "slack" | "docketflow" | "case_tracker";
 
 export type AutoProgressCandidate = {
   id: string;
@@ -32,7 +35,47 @@ export type AutoProgressCandidate = {
   attorneyUserId: string | null;
   assigneeUserId: string | null;
   reason: string;
+  /** Short evidence line (Slack excerpt, calendar title, etc.). */
+  evidenceExcerpt: string | null;
+  /** Link to Slack post, DocketFlow case, or Case Tracker case. */
+  evidenceUrl: string | null;
+  evidenceSource: AutoProgressEvidenceSource | null;
 };
+
+function evidenceFromSuggestion(suggestion: StageSuggestion): Pick<
+  AutoProgressCandidate,
+  "evidenceExcerpt" | "evidenceUrl" | "evidenceSource"
+> {
+  const excerpt = suggestion.excerpt?.trim() || null;
+  if (suggestion.sourceUrl) {
+    return { evidenceExcerpt: excerpt, evidenceUrl: suggestion.sourceUrl, evidenceSource: "slack" };
+  }
+  return { evidenceExcerpt: excerpt, evidenceUrl: null, evidenceSource: excerpt ? "slack" : null };
+}
+
+function evidenceFromDocket(input: {
+  caseId: string;
+  event: DocketFlowScheduledEvent;
+  createdOrEventDay: string;
+}): Pick<AutoProgressCandidate, "evidenceExcerpt" | "evidenceUrl" | "evidenceSource"> {
+  const title = input.event.title?.trim() || "Litigation calendar event";
+  return {
+    evidenceExcerpt: `${title} · ${input.createdOrEventDay}`,
+    evidenceUrl: getDocketFlowCaseUrl(input.caseId),
+    evidenceSource: "docketflow",
+  };
+}
+
+function evidenceFromCaseTracker(caseId: string, excerpt: string): Pick<
+  AutoProgressCandidate,
+  "evidenceExcerpt" | "evidenceUrl" | "evidenceSource"
+> {
+  return {
+    evidenceExcerpt: excerpt,
+    evidenceUrl: `/cases/${caseId}`,
+    evidenceSource: "case_tracker",
+  };
+}
 
 export type AutoCompleteAction = {
   deliverableId: string;
@@ -56,20 +99,55 @@ export function classifyLitDeliverableType(
   const hay = `${title ?? ""} ${eventKind ?? ""}`.toLowerCase();
   if (hay.includes("depo")) return "deposition";
   if (hay.includes("mediat")) return "mediation";
-  if (hay.includes("trial")) return "hearing_trial";
-  if (hay.includes("hearing") || hay.includes("motion") || hay.includes("pretrial")) return "hearing";
+  if (/\b(jury\s+)?(bench\s+)?trial\b/.test(hay) && !/\b(deadline|notice|motion|expert|limine|exchange)\b/.test(hay)) {
+    return "hearing_trial";
+  }
+  if (hay.includes("hearing") || hay.includes("pretrial")) return "hearing";
+  if (hay.includes("arbitration")) return "hearing";
   return "hearing";
 }
 
-export function isLitigationCalendarEvent(event: Pick<DocketFlowScheduledEvent, "title" | "eventKind" | "category">) {
-  const hay = `${event.title ?? ""} ${event.eventKind ?? ""} ${event.category ?? ""}`.toLowerCase();
-  return (
-    hay.includes("depo") ||
-    hay.includes("mediat") ||
-    hay.includes("hearing") ||
-    hay.includes("trial") ||
-    hay.includes("arbitration")
-  );
+/** Titles that are deadlines / filings around a lit event — not the appearance itself. */
+const LIT_PERIPHERAL_TITLE_RE =
+  /\b(deadline|due date|notice|motion|limine|reminder|exchange of|expert witness|file\b|filing|discovery|disclosure|subpoena|continuance|exhibit|designation|proposal for|pre-?trial order|witness list|jury charge|charge conference)\b/i;
+
+/** Title clearly is the attendance event. */
+const LIT_MAIN_EVENT_TITLE_RE =
+  /\b((jury|bench)\s+)?trial\b|\bdeposition\b|\bmediation\b|\bhearing\b|\barbitration\b|\bdepo\b/i;
+
+/**
+ * True for the litigation appearance itself (depo / mediation / hearing / trial),
+ * not surrounding deadlines, notices, or motion filings.
+ */
+export function isLitigationAttendanceEvent(
+  event: Pick<DocketFlowScheduledEvent, "title" | "eventKind" | "category" | "scheduleKind">,
+) {
+  // DocketFlow deadlines / date-range tasks are never the attendance event.
+  if (event.scheduleKind === "deadline") return false;
+
+  const title = (event.title ?? "").trim();
+  const kind = (event.eventKind ?? "").trim().toLowerCase();
+  const category = (event.category ?? "").trim().toLowerCase();
+  const hay = `${title} ${kind} ${category}`;
+
+  if (!/\b(depo(?:sition)?|mediat(?:ion)?|hearing|trial|arbitration)\b/i.test(hay)) return false;
+  if (/\b(deadline|reminder|notice|task)\b/.test(kind)) return false;
+
+  if (title && LIT_PERIPHERAL_TITLE_RE.test(title)) {
+    // Keep only when the title itself is the main event (e.g. "Jury Trial", "Plaintiff Deposition").
+    if (!LIT_MAIN_EVENT_TITLE_RE.test(title)) return false;
+    // "Trial — File motions in limine" / "Trial deadline" still peripheral.
+    if (/\b(file|deadline|motion|notice|exchange|expert)\b/i.test(title)) return false;
+  }
+
+  return true;
+}
+
+/** @deprecated Prefer isLitigationAttendanceEvent — kept for older call sites. */
+export function isLitigationCalendarEvent(
+  event: Pick<DocketFlowScheduledEvent, "title" | "eventKind" | "category" | "scheduleKind">,
+) {
+  return isLitigationAttendanceEvent(event);
 }
 
 function inWeek(day: string | null | undefined, weekStart: string) {
@@ -167,6 +245,12 @@ export function buildAutoProgress(input: {
       ])
       .filter(Boolean) as string[],
   );
+  // Cancelled rows with a docket id mean the calendar signal was dismissed.
+  const dismissedDocketIds = new Set(
+    input.deliverables
+      .filter((d) => d.workflowStatus === "cancelled" && d.docketEventId)
+      .map((d) => d.docketEventId as string),
+  );
 
   const candidates: AutoProgressCandidate[] = [];
   const autoCompletes: AutoCompleteAction[] = [];
@@ -185,7 +269,7 @@ export function buildAutoProgress(input: {
         if (!isLitigationCalendarEvent(event)) continue;
         const eventDay = asYmdPrefix(event.date) || asYmdPrefix(event.startDateTime) || "";
         if (!inWeek(eventDay, input.weekStart)) continue;
-        if (doneKeys.has(`docket:${event.id}`)) continue;
+        if (doneKeys.has(`docket:${event.id}`) || dismissedDocketIds.has(event.id)) continue;
         const type = classifyLitDeliverableType(event.title, event.eventKind);
         const matched = matchDeliverable({
           open,
@@ -214,6 +298,11 @@ export function buildAutoProgress(input: {
           reason: matched
             ? "Past-week DocketFlow event matches a planned lit item — confirm it occurred."
             : "Past-week DocketFlow lit event — confirm to count (no matching plan item yet).",
+          ...evidenceFromDocket({
+            caseId: record.shared.id,
+            event,
+            createdOrEventDay: eventDay,
+          }),
         });
       }
 
@@ -252,6 +341,10 @@ export function buildAutoProgress(input: {
             attorneyUserId: record.shared.attorneyId,
             assigneeUserId: record.shared.paralegalId,
             reason: "Settlement date in week — counts from Case Tracker (no verification).",
+            ...evidenceFromCaseTracker(
+              record.shared.id,
+              `Settlement date ${settleDay} on the case record`,
+            ),
           });
         }
       }
@@ -291,6 +384,10 @@ export function buildAutoProgress(input: {
             attorneyUserId: record.shared.attorneyId,
             assigneeUserId: record.shared.paralegalId,
             reason: "Disbursement date in week — counts from Case Tracker (no verification).",
+            ...evidenceFromCaseTracker(
+              record.shared.id,
+              `Disbursement date ${disburseDay} on the case record`,
+            ),
           });
         }
       }
@@ -302,7 +399,7 @@ export function buildAutoProgress(input: {
         // Scheduling credit requires DocketFlow created_at in the week (not event date).
         const createdDay = asYmdPrefix(event.createdAt) || "";
         if (!createdDay || !inWeek(createdDay, input.weekStart)) continue;
-        if (doneKeys.has(`docket:${event.id}`)) continue;
+        if (doneKeys.has(`docket:${event.id}`) || dismissedDocketIds.has(event.id)) continue;
         const matched = matchDeliverable({
           open,
           caseId: record.shared.id,
@@ -330,6 +427,11 @@ export function buildAutoProgress(input: {
           reason: matched
             ? "DocketFlow event created this week matches a planned schedule item — confirm."
             : "DocketFlow lit event created this week — confirm to count as scheduled.",
+          ...evidenceFromDocket({
+            caseId: record.shared.id,
+            event,
+            createdOrEventDay: createdDay,
+          }),
         });
       }
     }
@@ -370,6 +472,7 @@ export function buildAutoProgress(input: {
           reason: matched
             ? "Slack/stage Demand signal matches planned demand — confirm before counting."
             : "Slack/stage Demand signal — confirm to count (or add manually).",
+          ...evidenceFromSuggestion(suggestion),
         });
       }
 
@@ -401,6 +504,7 @@ export function buildAutoProgress(input: {
           reason: matched
             ? "Slack/stage Litigation signal matches planned lawsuit — confirm before counting."
             : "Slack/stage Litigation signal — confirm to count (or add manually).",
+          ...evidenceFromSuggestion(suggestion),
         });
       }
     }
@@ -434,6 +538,10 @@ export function buildAutoProgress(input: {
             attorneyUserId: record.shared.attorneyId,
             assigneeUserId: record.shared.paralegalId,
             reason: "Case stage is Lit and a lawsuit item is planned — confirm filing occurred this week.",
+            ...evidenceFromCaseTracker(
+              record.shared.id,
+              "Case stage is currently Lit on the case record",
+            ),
           });
         }
       }
@@ -467,6 +575,10 @@ export function buildAutoProgress(input: {
           attorneyUserId: record.shared.attorneyId,
           assigneeUserId: record.shared.paralegalId,
           reason: "Case moved to Disengaged — confirm to count (no weekly target).",
+          ...evidenceFromCaseTracker(
+            record.shared.id,
+            closedDay ? `Case closed / Disengaged on ${closedDay}` : "Case stage is Disengaged",
+          ),
         });
       }
     }

@@ -492,6 +492,10 @@ export async function listDocketFlowCaseEventsForCases(input: {
   caseIds: string[];
   dateFrom?: string;
   dateTo?: string;
+  /** Inclusive lower bound on case_events.created_at (YYYY-MM-DD). */
+  createdFrom?: string;
+  /** Exclusive upper bound on case_events.created_at (YYYY-MM-DD). */
+  createdToExclusive?: string;
 }): Promise<DocketFlowScheduledEvent[]> {
   if (input.caseIds.length === 0) return [];
   const client = await createSharedDataClient();
@@ -503,6 +507,10 @@ export async function listDocketFlowCaseEventsForCases(input: {
     let query = client.from("case_events").select(CASE_EVENT_COLUMNS).in("case_id", chunk);
     if (input.dateFrom) query = query.gte("date", input.dateFrom);
     if (input.dateTo) query = query.lte("date", input.dateTo);
+    if (input.createdFrom) query = query.gte("created_at", `${input.createdFrom}T00:00:00.000Z`);
+    if (input.createdToExclusive) {
+      query = query.lt("created_at", `${input.createdToExclusive}T00:00:00.000Z`);
+    }
     const { data, error } = await query.order("date", { ascending: true }).order("id", { ascending: true });
     if (error) throw error;
     if (data?.length) rows.push(...data);

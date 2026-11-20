@@ -3,6 +3,11 @@ import { requireSessionUser } from "@/lib/auth/session";
 import { MyWorkView } from "@/components/performance/my-work-view";
 import { canBrowsePerformancePeople } from "@/lib/performance/access";
 import {
+  buildParalegalBoardBuckets,
+  paralegalFinishedDocketCreatedWindow,
+  type AttorneyBoardBuckets,
+} from "@/lib/performance/attorney-board";
+import {
   listCommitmentsForWeek,
   listDeliverablesForPerson,
 } from "@/lib/performance/deliverables";
@@ -15,6 +20,7 @@ import { shiftWeekStart } from "@/lib/performance/team-rollup";
 import { listWeekPairMetricsForPairs, listWeekPairsInRange } from "@/lib/performance/week-pairs";
 import { weekStartMondayCt } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
+import { listDocketFlowCaseEventsForCases } from "@/lib/supabase/services";
 import { type AppUser } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -90,6 +96,45 @@ export default async function PerformanceParalegalsPage({
 
   const nameById = Object.fromEntries(users.map((u) => [u.id, u.name]));
 
+  const paralegalRecords = selectedPerson
+    ? records.filter((r) => r.shared.paralegalId === selectedPerson.id)
+    : [];
+
+  const createdWindow = paralegalFinishedDocketCreatedWindow(lastWeekStart, weekStart);
+  let eventsByCaseId: Record<string, Awaited<ReturnType<typeof listDocketFlowCaseEventsForCases>>> = {};
+  try {
+    const events = await listDocketFlowCaseEventsForCases({
+      caseIds: paralegalRecords.map((r) => r.shared.id),
+      createdFrom: createdWindow.createdFrom,
+      createdToExclusive: createdWindow.createdToExclusive,
+    });
+    eventsByCaseId = {};
+    for (const event of events) {
+      const list = eventsByCaseId[event.caseId] ?? [];
+      list.push(event);
+      eventsByCaseId[event.caseId] = list;
+    }
+  } catch {
+    eventsByCaseId = {};
+  }
+
+  let boardBuckets: AttorneyBoardBuckets | null = null;
+  if (selectedPerson) {
+    try {
+      boardBuckets = buildParalegalBoardBuckets({
+        weekStart,
+        lastWeekStart,
+        personId: selectedPerson.id,
+        deliverables,
+        commitments,
+        records: paralegalRecords,
+        eventsByCaseId,
+      });
+    } catch {
+      boardBuckets = null;
+    }
+  }
+
   return (
     <MyWorkView
       key={selectedPerson?.id ?? "none"}
@@ -108,6 +153,7 @@ export default async function PerformanceParalegalsPage({
       basePath="/performance/my-work"
       personSwitcherLabel="Paralegal"
       scorecard={scorecard}
+      boardBuckets={boardBuckets}
     />
   );
 }
