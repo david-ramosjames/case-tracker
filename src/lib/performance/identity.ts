@@ -53,18 +53,20 @@ export function buildIdentityKey(input: {
       const kind = input.hearingType?.trim() || "event";
       const party = input.documentLabel?.trim();
       const notes = input.notes?.trim();
-      const parts = [kind, party, notes].filter(Boolean) as string[];
       if (!input.hearingType?.trim()) {
         throw new Error("Schedule Litigation Event needs an event type.");
       }
       if (!party && !notes) {
         throw new Error("Add a deposition party role or notes with further details.");
       }
-      const identityLabel = parts
+      // Label is kind + party only — freeform notes stay in notes, not the title.
+      const labelParts = [kind, party].filter(Boolean) as string[];
+      const identityLabel = labelParts
         .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
         .join(" · ");
+      const keyParts = [kind, party, notes].filter(Boolean) as string[];
       return {
-        identityKey: `lit:${parts.map(slug).join(":")}`,
+        identityKey: `lit:${keyParts.map(slug).join(":")}`,
         identityLabel,
       };
     }

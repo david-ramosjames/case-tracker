@@ -24,15 +24,17 @@ describe("performance identity", () => {
     assert.match(a.identityKey, /notes:/);
   });
 
-  it("builds lit-event identity from kind, party, and notes", () => {
+  it("builds lit-event label from kind + party only (notes in key, not label)", () => {
     const a = buildIdentityKey({
       deliverableType: "lit_event_scheduled",
       hearingType: "deposition",
       documentLabel: "Defendant",
-      notes: "Smith adjuster",
+      notes: "Smith adjuster — sent 2nd email",
     });
     assert.match(a.identityLabel, /deposition/i);
     assert.match(a.identityLabel, /Defendant/);
+    assert.doesNotMatch(a.identityLabel, /sent 2nd email/i);
+    assert.match(a.identityKey, /smith/);
   });
 
   it("same document label produces same identity (duplicate guard input)", () => {

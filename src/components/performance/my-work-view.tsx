@@ -181,6 +181,8 @@ export function MyWorkView({
     if (boardBuckets) return boardBuckets.committed;
     return boardDeliverables.filter((d) => {
       if (d.workflowStatus !== "committed") return false;
+      // Spreadsheet imports are plan hints — Committed this week is manual entry only.
+      if ((d.notes ?? "").includes("[goals-import]")) return false;
       const commitment = commitmentByDeliverable.get(d.id);
       return commitment?.weekStart === weekStart;
     });
@@ -188,7 +190,11 @@ export function MyWorkView({
 
   const backlog = useMemo(() => {
     if (boardBuckets) return boardBuckets.backlog;
-    return boardDeliverables.filter((d) => d.workflowStatus === "backlog");
+    return boardDeliverables.filter((d) => {
+      if (d.workflowStatus === "backlog") return true;
+      // Show goals-import rows that were wrongly auto-committed under In progress.
+      return d.workflowStatus === "committed" && (d.notes ?? "").includes("[goals-import]");
+    });
   }, [boardBuckets, boardDeliverables]);
 
   const newEntriesThisWeek = useMemo(
@@ -537,9 +543,17 @@ export function MyWorkView({
                 <TableCell>
                   <div className="font-medium">
                     {d.deliverableType === "lit_event_scheduled"
-                      ? `Schedule Litigation Event${
-                          d.hearingType ? ` · ${litEventKindLabel(d.hearingType) ?? d.hearingType}` : ""
-                        }${d.documentLabel ? ` · ${d.documentLabel}` : ""}`
+                      ? (() => {
+                          const party =
+                            d.documentLabel &&
+                            d.documentLabel.length <= 40 &&
+                            !/\b(sent|deadline|email|follow[- ]?up)\b/i.test(d.documentLabel)
+                              ? d.documentLabel
+                              : null;
+                          return `Schedule Litigation Event${
+                            d.hearingType ? ` · ${litEventKindLabel(d.hearingType) ?? d.hearingType}` : ""
+                          }${party ? ` · ${party}` : ""}`;
+                        })()
                       : typeLabel(d.deliverableType)}
                   </div>
                 </TableCell>

@@ -4,7 +4,8 @@
  * Attorneys sheet → performance_attorney_plan_lines (weeks 2026-11-09 and 2026-11-16)
  * Paralegal pair tabs → performance_deliverables (+ commitments)
  *   Last Week              → done (week 11/09)
- *   To Be Completed This Week → committed (week 11/16), or done if struck / has complete date
+ *   To Be Completed This Week → backlog (manual “To this week” only; not auto-committed),
+ *                            or done if struck / Completed This Week
  *   In Progress            → backlog
  *
  * Usage:
@@ -175,7 +176,19 @@ function litFieldsFromNotes(notes) {
   else if (/\bhearing\b|\bmtq\b|\bmtn\b|\bmotion\b/.test(lower)) hearingType = "hearing";
   else if (/\bdepo\b|\bdeposition\b|\bcorp\s*rep\b/.test(lower)) hearingType = "deposition";
   else if (/\baso\b/.test(lower)) hearingType = "aso";
-  return { hearingType, documentLabel: n || hearingType };
+
+  // Short party/subtype only — never the full follow-up notes (emails/deadlines).
+  let documentLabel = null;
+  if (/\bcorp\s*rep\b/.test(lower)) documentLabel = "Corp Rep";
+  else if (/\bexpert\b/.test(lower)) documentLabel = "Expert";
+  else if (/\bplaintiff\b|\bp['’]?s\b\s*depo|\bp\s*depo/.test(lower)) documentLabel = "Plaintiff";
+  else if (/\bdefendant\b|\bd['’]?s\b\s*depo|\bd\s*depo|\bd\s*expert/.test(lower)) {
+    documentLabel = "Defendant";
+  } else {
+    const short = n.split(/\s[-–—]\s*(?:sent|deadline|email|follow)/i)[0].trim();
+    documentLabel = (short || hearingType).slice(0, 40);
+  }
+  return { hearingType, documentLabel };
 }
 
 function identityFor(type, notes, label) {
@@ -183,17 +196,18 @@ function identityFor(type, notes, label) {
   if (type === "lit_event_scheduled") {
     const { hearingType, documentLabel } = litFieldsFromNotes(detail);
     return {
-      identityKey: `lit:${slug(hearingType)}:${slug(documentLabel)}`,
-      identityLabel: documentLabel,
+      identityKey: `lit:${slug(hearingType)}:${slug(documentLabel)}:${slug(detail).slice(0, 48)}`,
+      identityLabel: `${hearingType}${documentLabel ? ` · ${documentLabel}` : ""}`,
       hearingType,
       documentLabel,
     };
   }
   return {
     identityKey: `import:${slug(detail)}`,
-    identityLabel: detail,
+    identityLabel: type,
     hearingType: null,
-    documentLabel: detail,
+    // Keep structured subtype empty; freeform text belongs in notes only.
+    documentLabel: null,
   };
 }
 
@@ -291,17 +305,25 @@ function parseParalegalSheet(sheet, meta) {
       completedAt = dateYmd || LAST_WEEK;
       plannedDate = dateYmd || LAST_WEEK;
       commitmentOutcome = "completed";
-    } else if (sectionKey.startsWith("to be completed") || sectionKey.startsWith("completed this week")) {
+    } else if (sectionKey.startsWith("completed this week")) {
       weekStart = THIS_WEEK;
-      if (struck || sectionKey.startsWith("completed")) {
+      workflowStatus = "done";
+      completedAt = dateYmd || THIS_WEEK;
+      plannedDate = dateYmd || THIS_WEEK;
+      commitmentOutcome = "completed";
+    } else if (sectionKey.startsWith("to be completed")) {
+      // Spreadsheet plan lines stay in backlog — Committed this week is manual entry only.
+      if (struck) {
+        weekStart = THIS_WEEK;
         workflowStatus = "done";
         completedAt = dateYmd || THIS_WEEK;
         plannedDate = dateYmd || THIS_WEEK;
         commitmentOutcome = "completed";
       } else {
-        workflowStatus = "committed";
-        plannedDate = dateYmd || THIS_WEEK;
-        commitmentOutcome = "promised";
+        workflowStatus = "backlog";
+        weekStart = null;
+        plannedDate = dateYmd;
+        commitmentOutcome = null;
       }
     } else {
       // In Progress → backlog for future weeks
