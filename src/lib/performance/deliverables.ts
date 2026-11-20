@@ -416,6 +416,54 @@ export async function cancelDeliverable(input: {
   return deliverable;
 }
 
+/** Update notes (and later other editable fields) on an open deliverable. */
+export async function updateDeliverable(input: {
+  deliverableId: string;
+  notes?: string | null;
+  actorUserId?: string | null;
+}): Promise<PerformanceDeliverable> {
+  const client = await createPerformanceClient();
+  const { data: existing, error: loadError } = await client
+    .from("performance_deliverables")
+    .select("*")
+    .eq("id", input.deliverableId)
+    .maybeSingle();
+  if (loadError) throw loadError;
+  if (!existing) throw new Error("Deliverable not found.");
+  const current = rowToDeliverable(existing as UnknownRow);
+  if (current.workflowStatus === "done" || current.workflowStatus === "cancelled") {
+    throw new Error("Cannot edit a closed deliverable.");
+  }
+
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  const eventPayload: Record<string, unknown> = {};
+  if (input.notes !== undefined) {
+    const nextNotes = input.notes?.trim() ? input.notes.trim() : null;
+    patch.notes = nextNotes;
+    eventPayload.notes = nextNotes;
+  }
+  if (Object.keys(eventPayload).length === 0) {
+    return current;
+  }
+
+  const { data, error } = await client
+    .from("performance_deliverables")
+    .update(patch)
+    .eq("id", input.deliverableId)
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  const deliverable = rowToDeliverable(data as UnknownRow);
+  await appendEvent({
+    deliverableId: deliverable.id,
+    actorUserId: input.actorUserId,
+    eventType: "updated",
+    payload: eventPayload,
+  });
+  return deliverable;
+}
+
 /** Move a this-week commitment back to the open backlog (In progress). */
 export async function uncommitDeliverableToBacklog(input: {
   deliverableId: string;

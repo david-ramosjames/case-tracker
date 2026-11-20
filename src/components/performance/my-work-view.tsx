@@ -127,6 +127,8 @@ export function MyWorkView({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [coverOthers, setCoverOthers] = useState(false);
+  const [editingNotesId, setEditingNotesId] = useState<string | null>(null);
+  const [draftNotes, setDraftNotes] = useState("");
 
   // PersonSwitcher uses client navigation; remount isn't guaranteed — reset board when person changes.
   useEffect(() => {
@@ -398,18 +400,63 @@ export function MyWorkView({
     }
   }
 
+  function startEditNotes(d: PerformanceDeliverable) {
+    if (isSyntheticBoardDeliverable(d.id)) return;
+    if (d.workflowStatus === "done" || d.workflowStatus === "cancelled") return;
+    setEditingNotesId(d.id);
+    setDraftNotes(d.notes ?? "");
+  }
+
+  async function saveNotes(id: string, nextNotes: string) {
+    const current = deliverables.find((d) => d.id === id);
+    const normalized = nextNotes.trim();
+    const previous = (current?.notes ?? "").trim();
+    setEditingNotesId(null);
+    if (!current || normalized === previous) return;
+    setBusyId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/performance/deliverables/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: normalized || null }),
+      });
+      const body = (await res.json()) as { deliverable?: PerformanceDeliverable; error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Save notes failed");
+      if (body.deliverable) {
+        setDeliverables((prev) => prev.map((d) => (d.id === id ? body.deliverable! : d)));
+      } else {
+        setDeliverables((prev) =>
+          prev.map((d) => (d.id === id ? { ...d, notes: normalized || null } : d)),
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save notes failed");
+      setEditingNotesId(id);
+      setDraftNotes(nextNotes);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function cancelItem(id: string) {
-    if (!window.confirm("Cancel this deliverable? It will be removed from the board.")) return;
+    if (
+      !window.confirm(
+        "Remove this deliverable from the board? It won’t count toward this week (still kept in history as cancelled).",
+      )
+    ) {
+      return;
+    }
     setBusyId(id);
     setError(null);
     try {
       const res = await fetch(`/api/performance/deliverables/${id}/cancel`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: "Cancelled from board" }),
+        body: JSON.stringify({ reason: "Removed from board" }),
       });
       const body = (await res.json()) as { deliverable?: PerformanceDeliverable; error?: string };
-      if (!res.ok) throw new Error(body.error ?? "Cancel failed");
+      if (!res.ok) throw new Error(body.error ?? "Remove failed");
       setDeliverables((prev) => prev.filter((d) => d.id !== id));
       setCommitments((prev) =>
         prev.map((c) =>
@@ -418,7 +465,7 @@ export function MyWorkView({
       );
       if (boardBuckets) router.refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Cancel failed");
+      setError(err instanceof Error ? err.message : "Remove failed");
     } finally {
       setBusyId(null);
     }
@@ -466,14 +513,19 @@ export function MyWorkView({
             <TableHead className="w-[9rem]">Client</TableHead>
             <TableHead className="w-[5.5rem]">Started</TableHead>
             <TableHead className="w-[7.5rem]">{mode === "finished" ? "Complete date" : "Status"}</TableHead>
-            <TableHead className="w-[12rem]">Notes</TableHead>
-            <TableHead className="w-[18rem]" />
+            <TableHead className="w-[14rem]">Notes</TableHead>
+            <TableHead className="w-[14rem]" />
           </TableRow>
         </TableHeader>
         <TableBody>
           {(rows ?? []).map((d, index) => {
             const startYmd = deliverableStartYmd(d);
             const ageDays = daysSinceStarted(d);
+            const canAct =
+              mode !== "finished" &&
+              !isSyntheticBoardDeliverable(d.id) &&
+              (d.workflowStatus === "backlog" || d.workflowStatus === "committed");
+            const isEditingNotes = editingNotesId === d.id;
             return (
               <TableRow key={d.id || `row-${index}`}>
                 <TableCell className="whitespace-nowrap">
@@ -489,9 +541,6 @@ export function MyWorkView({
                           d.hearingType ? ` · ${litEventKindLabel(d.hearingType) ?? d.hearingType}` : ""
                         }${d.documentLabel ? ` · ${d.documentLabel}` : ""}`
                       : typeLabel(d.deliverableType)}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {d.identityLabel || d.identityKey}
                   </div>
                 </TableCell>
                 <TableCell>
@@ -527,50 +576,99 @@ export function MyWorkView({
                     </Badge>
                   )}
                 </TableCell>
-                <TableCell className="truncate text-xs" title={d.notes ?? undefined}>
-                  {d.notes ?? "—"}
+                <TableCell className="align-top">
+                  {isEditingNotes ? (
+                    <Input
+                      autoFocus
+                      className="h-8 text-xs"
+                      value={draftNotes}
+                      disabled={busyId === d.id}
+                      placeholder="Add notes…"
+                      onChange={(e) => setDraftNotes(e.target.value)}
+                      onBlur={() => void saveNotes(d.id, draftNotes)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          void saveNotes(d.id, draftNotes);
+                        }
+                        if (e.key === "Escape") {
+                          e.preventDefault();
+                          setEditingNotesId(null);
+                          setDraftNotes(d.notes ?? "");
+                        }
+                      }}
+                    />
+                  ) : canAct ? (
+                    <button
+                      type="button"
+                      className="block w-full truncate rounded px-1 py-0.5 text-left text-xs hover:bg-slate-50"
+                      title={d.notes ? `${d.notes} (click to edit)` : "Click to add notes"}
+                      onClick={() => startEditNotes(d)}
+                    >
+                      {d.notes ?? <span className="text-muted-foreground">Add notes…</span>}
+                    </button>
+                  ) : (
+                    <span className="truncate text-xs" title={d.notes ?? undefined}>
+                      {d.notes ?? "—"}
+                    </span>
+                  )}
                 </TableCell>
-                <TableCell className="space-x-2 whitespace-nowrap">
+                <TableCell className="align-top">
                   {mode !== "finished" && isSyntheticBoardDeliverable(d.id) ? (
                     <span className="text-xs text-muted-foreground">
                       {d.id.startsWith("docket:") ? "DocketFlow calendar" : "Case Tracker"}
                     </span>
                   ) : null}
-                  {mode !== "finished" &&
-                  !isSyntheticBoardDeliverable(d.id) &&
-                  d.workflowStatus === "backlog" ? (
-                    <Button size="sm" variant="outline" disabled={busyId === d.id} onClick={() => void commit(d.id)}>
-                      Move to this week
-                    </Button>
-                  ) : null}
-                  {mode === "thisWeek" &&
-                  !isSyntheticBoardDeliverable(d.id) &&
-                  d.workflowStatus === "committed" ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busyId === d.id}
-                      onClick={() => void moveToInProgress(d.id)}
-                    >
-                      Move to in progress
-                    </Button>
-                  ) : null}
-                  {mode !== "finished" &&
-                  !isSyntheticBoardDeliverable(d.id) &&
-                  (d.workflowStatus === "backlog" || d.workflowStatus === "committed") ? (
-                    <>
-                      <Button size="sm" disabled={busyId === d.id} onClick={() => void complete(d.id)}>
+                  {canAct ? (
+                    <div className="grid w-[12.5rem] grid-cols-2 gap-1">
+                      <Button
+                        size="sm"
+                        className="h-8 px-2 text-xs"
+                        disabled={busyId === d.id}
+                        onClick={() => void complete(d.id)}
+                      >
                         Complete
                       </Button>
                       <Button
                         size="sm"
                         variant="outline"
+                        className="h-8 px-2 text-xs"
+                        disabled={busyId === d.id || isEditingNotes}
+                        onClick={() => startEditNotes(d)}
+                      >
+                        Edit
+                      </Button>
+                      {d.workflowStatus === "backlog" ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-2 text-xs"
+                          disabled={busyId === d.id}
+                          onClick={() => void commit(d.id)}
+                        >
+                          To this week
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 px-2 text-xs"
+                          disabled={busyId === d.id}
+                          onClick={() => void moveToInProgress(d.id)}
+                        >
+                          In progress
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 px-2 text-xs"
                         disabled={busyId === d.id}
                         onClick={() => void cancelItem(d.id)}
                       >
-                        Cancel
+                        Remove
                       </Button>
-                    </>
+                    </div>
                   ) : null}
                 </TableCell>
               </TableRow>
