@@ -53,6 +53,7 @@ import {
   asYmdPrefix,
   chicagoTodayYmd,
   formatWeekRangeLabel,
+  isDateInWeek,
   shiftWeekStart,
   weekEndFromStart,
 } from "@/lib/performance/weeks";
@@ -105,6 +106,25 @@ type Props = {
 };
 
 type CreateDestination = "backlog" | "this_week" | "last_week";
+
+/** Board bucket from requested date: this week → committed; otherwise → in progress. */
+function destinationFromRequestedDate(
+  requestedYmd: string,
+  weekStart: string,
+): Exclude<CreateDestination, "last_week"> {
+  if (isDateInWeek(requestedYmd, weekStart)) return "this_week";
+  return "backlog";
+}
+
+function requestedDatePlacementNote(requestedYmd: string, weekStart: string): string {
+  if (isDateInWeek(requestedYmd, weekStart)) {
+    return "Committed for current week";
+  }
+  if (requestedYmd > weekEndFromStart(weekStart)) {
+    return "In progress for future weeks";
+  }
+  return "In progress (date is before this week)";
+}
 
 /** Board Category column — short name only (no type/subtype/notes). */
 function boardCategoryLabel(type: PerformanceDeliverableType) {
@@ -428,6 +448,11 @@ export function MyWorkView({
       if (form.category === "completed_lit_event" && destination !== "last_week") {
         throw new Error("Completed Lit Event can only be added to completed last week.");
       }
+      if (form.category !== "completed_lit_event" && destination !== "last_week") {
+        if (!form.requestedCompletionDate) {
+          throw new Error("Enter a requested date — it decides this week vs in progress.");
+        }
+      }
       const selected = caseOptions.find((c) => c.id === form.caseId);
       const fields = resolveCreateFields();
       const res = await fetch("/api/performance/deliverables", {
@@ -491,6 +516,7 @@ export function MyWorkView({
         caseId: "",
         litEventKind: "",
         subType: "",
+        requestedCompletionDate: "",
         notes: "",
       }));
       if (destination === "last_week") await refresh();
@@ -1183,20 +1209,28 @@ export function MyWorkView({
               Requested date
               <span
                 className="inline-flex text-muted-foreground"
-                title="Optional target date only — it does not place the item on a board. Use Add to this week for Committed, or Add to in progress for future work."
+                title="Required. A date in the current week commits the item for this week; a later date puts it in progress for future weeks."
               >
                 <CircleHelp className="h-3.5 w-3.5" aria-hidden />
                 <span className="sr-only">
-                  Optional target date only — it does not place the item on a board. Use Add to this week for
-                  Committed, or Add to in progress for future work.
+                  Required. A date in the current week commits the item for this week; a later date puts it in
+                  progress for future weeks.
                 </span>
               </span>
             </span>
             <Input
               type="date"
+              required
               value={form.requestedCompletionDate}
               onChange={(e) => setForm((f) => ({ ...f, requestedCompletionDate: e.target.value }))}
             />
+            {form.requestedCompletionDate ? (
+              <p className="text-xs text-muted-foreground">
+                ({requestedDatePlacementNote(form.requestedCompletionDate, weekStart)})
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">Required — chooses this week vs in progress.</p>
+            )}
           </label>
         ) : null}
         <label className="space-y-1 text-sm md:col-span-2 lg:col-span-3">
@@ -1209,20 +1243,22 @@ export function MyWorkView({
         </label>
         <div className="flex flex-wrap items-end gap-2 md:col-span-2 lg:col-span-3">
           {form.category !== "completed_lit_event" ? (
-            <>
-              <Button
-                variant="outline"
-                disabled={creating || !form.caseId}
-                onClick={() => void createItem("backlog")}
-              >
-                {busyId === "create:backlog" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Add to in progress
-              </Button>
-              <Button disabled={creating || !form.caseId} onClick={() => void createItem("this_week")}>
-                {busyId === "create:this_week" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Add to this week
-              </Button>
-            </>
+            <Button
+              disabled={creating || !form.caseId || !form.requestedCompletionDate}
+              onClick={() => {
+                const dest = destinationFromRequestedDate(form.requestedCompletionDate, weekStart);
+                void createItem(dest);
+              }}
+            >
+              {busyId === "create:this_week" || busyId === "create:backlog" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : null}
+              {form.requestedCompletionDate
+                ? destinationFromRequestedDate(form.requestedCompletionDate, weekStart) === "this_week"
+                  ? "Add to this week"
+                  : "Add to in progress"
+                : "Add"}
+            </Button>
           ) : null}
           <Button
             variant={form.category === "completed_lit_event" ? "default" : "secondary"}
