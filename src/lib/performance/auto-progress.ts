@@ -218,9 +218,20 @@ function disbursementDatesFor(record: CaseRecord) {
   const dates = record.tracker.disbursements
     .map((d) => d.disburseDate)
     .filter((d): d is string => Boolean(d));
-  if (dates.length > 0) return dates;
+  if (dates.length > 0) return [...new Set(dates)];
   if (record.tracker.result.disburseDate) return [record.tracker.result.disburseDate];
   return [];
+}
+
+/** Idempotency key so Case Tracker settlement/disbursement sync does not recreate rows. */
+export function closingSignalDoneKey(
+  type: "settlement" | "disbursement",
+  caseId: string | null | undefined,
+  day: string | null | undefined,
+) {
+  const ymd = asYmdPrefix(day);
+  if (!caseId || !ymd) return null;
+  return `${type}:${caseId}:${ymd}`;
 }
 
 /** Build confirmation queue + system auto-complete actions for a person's planned work. */
@@ -238,11 +249,23 @@ export function buildAutoProgress(input: {
   const doneKeys = new Set(
     input.deliverables
       .filter((d) => d.workflowStatus === "done")
-      .flatMap((d) => [
-        d.id,
-        d.docketEventId ? `docket:${d.docketEventId}` : null,
-        `${d.deliverableType}:${d.caseNumber}`,
-      ])
+      .flatMap((d) => {
+        const keys: Array<string | null> = [
+          d.id,
+          d.docketEventId ? `docket:${d.docketEventId}` : null,
+          `${d.deliverableType}:${d.caseNumber}`,
+        ];
+        if (d.deliverableType === "settlement" || d.deliverableType === "disbursement") {
+          keys.push(
+            closingSignalDoneKey(
+              d.deliverableType,
+              d.caseId,
+              asYmdPrefix(d.completedAt) || asYmdPrefix(d.plannedDate),
+            ),
+          );
+        }
+        return keys;
+      })
       .filter(Boolean) as string[],
   );
   // Cancelled rows with a docket id mean the calendar signal was dismissed.
@@ -308,6 +331,7 @@ export function buildAutoProgress(input: {
 
       const settleDay = settlementDateFor(record);
       if (inWeek(settleDay, input.weekStart)) {
+        const signalKey = closingSignalDoneKey("settlement", record.shared.id, settleDay);
         const matched = matchDeliverable({
           open,
           caseId: record.shared.id,
@@ -324,7 +348,8 @@ export function buildAutoProgress(input: {
             caseNumber: record.shared.caseNumber,
             label: `Settlement dated ${settleDay}`,
           });
-        } else if (!matched) {
+          if (signalKey) doneKeys.add(signalKey);
+        } else if (!matched && signalKey && !doneKeys.has(signalKey)) {
           candidates.push({
             id: `settlement:${record.shared.id}:${settleDay}`,
             kind: "settlement",
@@ -346,11 +371,14 @@ export function buildAutoProgress(input: {
               `Settlement date ${settleDay} on the case record`,
             ),
           });
+          doneKeys.add(signalKey);
         }
       }
 
       for (const disburseDay of disbursementDatesFor(record)) {
         if (!inWeek(disburseDay, input.weekStart)) continue;
+        const signalKey = closingSignalDoneKey("disbursement", record.shared.id, disburseDay);
+        if (signalKey && doneKeys.has(signalKey)) continue;
         const matched = matchDeliverable({
           open,
           caseId: record.shared.id,
@@ -367,7 +395,8 @@ export function buildAutoProgress(input: {
             caseNumber: record.shared.caseNumber,
             label: `Disbursement dated ${disburseDay}`,
           });
-        } else if (!matched) {
+          if (signalKey) doneKeys.add(signalKey);
+        } else if (!matched && signalKey) {
           candidates.push({
             id: `disbursement:${record.shared.id}:${disburseDay}`,
             kind: "disbursement",
@@ -389,6 +418,7 @@ export function buildAutoProgress(input: {
               `Disbursement date ${disburseDay} on the case record`,
             ),
           });
+          doneKeys.add(signalKey);
         }
       }
     }

@@ -3,7 +3,16 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  CircleHelp,
+  Loader2,
+} from "lucide-react";
 import { AutoProgressPanel } from "@/components/performance/auto-progress-panel";
 import { CasePicker } from "@/components/performance/case-picker";
 import { PersonScorecardView } from "@/components/performance/person-scorecard-view";
@@ -334,6 +343,14 @@ export function MyWorkView({
     () =>
       boardDeliverables
         .filter((d) => inWeek(d.identifiedAt, weekStart))
+        // Case Tracker auto-rows belong on Attorney scorecard/board — not Identify entry list.
+        .filter(
+          (d) =>
+            !(
+              d.completionSource === "system" &&
+              (d.deliverableType === "settlement" || d.deliverableType === "disbursement")
+            ),
+        )
         .sort((a, b) => (b.identifiedAt ?? "").localeCompare(a.identifiedAt ?? "")),
     [boardDeliverables, weekStart],
   );
@@ -1162,7 +1179,19 @@ export function MyWorkView({
         ) : null}
         {form.category !== "completed_lit_event" ? (
           <label className="space-y-1 text-sm">
-            <span className="font-medium">Requested date</span>
+            <span className="inline-flex items-center gap-1.5 font-medium">
+              Requested date
+              <span
+                className="inline-flex text-muted-foreground"
+                title="Optional target date only — it does not place the item on a board. Use Add to this week for Committed, or Add to in progress for future work."
+              >
+                <CircleHelp className="h-3.5 w-3.5" aria-hidden />
+                <span className="sr-only">
+                  Optional target date only — it does not place the item on a board. Use Add to this week for
+                  Committed, or Add to in progress for future work.
+                </span>
+              </span>
+            </span>
             <Input
               type="date"
               value={form.requestedCompletionDate}

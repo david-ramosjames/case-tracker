@@ -23,9 +23,9 @@ const LIT_COMPLETED_TYPES: PerformanceDeliverableType[] = [
   "hearing_trial",
 ];
 
-/** Settlements + completed lit event types — attorney Output board only. */
+/** Settlements / disbursements + completed lit event types — attorney Output board only. */
 export function isAttorneyOnlyBoardType(type: PerformanceDeliverableType) {
-  return type === "settlement" || LIT_COMPLETED_TYPES.includes(type);
+  return type === "settlement" || type === "disbursement" || LIT_COMPLETED_TYPES.includes(type);
 }
 
 /** Paralegals see shared work only (demands, lawsuits, schedule lit, discovery, etc.). */
@@ -184,8 +184,8 @@ function dedupeById(rows: PerformanceDeliverable[]) {
 
 /**
  * Attorney Output board lists:
- * - Finished last week: verified completed lit events + settlements dated last week
- * - Committed this week: DF lit events dated this week + settlements dated/committed this week
+ * - Finished last week: verified completed lit events + settlements/disbursements dated last week
+ * - Committed this week: DF lit events dated this week + settlements/disbursements dated/committed this week
  * - In progress: DF lit events dated next week and the week after (+1 / +2)
  */
 export function buildAttorneyBoardBuckets(input: {
@@ -220,13 +220,17 @@ export function buildAttorneyBoardBuckets(input: {
       .map((d) => d.docketEventId as string),
   );
 
-  // Verified completed lit events (confirmation creates done deliverables).
+  // Verified completed lit events + closing metrics (confirmation / Case Tracker sync).
   for (const d of input.deliverables) {
     if (d.attorneyUserId !== input.personId) continue;
     if (d.workflowStatus !== "done") continue;
     const completedDay = asYmdPrefix(d.completedAt);
     if (!completedDay || !isDateInWeek(completedDay, input.lastWeekStart)) continue;
-    if (LIT_COMPLETED_TYPES.includes(d.deliverableType) || d.deliverableType === "settlement") {
+    if (
+      LIT_COMPLETED_TYPES.includes(d.deliverableType) ||
+      d.deliverableType === "settlement" ||
+      d.deliverableType === "disbursement"
+    ) {
       finished.push(d);
     }
   }
@@ -304,10 +308,15 @@ export function buildAttorneyBoardBuckets(input: {
     }
   }
 
-  // Settlement commitments / backlog (attorney-only types).
+  // Settlement / disbursement commitments, this-week completions, and backlog (attorney-only).
   for (const d of input.deliverables) {
     if (d.attorneyUserId !== input.personId) continue;
-    if (d.deliverableType !== "settlement") continue;
+    if (d.deliverableType !== "settlement" && d.deliverableType !== "disbursement") continue;
+    if (d.workflowStatus === "done") {
+      const completedDay = asYmdPrefix(d.completedAt);
+      if (completedDay && isDateInWeek(completedDay, input.weekStart)) committed.push(d);
+      continue;
+    }
     if (d.workflowStatus === "committed" && committedIds.has(d.id)) committed.push(d);
     if (d.workflowStatus === "backlog") backlog.push(d);
   }

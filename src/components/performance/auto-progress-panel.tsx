@@ -98,6 +98,7 @@ export function AutoProgressPanel({ role, personId, weekStart }: Props) {
           deliverableType: candidate.deliverableType,
           deliverableId: candidate.deliverableId,
           docketEventId: candidate.docketEventId,
+          stageSuggestionId: candidate.stageSuggestionId,
           eventTitle: candidate.label,
           attorneyUserId: candidate.attorneyUserId,
           assigneeUserId: candidate.assigneeUserId,
@@ -105,10 +106,14 @@ export function AutoProgressPanel({ role, personId, weekStart }: Props) {
           notes: candidate.reason,
         }),
       });
-      const body = (await res.json()) as { error?: string };
+      const body = (await res.json()) as { error?: string; caseStageUpdated?: string | null };
       if (!res.ok) throw new Error(body.error ?? "Confirm failed");
       setNeedsConfirm((prev) => prev.filter((c) => c.id !== candidate.id));
-      setMessage(`Confirmed ${candidate.label} on ${candidate.caseNumber}.`);
+      setMessage(
+        body.caseStageUpdated
+          ? `Confirmed ${candidate.label} on ${candidate.caseNumber} — case stage set to ${body.caseStageUpdated}.`
+          : `Confirmed ${candidate.label} on ${candidate.caseNumber}.`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Confirm failed");
     } finally {

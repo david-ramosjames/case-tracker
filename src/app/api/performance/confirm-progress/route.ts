@@ -4,17 +4,25 @@ import { findContactForSession } from "@/lib/auth/access";
 import { canViewPerformance } from "@/lib/performance/access";
 import { classifyLitDeliverableType } from "@/lib/performance/auto-progress";
 import {
+  shouldUpdateCaseStageOnProgressConfirm,
+  stagePatchForProgressConfirm,
+  targetStageForProgressConfirm,
+} from "@/lib/performance/confirm-stage";
+import {
   completeDeliverable,
   createDeliverable,
   listAllOpenDeliverables,
 } from "@/lib/performance/deliverables";
-import { getUsers } from "@/lib/supabase/services";
+import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import { getCaseById, getUsers, toDatabaseStage, updateTrackerEntry } from "@/lib/supabase/services";
 import { type PerformanceDeliverableType } from "@/lib/performance/types";
+import { type CaseStage } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 
 /**
  * Confirm a suggested weekly-goal completion (lit event, demand, lawsuit, disengagement).
- * Does not mutate case stage.
+ * Demand / lawsuit / disengagement also advance Case Tracker stage when that is not a
+ * backward move (and never when the case is already Settled).
  */
 export async function POST(request: Request) {
   try {
@@ -31,6 +39,7 @@ export async function POST(request: Request) {
       deliverableType: PerformanceDeliverableType;
       deliverableId?: string | null;
       docketEventId?: string | null;
+      stageSuggestionId?: string | null;
       eventTitle?: string | null;
       attorneyUserId?: string | null;
       assigneeUserId?: string | null;
@@ -92,7 +101,39 @@ export async function POST(request: Request) {
       completedAt: body.completedAt,
     });
 
-    return NextResponse.json({ deliverable });
+    let caseStageUpdated: CaseStage | null = null;
+    const targetStage = targetStageForProgressConfirm(body.deliverableType);
+    if (targetStage) {
+      const record = await getCaseById(body.caseId);
+      if (record && shouldUpdateCaseStageOnProgressConfirm(record.tracker.caseStage, targetStage)) {
+        const actorName = contact?.name || sessionUser.email || "Performance confirm";
+        const patch = stagePatchForProgressConfirm(record, targetStage);
+        await updateTrackerEntry(body.caseId, patch, {
+          actor: { userName: actorName },
+          markReviewed: true,
+          changeInput: patch,
+        });
+        caseStageUpdated = targetStage;
+      }
+    }
+
+    if (body.stageSuggestionId) {
+      const admin = createSupabaseAdminClient();
+      if (admin) {
+        const update: Record<string, unknown> = {
+          confirmed_at: new Date().toISOString(),
+        };
+        if (caseStageUpdated) {
+          update.suggested_stage = toDatabaseStage(caseStageUpdated);
+        }
+        await admin
+          .from("case_tracker_stage_suggestions")
+          .update(update)
+          .eq("id", body.stageSuggestionId);
+      }
+    }
+
+    return NextResponse.json({ deliverable, caseStageUpdated });
   } catch (error) {
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 });
   }

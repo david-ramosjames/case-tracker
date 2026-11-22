@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { unauthorizedResponse, requireApiSession } from "@/lib/auth/api";
 import { findContactForSession } from "@/lib/auth/access";
 import { canViewPerformance } from "@/lib/performance/access";
-import { buildAutoProgress } from "@/lib/performance/auto-progress";
+import { buildAutoProgress, closingSignalDoneKey } from "@/lib/performance/auto-progress";
 import {
   completeDeliverable,
   createDeliverable,
@@ -104,10 +104,28 @@ export async function POST(request: Request) {
     }
 
     // Info-only settlement/disbursement candidates without a planned item: create+complete system rows
-    // so person scorecards include them without verification.
+    // so person scorecards include them without verification. Skip if already recorded for that date.
     if (body.applyAutoCompletes !== false && role === "attorney") {
+      const existingClosingKeys = new Set(
+        deliverables
+          .filter(
+            (d) =>
+              d.workflowStatus === "done" &&
+              (d.deliverableType === "settlement" || d.deliverableType === "disbursement"),
+          )
+          .map((d) =>
+            closingSignalDoneKey(
+              d.deliverableType as "settlement" | "disbursement",
+              d.caseId,
+              asYmdPrefix(d.completedAt) || asYmdPrefix(d.plannedDate),
+            ),
+          )
+          .filter(Boolean) as string[],
+      );
       for (const candidate of candidates.filter((c) => !c.requiresVerification && !c.deliverableId)) {
         if (candidate.kind !== "settlement" && candidate.kind !== "disbursement") continue;
+        const signalKey = closingSignalDoneKey(candidate.kind, candidate.caseId, candidate.signalDate);
+        if (signalKey && existingClosingKeys.has(signalKey)) continue;
         const created = await createDeliverable(
           {
             caseId: candidate.caseId,
@@ -127,6 +145,7 @@ export async function POST(request: Request) {
           actorUserId: contact?.id,
           completedAt: `${candidate.signalDate}T18:00:00.000Z`,
         });
+        if (signalKey) existingClosingKeys.add(signalKey);
         applied.push({
           deliverableId: created.id,
           kind: candidate.kind,

@@ -145,6 +145,42 @@ describe("auto-progress", () => {
     assert.equal(candidates.filter((c) => c.kind === "settlement").length, 0);
   });
 
+  it("does not re-queue Case Tracker disbursements already recorded as done", () => {
+    const done = deliverable({
+      id: "d-disb",
+      deliverableType: "disbursement",
+      workflowStatus: "done",
+      completedAt: "2026-11-12T18:00:00.000Z",
+      completionSource: "system",
+    });
+    const record = {
+      shared: { id: "c1", caseNumber: "100", clientName: "Client", attorneyId: "atty", paralegalId: "para" },
+      tracker: {
+        caseStage: "Disbursed",
+        result: { settlementDate: null, disburseDate: "2026-11-12" },
+        disbursements: [
+          { disburseDate: "2026-11-12" },
+          { disburseDate: "2026-11-12" },
+        ],
+        closedAt: null,
+        detectedStageSignals: [],
+      },
+    } as unknown as CaseRecord;
+
+    const { autoCompletes, candidates } = buildAutoProgress({
+      role: "attorney",
+      personId: "atty",
+      weekStart: "2026-11-10",
+      records: [record],
+      deliverables: [done],
+      commitments: [],
+      eventsByCaseId: {},
+    });
+
+    assert.equal(autoCompletes.length, 0);
+    assert.equal(candidates.filter((c) => c.kind === "disbursement").length, 0);
+  });
+
   it("requires verification for past-week docket lit events", () => {
     const event: DocketFlowScheduledEvent = {
       id: "ev1",
