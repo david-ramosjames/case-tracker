@@ -8,11 +8,14 @@ export function PersonSwitcher({
   selectedId,
   basePath,
   label = "Viewing",
+  query,
 }: {
   people: AppUser[];
   selectedId: string | null;
   basePath: string;
   label?: string;
+  /** Extra query params to keep when switching people (e.g. week). */
+  query?: Record<string, string | undefined | null>;
 }) {
   const router = useRouter();
 
@@ -24,8 +27,14 @@ export function PersonSwitcher({
         value={selectedId ?? ""}
         onChange={(e) => {
           const id = e.target.value;
-          const href = id ? `${basePath}?person=${id}` : basePath;
-          router.push(href);
+          const params = new URLSearchParams();
+          for (const [key, value] of Object.entries(query ?? {})) {
+            if (value) params.set(key, value);
+          }
+          if (id) params.set("person", id);
+          else params.delete("person");
+          const qs = params.toString();
+          router.push(qs ? `${basePath}?${qs}` : basePath);
         }}
       >
         {people.map((person) => (

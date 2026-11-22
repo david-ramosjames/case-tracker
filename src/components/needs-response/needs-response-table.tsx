@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { HeaderMultiFilter } from "@/components/ui/header-filter";
 import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { needsResponseScoreboardSeeds } from "@/lib/needs-response/scoreboard";
 import { reasonCodeLabel, type NeedsResponseRow } from "@/lib/needs-response/types";
+import { type AppUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const compactHead = "h-8 px-2";
@@ -59,9 +61,12 @@ function channelBadge(channel: NeedsResponseRow["channel"]) {
 export function NeedsResponseView({
   rows,
   scoreboardAttorneyIds,
+  scoreboardUsers = [],
 }: {
   rows: NeedsResponseRow[];
   scoreboardAttorneyIds: string[] | null;
+  /** Used to seed allowlisted attorneys (e.g. Laura) even at zero open items. */
+  scoreboardUsers?: AppUser[];
 }) {
   const [query, setQuery] = useState("");
   const [attorneys, setAttorneys] = useState<string[]>([]);
@@ -74,8 +79,13 @@ export function NeedsResponseView({
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const scoreboard = useMemo(
-    () => needsResponseAttorneyScoreboard(localRows, scoreboardAttorneyIds),
-    [localRows, scoreboardAttorneyIds],
+    () =>
+      needsResponseAttorneyScoreboard(
+        localRows,
+        scoreboardAttorneyIds,
+        needsResponseScoreboardSeeds(scoreboardUsers),
+      ),
+    [localRows, scoreboardAttorneyIds, scoreboardUsers],
   );
 
   const attorneyOptions = useMemo(
@@ -404,13 +414,22 @@ function SortableHead({
   );
 }
 
-function needsResponseAttorneyScoreboard(rows: NeedsResponseRow[], allowlist: string[] | null) {
+function needsResponseAttorneyScoreboard(
+  rows: NeedsResponseRow[],
+  allowlist: string[] | null,
+  seeds: Array<{ id: string; name: string }> = [],
+) {
   const allowed = allowlist ? new Set(allowlist) : null;
   const now = Date.now();
   const byAttorney = new Map<
     string,
     { name: string; open: number; over24h: number; sms: number }
   >();
+
+  for (const seed of seeds) {
+    if (allowed && !allowed.has(seed.id)) continue;
+    byAttorney.set(seed.id, { name: seed.name, open: 0, over24h: 0, sms: 0 });
+  }
 
   for (const row of rows) {
     const attorneyId = row.attorneyId?.trim() || `name:${row.attorneyName?.trim() || "Unassigned"}`;

@@ -31,12 +31,12 @@ function overallGoalStatus(overall: number | null): GoalStatus {
 }
 
 function groupRows(rows: ScoreMetricRow[]) {
-  const groups: Array<{ name: string; weightLabel?: string; rows: ScoreMetricRow[] }> = [];
+  const groups: Array<{ name: string; rows: ScoreMetricRow[] }> = [];
   for (const row of rows) {
     const name = row.group ?? "";
     const last = groups[groups.length - 1];
     if (!last || last.name !== name) {
-      groups.push({ name, weightLabel: row.groupWeightLabel, rows: [row] });
+      groups.push({ name, rows: [row] });
     } else {
       last.rows.push(row);
     }
@@ -71,16 +71,9 @@ function ScoreTable({ card, valueLabel }: { card: PersonWeekScorecard; valueLabe
                   className="border-t-2 border-slate-200 bg-slate-50 hover:bg-slate-50"
                 >
                   <TableCell colSpan={3} className="py-2">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-700">
-                        {group.name}
-                      </span>
-                      {group.weightLabel ? (
-                        <span className="text-[11px] font-medium tabular-nums text-slate-500">
-                          Weight {group.weightLabel}
-                        </span>
-                      ) : null}
-                    </div>
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-700">
+                      {group.name}
+                    </span>
                   </TableCell>
                 </TableRow>
               ) : null,

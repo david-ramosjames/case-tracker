@@ -25,16 +25,24 @@ import { type AppUser } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
+function parseWeekParam(raw: string | string[] | undefined): string | null {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  return value;
+}
+
 export default async function PerformanceParalegalsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ person?: string }>;
+  searchParams?: Promise<{ person?: string; week?: string | string[] }>;
 }) {
   const sessionUser = await requireSessionUser();
   const params = searchParams ? await searchParams : {};
   const { records, users } = await loadViewerCaseBundle();
   const contact = findContactForSession(users, sessionUser);
-  const weekStart = weekStartMondayCt();
+  const currentWeekStart = weekStartMondayCt();
+  const requested = parseWeekParam(params.week);
+  const weekStart = requested && requested <= currentWeekStart ? requested : currentWeekStart;
   const lastWeekStart = shiftWeekStart(weekStart, -1);
   const trendSince = shiftWeekStart(weekStart, -13);
   const canBrowsePeople = canBrowsePerformancePeople(sessionUser.role);
@@ -137,13 +145,15 @@ export default async function PerformanceParalegalsPage({
 
   return (
     <MyWorkView
-      key={selectedPerson?.id ?? "none"}
+      key={`${selectedPerson?.id ?? "none"}:${weekStart}`}
       mode="paralegal"
       panel="board"
       initialDeliverables={deliverables}
       initialCommitments={commitments}
       weekStart={weekStart}
       lastWeekStart={lastWeekStart}
+      currentWeekStart={currentWeekStart}
+      showWeekToggle
       selectedPerson={selectedPerson}
       viewerContactId={contact?.id ?? null}
       canBrowsePeople={canBrowsePeople}

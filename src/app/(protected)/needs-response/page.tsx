@@ -4,6 +4,7 @@ import { caseRequiresOngoingUpdates } from "@/lib/case-status";
 import { cleanCaseNumber } from "@/lib/csv/parse";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
 import { listOpenNeedsResponse } from "@/lib/needs-response/repository";
+import { needsResponseScoreboardAttorneyIds } from "@/lib/needs-response/scoreboard";
 import { attachQuoRouterSlackPosts } from "@/lib/needs-response/slack-post";
 import { getQuoClientSmsUrl, getQuoContactUrl } from "@/lib/quo/links";
 import { loadSlackChannelMapByCaseNumber } from "@/lib/slack/channels";
@@ -87,7 +88,14 @@ export default async function NeedsResponsePage() {
           call (2-minute rule), or someone marks Resolved. The morning email only lists newly detected items.
         </p>
       </div>
-      <NeedsResponseView rows={rowsWithPosts} scoreboardAttorneyIds={settings.contactScoreboardAttorneyIds} />
+      <NeedsResponseView
+        rows={rowsWithPosts}
+        scoreboardAttorneyIds={needsResponseScoreboardAttorneyIds(
+          settings.contactScoreboardAttorneyIds,
+          users,
+        )}
+        scoreboardUsers={users}
+      />
     </div>
   );
 }

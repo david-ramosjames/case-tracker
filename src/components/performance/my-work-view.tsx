@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   ATTORNEY_IDENTIFY_CATEGORIES,
@@ -39,7 +40,13 @@ import {
   type PerformanceDeliverableType,
 } from "@/lib/performance/types";
 import { daysBetweenYmd } from "@/lib/performance/pacing";
-import { asYmdPrefix, chicagoTodayYmd, weekEndFromStart } from "@/lib/performance/weeks";
+import {
+  asYmdPrefix,
+  chicagoTodayYmd,
+  formatWeekRangeLabel,
+  shiftWeekStart,
+  weekEndFromStart,
+} from "@/lib/performance/weeks";
 import { type AppUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -71,6 +78,8 @@ type Props = {
   initialCommitments: PerformanceCommitment[];
   weekStart: string;
   lastWeekStart: string;
+  /** Current Monday in CT — caps the week toggle (no future weeks). */
+  currentWeekStart?: string;
   selectedPerson: AppUser | null;
   viewerContactId: string | null;
   canBrowsePeople: boolean;
@@ -82,6 +91,8 @@ type Props = {
   scorecard?: PersonScorecardBundle | null;
   /** Attorney Output board: DF lit events + settlements (overrides default filters). */
   boardBuckets?: AttorneyBoardBuckets | null;
+  /** Show ← / → week navigation (paralegal board / identify). */
+  showWeekToggle?: boolean;
 };
 
 type CreateDestination = "backlog" | "this_week" | "last_week";
@@ -163,6 +174,7 @@ export function MyWorkView({
   initialCommitments,
   weekStart,
   lastWeekStart,
+  currentWeekStart,
   selectedPerson,
   viewerContactId,
   canBrowsePeople,
@@ -173,12 +185,59 @@ export function MyWorkView({
   personSwitcherLabel,
   scorecard = null,
   boardBuckets = null,
+  showWeekToggle = false,
 }: Props) {
   const router = useRouter();
   const isAttorney = mode === "attorney";
   const switcherPath = basePath ?? (isAttorney ? "/performance/attorney" : "/performance/my-work");
+  const weekCap = currentWeekStart ?? weekStart;
+  const isCurrentWeek = weekStart >= weekCap;
   const switcherLabel =
     personSwitcherLabel ?? (isAttorney ? "Attorney" : "Paralegal");
+
+  function boardHref(nextWeek: string, personId?: string | null) {
+    const params = new URLSearchParams();
+    const person = personId === undefined ? selectedPerson?.id : personId;
+    if (person && canBrowsePeople) params.set("person", person);
+    if (nextWeek) params.set("week", nextWeek);
+    const qs = params.toString();
+    return qs ? `${switcherPath}?${qs}` : switcherPath;
+  }
+
+  function goWeek(next: string) {
+    router.push(boardHref(next));
+  }
+
+  const weekNav = showWeekToggle ? (
+    <div className="flex flex-wrap items-center gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        aria-label="Previous week"
+        onClick={() => goWeek(shiftWeekStart(weekStart, -1))}
+      >
+        ←
+      </Button>
+      <div className="min-w-[11rem] text-center">
+        <div className="text-sm font-semibold text-navy-950">{formatWeekRangeLabel(weekStart)}</div>
+        <div className="text-xs text-muted-foreground">
+          Week of {weekStart}
+          {isCurrentWeek ? " · Current week" : ""}
+        </div>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        aria-label="Next week"
+        disabled={isCurrentWeek}
+        onClick={() => goWeek(shiftWeekStart(weekStart, 1))}
+      >
+        →
+      </Button>
+    </div>
+  ) : null;
   const [deliverables, setDeliverables] = useState(initialDeliverables);
   const [commitments, setCommitments] = useState(initialCommitments);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -644,7 +703,9 @@ export function MyWorkView({
         case "started": {
           const startYmd = deliverableStartYmd(d);
           const ageDays = daysSinceStarted(d);
-          return `${ageDays ?? ""} ${startYmd ?? ""}`.trim();
+          if (ageDays == null && !startYmd) return "";
+          if (ageDays == null) return startYmd ?? "";
+          return startYmd ? `${ageDays}d · ${startYmd}` : `${ageDays}d`;
         }
         case "status":
           return statusLabel(d, mode);
@@ -673,10 +734,36 @@ export function MyWorkView({
       }));
     }
 
+    const filterOptions: Partial<Record<BoardColKey, string[]>> = {};
+    {
+      const keys: BoardColKey[] = [
+        "paralegal",
+        "attorney",
+        "category",
+        "type",
+        "subtype",
+        "caseNumber",
+        "client",
+        "started",
+        "status",
+        "notes",
+      ];
+      for (const key of keys) {
+        const values = new Set<string>();
+        for (const d of rows ?? []) {
+          const raw = cellValue(d, key).trim();
+          if (raw) values.add(raw);
+        }
+        filterOptions[key] = [...values].sort((a, b) =>
+          a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }),
+        );
+      }
+    }
+
     const filtered = (rows ?? []).filter((d) =>
       (Object.entries(filters) as Array<[BoardColKey, string | undefined]>).every(([key, value]) => {
         if (!value?.trim()) return true;
-        return cellValue(d, key).toLowerCase().includes(value.trim().toLowerCase());
+        return cellValue(d, key).trim() === value.trim();
       }),
     );
 
@@ -709,6 +796,8 @@ export function MyWorkView({
     }) {
       const active = sort?.key === col;
       const Icon = !active ? ArrowUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
+      const options = filterOptions[col] ?? [];
+      const selected = filters[col] ?? "";
       return (
         <TableHead className={className}>
           <button
@@ -719,13 +808,29 @@ export function MyWorkView({
             {label}
             <Icon className="h-3 w-3 opacity-60" aria-hidden />
           </button>
-          <Input
-            className="mt-1 h-7 text-xs font-normal normal-case tracking-normal"
-            value={filters[col] ?? ""}
-            placeholder="Filter…"
-            onChange={(e) => setFilter(col, e.target.value)}
-            onClick={(e) => e.stopPropagation()}
-          />
+          <div className="relative mt-1">
+            <Select
+              className={cn(
+                "h-7 w-full appearance-none truncate pr-6 text-xs font-normal normal-case tracking-normal",
+                !selected && "text-muted-foreground",
+              )}
+              value={selected}
+              onChange={(e) => setFilter(col, e.target.value)}
+              onClick={(e) => e.stopPropagation()}
+              aria-label={`Filter ${label}`}
+            >
+              <option value="">All</option>
+              {options.map((option) => (
+                <option key={option} value={option}>
+                  {option.length > 48 ? `${option.slice(0, 45)}…` : option}
+                </option>
+              ))}
+            </Select>
+            <ChevronDown
+              className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500"
+              aria-hidden
+            />
+          </div>
         </TableHead>
       );
     }
@@ -1105,14 +1210,13 @@ export function MyWorkView({
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold text-navy-950">
             {selectedPerson?.name ?? (isAttorney ? "Attorney" : "Paralegal")}
             {viewerContactId && selectedPerson?.id === viewerContactId ? " (you)" : ""}
           </h2>
           <p className="text-sm text-muted-foreground">
-            Week of {weekStart} ·{" "}
             {panel === "identify"
               ? isAttorney
                 ? "attorney identify"
@@ -1122,14 +1226,18 @@ export function MyWorkView({
                 : "paralegal board"}
           </p>
         </div>
-        {canBrowsePeople ? (
-          <PersonSwitcher
-            people={people}
-            selectedId={selectedPerson?.id ?? null}
-            basePath={switcherPath}
-            label={switcherLabel}
-          />
-        ) : null}
+        <div className="flex flex-wrap items-center gap-3">
+          {weekNav}
+          {canBrowsePeople ? (
+            <PersonSwitcher
+              people={people}
+              selectedId={selectedPerson?.id ?? null}
+              basePath={switcherPath}
+              label={switcherLabel}
+              query={{ week: weekStart }}
+            />
+          ) : null}
+        </div>
       </div>
 
       {panel === "identify" ? (
@@ -1163,28 +1271,31 @@ export function MyWorkView({
             />
           ) : null}
 
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground">Columns:</span>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 px-2 text-xs"
-              onClick={() => setShowTypeCol((v) => !v)}
-            >
-              {showTypeCol ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-              Type {showTypeCol ? "(shown)" : "(hidden)"}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-7 gap-1 px-2 text-xs"
-              onClick={() => setShowSubtypeCol((v) => !v)}
-            >
-              {showSubtypeCol ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-              Subtype {showSubtypeCol ? "(shown)" : "(hidden)"}
-            </Button>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-muted-foreground">Columns:</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1 px-2 text-xs"
+                onClick={() => setShowTypeCol((v) => !v)}
+              >
+                {showTypeCol ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                Type {showTypeCol ? "(shown)" : "(hidden)"}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1 px-2 text-xs"
+                onClick={() => setShowSubtypeCol((v) => !v)}
+              >
+                {showSubtypeCol ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                Subtype {showSubtypeCol ? "(shown)" : "(hidden)"}
+              </Button>
+            </div>
+            {weekNav}
           </div>
 
           <Card>
@@ -1192,10 +1303,10 @@ export function MyWorkView({
               <CardTitle>Finished last week</CardTitle>
               <CardDescription>
                 {boardBuckets && isAttorney
-                  ? `Week of ${lastWeekStart} — shared completed work, plus verified lit events and settlements (attorney-only).`
+                  ? `Week of ${lastWeekStart} (${formatWeekRangeLabel(lastWeekStart)}) — shared completed work, plus verified lit events and settlements (attorney-only).`
                   : boardBuckets
-                    ? `Week of ${lastWeekStart} — completed work, plus lit events scheduled in DocketFlow last week (attendance events only; any event date).`
-                    : `Week of ${lastWeekStart} — bring this list to the Monday 9:30 check. Pair totals roll up on Team.`}
+                    ? `Week of ${lastWeekStart} (${formatWeekRangeLabel(lastWeekStart)}) — completed work, plus lit events scheduled in DocketFlow last week (attendance events only; any event date).`
+                    : `Week of ${lastWeekStart} (${formatWeekRangeLabel(lastWeekStart)}) — bring this list to the Monday 9:30 check. Pair totals roll up on Team.`}
               </CardDescription>
             </CardHeader>
             <CardContent className="overflow-x-auto">{renderWorkTable(finishedLastWeek, "finished")}</CardContent>
