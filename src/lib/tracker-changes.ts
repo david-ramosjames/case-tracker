@@ -60,6 +60,8 @@ const RESULT_FIELD_LABELS: Record<keyof SettlementResult, string> = {
   checkDisbursedAt: "Check disbursed",
   disburseDate: "Disburse date",
   resultQuarter: "Result quarter",
+  disbursementPlan: "Disbursement plan",
+  disbursementStatusNote: "Disbursement status",
   financialBackfillLocked: "Financial backfill locked",
 };
 

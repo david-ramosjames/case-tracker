@@ -485,7 +485,17 @@ export function applyDerivedWorkflowFromDisburseDate<T extends SettlementResult>
 }
 
 export function applyDerivedResultFields<T extends SettlementResult>(result: T): T {
-  return applyDerivedWorkflowFromDisburseDate(applyDerivedResultQuarter(result));
+  const withPlan = {
+    ...result,
+    disbursementPlan:
+      result.disbursementPlan === "This Week" ||
+      result.disbursementPlan === "Next Week" ||
+      result.disbursementPlan === "2+ Weeks"
+        ? result.disbursementPlan
+        : ("2+ Weeks" as const),
+    disbursementStatusNote: result.disbursementStatusNote ?? null,
+  };
+  return applyDerivedWorkflowFromDisburseDate(applyDerivedResultQuarter(withPlan));
 }
 
 export type ApplyDerivedSettlementResultOptions = {

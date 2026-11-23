@@ -1,7 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ArrowUpDown, CheckCircle2, Eye, Loader2 } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Eye,
+  Loader2,
+} from "lucide-react";
 import { CaseCompletionCell } from "@/components/cases/case-completion-cell";
 import { CaseNumberLink } from "@/components/cases/case-number-link";
 import { deriveCaseStatusFromTracker } from "@/lib/case-status";
@@ -29,7 +38,20 @@ import {
   getCommissionYearResultAmounts,
   isResultsTabCase,
 } from "@/lib/results-commission-year";
-import { getCaseTotalAmounts, recordHasMultipleDisbursementParties } from "@/lib/results-period";
+import { daysBetweenYmd } from "@/lib/performance/pacing";
+import { asYmdPrefix, chicagoTodayYmd } from "@/lib/performance/weeks";
+import {
+  getCaseTotalAmounts,
+  recordHasMultipleDisbursementParties,
+  recordIsFullySettled,
+} from "@/lib/results-period";
+import {
+  DISBURSEMENT_PLAN_OPTIONS,
+  daysSinceSettlementClass,
+  disbursementPlanClass,
+  coerceDisbursementPlan,
+  workflowSelectClass,
+} from "@/lib/results-workflow-ui";
 import {
   type AppUser,
   type AttorneyGoal,
@@ -39,6 +61,7 @@ import {
   type CheckStatus,
   type ClosingStatus,
   type DisbursedStatus,
+  type DisbursementPlan,
   type ReductionsStatus,
   type ReleaseStatus,
   type SettlementResult,
@@ -48,9 +71,23 @@ import { cn, formatCurrency } from "@/lib/utils";
 import { createSyncedHorizontalScroll } from "@/lib/ui/synced-horizontal-scroll";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type SortKey = "completion" | "caseNumber" | "clientName" | "settlementDate" | "settlementAmount" | "attorneyFees";
+type SortKey =
+  | "completion"
+  | "caseNumber"
+  | "clientName"
+  | "settlementDate"
+  | "daysSinceSettlement"
+  | "settlementAmount"
+  | "attorneyFees";
 type SortDirection = "asc" | "desc";
 type RowSaveStatus = "saving" | "saved";
+type FullySettledFilter = "all" | "yes" | "no";
+
+function daysSinceSettlement(record: CaseRecord, asOfYmd = chicagoTodayYmd()) {
+  const settlementYmd = asYmdPrefix(record.tracker.result.settlementDate);
+  if (!settlementYmd) return null;
+  return Math.max(0, daysBetweenYmd(settlementYmd, asOfYmd));
+}
 
 type ResultPersistPatch = {
   result: SettlementResult;
@@ -121,13 +158,19 @@ export function ResultsTable({
   const [disbursed, setDisbursed] = useState(initialDisbursed);
   const [reductions, setReductions] = useState("all");
   const [quarter, setQuarter] = useState("all");
-  const [sortKey, setSortKey] = useState<SortKey>("caseNumber");
+  const [fullySettled, setFullySettled] = useState<FullySettledFilter>("yes");
+  const [sortKey, setSortKey] = useState<SortKey>("daysSinceSettlement");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+  const [showSettlementDate, setShowSettlementDate] = useState(false);
+  const [showResultQuarter, setShowResultQuarter] = useState(false);
+  const [showDisburseDate, setShowDisburseDate] = useState(false);
+  const [showActions, setShowActions] = useState(false);
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
-  const [scrollWidth, setScrollWidth] = useState(2380);
+  const [scrollWidth, setScrollWidth] = useState(2800);
   const syncScroll = useMemo(() => createSyncedHorizontalScroll(), []);
+  const todayYmd = useMemo(() => chicagoTodayYmd(), []);
 
   useEffect(() => {
     setDisbursed(initialDisbursed);
@@ -145,6 +188,7 @@ export function ResultsTable({
     disbursed,
     reductions,
     quarter,
+    fullySettled !== "yes",
   ].filter((value) => value !== "all" && value !== false).length;
 
   const filteredRecords = useMemo(() => {
@@ -169,6 +213,11 @@ export function ResultsTable({
         if (disbursed !== "all" && result.disbursedStatus !== disbursed && !pinRow) return false;
         if (reductions !== "all" && coerceReductionsStatus(result.reductionsStatus) !== reductions && !pinRow) return false;
         if (quarter !== "all" && result.resultQuarter !== quarter && !pinRow) return false;
+        if (fullySettled !== "all") {
+          const isFull = recordIsFullySettled(record);
+          if (fullySettled === "yes" && !isFull && !pinRow) return false;
+          if (fullySettled === "no" && isFull && !pinRow) return false;
+        }
 
         return true;
       })
@@ -199,6 +248,13 @@ export function ResultsTable({
           return cmp !== 0 ? dir * cmp : tieBreak();
         }
 
+        if (sortKey === "daysSinceSettlement") {
+          const aDays = daysSinceSettlement(a, todayYmd) ?? -1;
+          const bDays = daysSinceSettlement(b, todayYmd) ?? -1;
+          const cmp = aDays - bDays;
+          return cmp !== 0 ? dir * cmp : tieBreak();
+        }
+
         if (sortKey === "settlementAmount") {
           const aValue = getCommissionYearResultAmounts(a, goals).settlementAmount;
           const bValue = getCommissionYearResultAmounts(b, goals).settlementAmount;
@@ -211,7 +267,25 @@ export function ResultsTable({
         const cmp = aFees - bFees;
         return cmp !== 0 ? dir * cmp : tieBreak();
       });
-  }, [attorneyIds, caseStatus, check, closing, disbursed, goals, quarter, reductions, release, rowSaveStatus, search, settings, sortDirection, sortKey, workingRecords]);
+  }, [
+    attorneyIds,
+    caseStatus,
+    check,
+    closing,
+    disbursed,
+    fullySettled,
+    goals,
+    quarter,
+    reductions,
+    release,
+    rowSaveStatus,
+    search,
+    settings,
+    sortDirection,
+    sortKey,
+    todayYmd,
+    workingRecords,
+  ]);
 
   useEffect(() => {
     recordsRef.current = workingRecords;
@@ -238,7 +312,7 @@ export function ResultsTable({
 
   useEffect(() => {
     function updateScrollWidth() {
-      setScrollWidth(tableRef.current?.scrollWidth ?? 2380);
+      setScrollWidth(tableRef.current?.scrollWidth ?? 2800);
     }
 
     updateScrollWidth();
@@ -255,6 +329,7 @@ export function ResultsTable({
     setDisbursed("all");
     setReductions("all");
     setQuarter("all");
+    setFullySettled("yes");
   }
 
   function requestSort(nextKey: SortKey) {
@@ -440,9 +515,28 @@ export function ResultsTable({
             Showing {filteredRecords.length} of {workingRecords.length} settled cases. Use column headers to filter; click labels to sort.
           </p>
         </div>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">Columns:</span>
+          <ColumnToggle
+            label="Settlement date"
+            shown={showSettlementDate}
+            onToggle={() => setShowSettlementDate((v) => !v)}
+          />
+          <ColumnToggle
+            label="Result quarter"
+            shown={showResultQuarter}
+            onToggle={() => setShowResultQuarter((v) => !v)}
+          />
+          <ColumnToggle
+            label="Disburse date"
+            shown={showDisburseDate}
+            onToggle={() => setShowDisburseDate((v) => !v)}
+          />
+          <ColumnToggle label="Actions" shown={showActions} onToggle={() => setShowActions((v) => !v)} />
+        </div>
         {saveMessage ? <p className="mt-3 text-sm font-medium text-pink-600">{saveMessage}</p> : null}
         <p className="mt-3 text-xs text-muted-foreground">
-          Changes save automatically. A green checkmark in Actions confirms the server accepted the update.
+          Changes save automatically. Days since settlement: green &lt;23, orange 23–30, red &gt;30.
         </p>
 
         <div className="mt-4 rounded-lg border bg-white">
@@ -462,13 +556,13 @@ export function ResultsTable({
               className="table-main-scroll max-h-[calc(100vh-23rem)] min-h-[28rem]"
               onScroll={(event) => syncScroll(event, topScrollRef)}
             >
-          <Table ref={tableRef} className="min-w-[2380px] table-fixed">
+          <Table ref={tableRef} className="min-w-[2800px] table-fixed">
             <TableHeader className="sticky top-0 z-20 bg-slate-50 shadow-sm">
               <TableRow>
                 <SortableHead label="% Complete" sortKey="completion" active={sortKey} direction={sortDirection} onSort={requestSort} className="sticky left-0 z-40 w-28 bg-slate-50 shadow-[1px_0_0_0_hsl(var(--border))]" />
                 <TableHead className="sticky left-28 z-40 w-24 bg-slate-50 align-top shadow-[1px_0_0_0_hsl(var(--border))]">
                   <HeaderFilter
-                    label="Status"
+                    label="Open/Closed"
                     value={caseStatus}
                     onChange={(value) => setCaseStatus(value as "all" | CaseStatus)}
                     options={[
@@ -493,7 +587,29 @@ export function ResultsTable({
                   )}
                 </TableHead>
                 <TableHead className="w-36">Paralegal</TableHead>
-                <SortableHead label="Settlement Date" sortKey="settlementDate" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-48" />
+                {showSettlementDate ? (
+                  <SortableHead label="Settlement Date" sortKey="settlementDate" active={sortKey} direction={sortDirection} onSort={requestSort} className="w-48" />
+                ) : null}
+                <SortableHead
+                  label="Days since settlement"
+                  sortKey="daysSinceSettlement"
+                  active={sortKey}
+                  direction={sortDirection}
+                  onSort={requestSort}
+                  className="w-28"
+                />
+                <TableHead className="w-28 align-top">
+                  <HeaderFilter
+                    label="Fully settled"
+                    value={fullySettled}
+                    onChange={(value) => setFullySettled(value as FullySettledFilter)}
+                    options={[
+                      { value: "all", label: "All" },
+                      { value: "yes", label: "Yes" },
+                      { value: "no", label: "No (partial)" },
+                    ]}
+                  />
+                </TableHead>
                 <SortableHead
                   label="Gross Settlement $"
                   sortKey="settlementAmount"
@@ -511,7 +627,7 @@ export function ResultsTable({
                   onSort={requestSort}
                   className="w-36"
                 />
-                <TableHead className="w-48 align-top">
+                <TableHead className="w-52 align-top">
                   <HeaderFilter
                     label="Release"
                     value={release}
@@ -522,7 +638,7 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="w-36 align-top">
+                <TableHead className="w-48 align-top">
                   <HeaderFilter
                     label="Reductions"
                     value={reductions}
@@ -533,7 +649,7 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="w-32 align-top">
+                <TableHead className="w-40 align-top">
                   <HeaderFilter
                     label="Check"
                     value={check}
@@ -544,7 +660,7 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="w-32 align-top">
+                <TableHead className="w-40 align-top">
                   <HeaderFilter
                     label="Closing"
                     value={closing}
@@ -555,6 +671,7 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
+                <TableHead className="w-36">Plan</TableHead>
                 <TableHead className="w-32 align-top">
                   <HeaderFilter
                     label="Disbursed"
@@ -566,19 +683,22 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="w-36 align-top">
-                  <HeaderFilter
-                    label="Result quarter"
-                    value={quarter}
-                    onChange={setQuarter}
-                    options={[
-                      { value: "all", label: "All" },
-                      ...quarters.map((item) => ({ value: item ?? "", label: item ?? "" })),
-                    ]}
-                  />
-                </TableHead>
-                <TableHead className="w-48">Disburse Date</TableHead>
-                <TableHead className="w-28">Actions</TableHead>
+                {showResultQuarter ? (
+                  <TableHead className="w-36 align-top">
+                    <HeaderFilter
+                      label="Result quarter"
+                      value={quarter}
+                      onChange={setQuarter}
+                      options={[
+                        { value: "all", label: "All" },
+                        ...quarters.map((item) => ({ value: item ?? "", label: item ?? "" })),
+                      ]}
+                    />
+                  </TableHead>
+                ) : null}
+                {showDisburseDate ? <TableHead className="w-48">Disburse Date</TableHead> : null}
+                <TableHead className="w-56">Status</TableHead>
+                {showActions ? <TableHead className="w-28">Actions</TableHead> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -594,6 +714,10 @@ export function ResultsTable({
                   commissionAmounts.settlementAmount !== caseTotalSettlement ||
                   commissionAmounts.attorneyFees !== caseTotalFees;
                 const isMultiDisbursement = recordHasMultipleDisbursementParties(record);
+                const fullySettledValue = recordIsFullySettled(record);
+                const days = daysSinceSettlement(record, todayYmd);
+                const plan = coerceDisbursementPlan(result.disbursementPlan);
+                const reductionsValue = coerceReductionsStatus(result.reductionsStatus);
 
                 return (
                   <TableRow key={record.shared.id}>
@@ -618,8 +742,18 @@ export function ResultsTable({
                     </TableCell>
                     <TableCell className="sticky left-[31rem] z-10 w-40 bg-white font-medium text-navy-950 shadow-[1px_0_0_0_hsl(var(--border))]">{record.attorney.name}</TableCell>
                     <TableCell className="w-36">{record.paralegal.name}</TableCell>
-                    <TableCell className="w-48">
-                      <Input className="h-9 w-full text-xs" type="date" value={toDateInput(result.settlementDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, settlementDate: fromDateInput(event.target.value) }))} />
+                    {showSettlementDate ? (
+                      <TableCell className="w-48">
+                        <Input className="h-9 w-full text-xs" type="date" value={toDateInput(result.settlementDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, settlementDate: fromDateInput(event.target.value) }))} />
+                      </TableCell>
+                    ) : null}
+                    <TableCell className={cn("w-28 tabular-nums", daysSinceSettlementClass(days))}>
+                      {days == null ? "—" : days}
+                    </TableCell>
+                    <TableCell className="w-28">
+                      <span title={fullySettledValue ? "Single-party settlement" : "Multi-party — not fully settled"}>
+                        {fullySettledValue ? "Yes" : "No"}
+                      </span>
                     </TableCell>
                     <TableCell className="w-40">
                       <div className="space-y-0.5">
@@ -652,14 +786,23 @@ export function ResultsTable({
                         ) : null}
                       </div>
                     </TableCell>
-                    <TableCell className="w-48">
-                      <InlineSelect value={result.releaseStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "releaseStatus", value as ReleaseStatus)}>
-                        {RELEASE_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                    <TableCell className="w-52">
+                      <InlineSelect
+                        value={result.releaseStatus}
+                        toneClass={workflowSelectClass(RELEASE_STATUS_OPTIONS, result.releaseStatus)}
+                        onChange={(value) => updateResultWorkflow(record.shared.id, "releaseStatus", value as ReleaseStatus)}
+                      >
+                        {RELEASE_STATUS_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
                       </InlineSelect>
                     </TableCell>
-                    <TableCell className="w-36">
+                    <TableCell className="w-48">
                       <InlineSelect
-                        value={coerceReductionsStatus(result.reductionsStatus)}
+                        value={reductionsValue}
+                        toneClass={workflowSelectClass(REDUCTIONS_MANUAL_STATUS_OPTIONS, reductionsValue)}
                         onChange={(value) =>
                           updateResult(record.shared.id, (current) => ({
                             ...current,
@@ -674,53 +817,114 @@ export function ResultsTable({
                         ))}
                       </InlineSelect>
                     </TableCell>
-                    <TableCell className="w-32">
-                      <InlineSelect value={result.checkStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "checkStatus", value as CheckStatus)}>
-                        {CHECK_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                    <TableCell className="w-40">
+                      <InlineSelect
+                        value={result.checkStatus}
+                        toneClass={workflowSelectClass(CHECK_STATUS_OPTIONS, result.checkStatus)}
+                        onChange={(value) => updateResultWorkflow(record.shared.id, "checkStatus", value as CheckStatus)}
+                      >
+                        {CHECK_STATUS_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </InlineSelect>
+                    </TableCell>
+                    <TableCell className="w-40">
+                      <InlineSelect
+                        value={result.closingStatus}
+                        toneClass={workflowSelectClass(CLOSING_STATUS_OPTIONS, result.closingStatus)}
+                        onChange={(value) => updateResultWorkflow(record.shared.id, "closingStatus", value as ClosingStatus)}
+                      >
+                        {CLOSING_STATUS_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </InlineSelect>
+                    </TableCell>
+                    <TableCell className="w-36">
+                      <InlineSelect
+                        value={plan}
+                        toneClass={disbursementPlanClass(plan)}
+                        onChange={(value) =>
+                          updateResult(record.shared.id, (current) => ({
+                            ...current,
+                            disbursementPlan: value as DisbursementPlan,
+                          }))
+                        }
+                      >
+                        {DISBURSEMENT_PLAN_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
                       </InlineSelect>
                     </TableCell>
                     <TableCell className="w-32">
-                      <InlineSelect value={result.closingStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "closingStatus", value as ClosingStatus)}>
-                        {CLOSING_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
+                      <InlineSelect
+                        value={result.disbursedStatus}
+                        toneClass={workflowSelectClass(DISBURSED_STATUS_OPTIONS, result.disbursedStatus)}
+                        onChange={(value) => updateResultWorkflow(record.shared.id, "disbursedStatus", value as DisbursedStatus)}
+                      >
+                        {DISBURSED_STATUS_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
                       </InlineSelect>
                     </TableCell>
-                    <TableCell className="w-32">
-                      <InlineSelect value={result.disbursedStatus} onChange={(value) => updateResultWorkflow(record.shared.id, "disbursedStatus", value as DisbursedStatus)}>
-                        {DISBURSED_STATUS_OPTIONS.map((option) => <option key={option} value={option}>{option}</option>)}
-                      </InlineSelect>
+                    {showResultQuarter ? (
+                      <TableCell className="w-36 whitespace-nowrap text-sm text-muted-foreground">
+                        {result.resultQuarter ?? "—"}
+                      </TableCell>
+                    ) : null}
+                    {showDisburseDate ? (
+                      <TableCell className="w-48">
+                        <Input className="h-9 w-full text-xs" type="date" value={toDateInput(result.disburseDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, disburseDate: fromDateInput(event.target.value) }))} />
+                      </TableCell>
+                    ) : null}
+                    <TableCell className="w-56">
+                      <Input
+                        className="h-9 w-full text-xs"
+                        value={result.disbursementStatusNote ?? ""}
+                        placeholder="Meeting note…"
+                        onChange={(event) =>
+                          updateResult(record.shared.id, (current) => ({
+                            ...current,
+                            disbursementStatusNote: event.target.value,
+                          }))
+                        }
+                      />
                     </TableCell>
-                    <TableCell className="w-36 whitespace-nowrap text-sm text-muted-foreground">
-                      {result.resultQuarter ?? "—"}
-                    </TableCell>
-                    <TableCell className="w-48">
-                      <Input className="h-9 w-full text-xs" type="date" value={toDateInput(result.disburseDate)} onChange={(event) => updateResult(record.shared.id, (current) => ({ ...current, disburseDate: fromDateInput(event.target.value) }))} />
-                    </TableCell>
-                    <TableCell className="w-28">
-                      <div className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2">
-                          {saveStatus === "saving" ? (
-                            <span className="inline-flex w-5 shrink-0 justify-center" title="Saving…">
-                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
-                              <span className="sr-only">Saving</span>
-                            </span>
-                          ) : saveStatus === "saved" ? (
-                            <span className="inline-flex w-5 shrink-0 justify-center" title="Saved">
-                              <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
-                              <span className="sr-only">Saved</span>
-                            </span>
-                          ) : (
-                            <span className="w-5 shrink-0" aria-hidden />
-                          )}
-                          <Button asChild variant="outline" size="sm">
-                            <Link href={`/cases/${record.shared.id}`} target="_blank" rel="noopener noreferrer">
-                              <Eye className="h-4 w-4" />
-                              View
-                            </Link>
-                          </Button>
+                    {showActions ? (
+                      <TableCell className="w-28">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            {saveStatus === "saving" ? (
+                              <span className="inline-flex w-5 shrink-0 justify-center" title="Saving…">
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" aria-hidden />
+                                <span className="sr-only">Saving</span>
+                              </span>
+                            ) : saveStatus === "saved" ? (
+                              <span className="inline-flex w-5 shrink-0 justify-center" title="Saved">
+                                <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden />
+                                <span className="sr-only">Saved</span>
+                              </span>
+                            ) : (
+                              <span className="w-5 shrink-0" aria-hidden />
+                            )}
+                            <Button asChild variant="outline" size="sm">
+                              <Link href={`/cases/${record.shared.id}`} target="_blank" rel="noopener noreferrer">
+                                <Eye className="h-4 w-4" />
+                                View
+                              </Link>
+                            </Button>
+                          </div>
+                          {saveError ? <p className="max-w-32 text-xs font-medium text-pink-600">{saveError}</p> : null}
                         </div>
-                        {saveError ? <p className="max-w-32 text-xs font-medium text-pink-600">{saveError}</p> : null}
-                      </div>
-                    </TableCell>
+                      </TableCell>
+                    ) : null}
                   </TableRow>
                 );
               })}
@@ -772,11 +976,43 @@ function SortableHead({
   );
 }
 
-function InlineSelect({ value, onChange, children }: { value: string; onChange: (value: string) => void; children: React.ReactNode }) {
+function InlineSelect({
+  value,
+  onChange,
+  children,
+  toneClass,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  children: React.ReactNode;
+  toneClass?: string;
+}) {
   return (
-    <Select className="h-9 w-full min-w-0 text-xs" value={value} onChange={(event) => onChange(event.target.value)}>
+    <Select
+      className={cn("h-9 w-full min-w-0 truncate text-xs font-medium", toneClass)}
+      title={value}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    >
       {children}
     </Select>
+  );
+}
+
+function ColumnToggle({
+  label,
+  shown,
+  onToggle,
+}: {
+  label: string;
+  shown: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" onClick={onToggle}>
+      {shown ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+      {label} {shown ? "(shown)" : "(hidden)"}
+    </Button>
   );
 }
 

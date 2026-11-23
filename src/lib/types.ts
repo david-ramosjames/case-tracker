@@ -45,6 +45,8 @@ export type ReductionsStatus =
   | "Reductions Proposed"
   | "Reductions Sent"
   | "Reductions Approved";
+/** Results meeting plan bucket for when disbursement is expected to finish. */
+export type DisbursementPlan = "This Week" | "Next Week" | "2+ Weeks";
 
 export type LitigationEventStatus = "To Schedule" | "Scheduled" | "Complete";
 
@@ -176,6 +178,10 @@ export type SettlementResult = {
   checkDisbursedAt: string | null;
   disburseDate: string | null;
   resultQuarter: string | null;
+  /** Weekly disbursement meeting plan; new settlements default to 2+ Weeks. */
+  disbursementPlan: DisbursementPlan;
+  /** Free-form status note for the Results meeting (also posted to Slack). */
+  disbursementStatusNote: string | null;
   /** When true, amounts/dates came from CSV financial backfill — sheet sync skips this case. */
   financialBackfillLocked?: boolean;
 };

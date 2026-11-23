@@ -327,6 +327,11 @@ export function recordHasMultipleDisbursementParties(record: CaseRecord) {
   return hasMultipleDisbursements(record.tracker);
 }
 
+/** Single-party (or legacy) settlements count as fully settled; multi-party cases do not. */
+export function recordIsFullySettled(record: CaseRecord) {
+  return !recordHasMultipleDisbursementParties(record);
+}
+
 export type OutputAuditRow = {
   caseNumber: string;
   clientName: string;

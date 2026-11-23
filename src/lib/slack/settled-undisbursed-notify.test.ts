@@ -70,7 +70,17 @@ describe("settled undisbursed slack notify", () => {
     assert.match(text, /\*Check:\* Not Issued/);
     assert.match(text, /\*Closing:\* Drafted/);
     assert.match(text, /\*Disbursed:\* No/);
+    assert.match(text, /\*Plan:\* 2\+ Weeks/);
     assert.match(text, /\*Result quarter:\* —/);
     assert.match(text, /results\?disbursed=No/);
+  });
+
+  it("appends free-form status note when present", () => {
+    const withNote = record({});
+    withNote.tracker.result.disbursementStatusNote = "Pending Progressive check";
+    withNote.tracker.result.disbursementPlan = "This Week";
+    const text = buildSettledUndisbursedProgressMessage(withNote, "https://app.example.com");
+    assert.match(text, /\*Plan:\* This Week/);
+    assert.match(text, /\*Status:\* Pending Progressive check/);
   });
 });

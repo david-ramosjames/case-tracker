@@ -53,6 +53,7 @@ import { deriveFeePercentFromSettlement } from "@/lib/fee-percent";
 import { deriveCaseStatusFromTracker, applyOpenSettledTrackerFallback, isCaseFullyDisbursed } from "@/lib/case-status";
 import { EMPTY_LITIGATION_EVENTS } from "@/lib/litigation-events";
 import { mapCaseEventRows, pickNextScheduledEvents } from "@/lib/docketflow/case-events";
+import { coerceDisbursementPlan } from "@/lib/results-workflow-ui";
 import {
   type ActivityLogEntry,
   type AppUser,
@@ -3457,6 +3458,8 @@ async function upsertResultRow(
     check_disbursed_at: normalized.checkDisbursedAt,
     disburse_date: normalized.disburseDate ? toDateOnly(normalized.disburseDate) : null,
     result_quarter: normalized.resultQuarter,
+    disbursement_plan: normalized.disbursementPlan ?? "2+ Weeks",
+    disbursement_status_note: normalized.disbursementStatusNote?.trim() || null,
   };
 
   const lookupFilter = linkedCaseId
@@ -3827,6 +3830,8 @@ function rowToResult(row: ResultRow | null): SettlementResult {
     checkDisbursedAt: toStringOrNull(row?.check_disbursed_at),
     disburseDate,
     resultQuarter: toStringOrNull(row?.result_quarter),
+    disbursementPlan: coerceDisbursementPlan(toStringOrNull(row?.disbursement_plan)),
+    disbursementStatusNote: toStringOrNull(row?.disbursement_status_note),
     financialBackfillLocked: toBoolean(row?.financial_backfill_locked, false),
   });
 }

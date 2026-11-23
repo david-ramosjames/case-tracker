@@ -48,10 +48,14 @@ export function buildSettledUndisbursedProgressMessage(
     `• *Check:* ${coerceCheckStatus(result.checkStatus)}`,
     `• *Closing:* ${coerceClosingStatus(result.closingStatus)}`,
     `• *Disbursed:* ${result.disbursedStatus}`,
+    `• *Plan:* ${result.disbursementPlan ?? "2+ Weeks"}`,
     `• *Result quarter:* ${result.resultQuarter?.trim() || "—"}`,
-    "",
-    `<${caseLink}|Open case> · <${resultsLink}|Results (Disbursed = No)>`,
   );
+  const statusNote = result.disbursementStatusNote?.trim();
+  if (statusNote) {
+    lines.push(`• *Status:* ${statusNote}`);
+  }
+  lines.push("", `<${caseLink}|Open case> · <${resultsLink}|Results (Disbursed = No)>`);
 
   return lines.join("\n");
 }
