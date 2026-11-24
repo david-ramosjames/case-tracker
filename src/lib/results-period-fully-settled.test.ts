@@ -24,9 +24,11 @@ function party(
 }
 
 function record(input: {
-  caseStage: CaseStage;
+  caseStage: CaseStage | "Settlement";
   disbursements?: CaseDisbursement[];
   settlementDate?: string | null;
+  disbursedStatus?: "Yes" | "No";
+  disburseDate?: string | null;
 }): CaseRecord {
   return {
     shared: {
@@ -37,10 +39,12 @@ function record(input: {
       paralegalId: "para",
     },
     tracker: {
-      caseStage: input.caseStage,
+      caseStage: input.caseStage as CaseStage,
       result: {
         settlementDate: input.settlementDate ?? null,
         settlementAmount: null,
+        disbursedStatus: input.disbursedStatus ?? "No",
+        disburseDate: input.disburseDate ?? null,
       },
       disbursements: input.disbursements ?? [],
       expectedDisbursementCount: Math.max(1, (input.disbursements ?? []).length),
@@ -68,6 +72,34 @@ describe("recordIsFullySettled", () => {
               partyLabel: "Jazmine Bradford",
               settlementDate: "2026-11-06",
               pendingRemaining: true,
+            }),
+          ],
+        }),
+      ),
+      true,
+    );
+  });
+
+  it("accepts DB stage label Settlement for fully disbursed multi-party cases (e.g. 1394/980/1289)", () => {
+    assert.equal(
+      recordIsFullySettled(
+        record({
+          caseStage: "Settlement",
+          settlementDate: "2026-02-18",
+          disbursedStatus: "Yes",
+          disburseDate: "2026-06-30",
+          disbursements: [
+            party({
+              id: "p1",
+              partyLabel: "Regina Parker",
+              settlementDate: "2026-02-18",
+              disburseDate: "2026-06-30",
+            }),
+            party({
+              id: "p2",
+              partyLabel: "Regina Parker (1P - Prove Up)",
+              settlementDate: "2026-02-18",
+              disburseDate: "2026-04-21",
             }),
           ],
         }),
