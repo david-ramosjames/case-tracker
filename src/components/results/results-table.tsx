@@ -769,8 +769,8 @@ export function ResultsTable({
                       <span
                         title={
                           fullySettledValue
-                            ? "Full Settlement (sheet column G) is Y — stage Settled"
-                            : "Full Settlement (sheet column G) is not Y — party settlement date alone is not enough"
+                            ? "Every party has a settlement date (disbursement may still be open)"
+                            : "Not every party is settled yet — or Full Settlement (column G) is still N"
                         }
                       >
                         {fullySettledValue ? "Yes" : "No"}

@@ -29,7 +29,9 @@ function record(input: {
   settlementDate?: string | null;
   disbursedStatus?: "Yes" | "No";
   disburseDate?: string | null;
+  expectedDisbursementCount?: number;
 }): CaseRecord {
+  const disbursements = input.disbursements ?? [];
   return {
     shared: {
       id: "case",
@@ -46,15 +48,15 @@ function record(input: {
         disbursedStatus: input.disbursedStatus ?? "No",
         disburseDate: input.disburseDate ?? null,
       },
-      disbursements: input.disbursements ?? [],
-      expectedDisbursementCount: Math.max(1, (input.disbursements ?? []).length),
-      multipleDisbursementsEnabled: (input.disbursements ?? []).length > 1,
+      disbursements,
+      expectedDisbursementCount: input.expectedDisbursementCount ?? Math.max(1, disbursements.length),
+      multipleDisbursementsEnabled: disbursements.length > 1,
     },
   } as CaseRecord;
 }
 
 describe("recordIsFullySettled", () => {
-  it("treats Settled-stage multi-party cases as fully settled even if disbursement is still open", () => {
+  it("treats Settled-stage multi-party cases as fully settled when every party has a settlement date", () => {
     assert.equal(
       recordIsFullySettled(
         record({
@@ -80,7 +82,38 @@ describe("recordIsFullySettled", () => {
     );
   });
 
-  it("accepts DB stage label Settlement for fully disbursed multi-party cases (e.g. 1394/980/1289)", () => {
+  it("flags Settled-stage multi-party as partial when a co-client still lacks a settlement date (e.g. 1345)", () => {
+    assert.equal(
+      recordIsFullySettled(
+        record({
+          caseStage: "Settlement",
+          settlementDate: "2026-03-27",
+          expectedDisbursementCount: 2,
+          disbursements: [
+            party({
+              id: "krystal",
+              partyLabel: "Krystal Garcia",
+              settlementDate: "2026-03-27",
+              disburseDate: "2026-04-08",
+              settlementAmount: 30000,
+              attorneyFees: 10000,
+            }),
+            party({
+              id: "eric",
+              partyLabel: "Eric Cano",
+              settlementDate: null,
+              pendingRemaining: true,
+              settlementAmount: 0,
+              attorneyFees: 0,
+            }),
+          ],
+        }),
+      ),
+      false,
+    );
+  });
+
+  it("accepts fully disbursed multi-party cases with all settlement dates (e.g. 1394/980/1289)", () => {
     assert.equal(
       recordIsFullySettled(
         record({

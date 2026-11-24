@@ -337,20 +337,25 @@ function isSettledCaseStage(stage: string | null | undefined) {
 }
 
 /**
- * Fully settled = settlements sheet column G is Y (case stage Settled), or the
- * case has finished every party settlement + disbursement.
- * A party settlement date alone is not enough (e.g. 899 still Lit / G = N).
- * Multi-party + open disbursement does not make a Settled case partial.
+ * Fully settled = every party/claim has a settlement date.
+ * Settled stage alone is not enough (e.g. 1345: one client settled, co-client still open).
+ * A settlement date without Settled stage is also not enough (e.g. 899 / column G = N).
+ * Open disbursement does not make an all-parties-settled case partial.
  */
 export function recordIsFullySettled(record: CaseRecord) {
-  if (isSettledCaseStage(record.tracker.caseStage)) return true;
+  const tracker = record.tracker;
 
-  // Completed files: all expected parties settled and disbursed (covers stage lag).
-  if (record.tracker.disbursements.length > 0) {
-    return areAllDisbursementPartiesSettled(record.tracker) && areAllDisbursementPartiesDisbursed(record.tracker);
+  if (tracker.disbursements.length > 0) {
+    if (!areAllDisbursementPartiesSettled(tracker)) return false;
+    // All parties settled — require Settled stage (column G) unless already fully disbursed.
+    return isSettledCaseStage(tracker.caseStage) || areAllDisbursementPartiesDisbursed(tracker);
   }
 
-  return isCaseFullyDisbursed(record.tracker.result);
+  if (!isSettledCaseStage(tracker.caseStage) && !isCaseFullyDisbursed(tracker.result)) {
+    return false;
+  }
+  const result = tracker.result;
+  return Boolean(result.settlementDate) || (result.settlementAmount ?? 0) > 0 || isCaseFullyDisbursed(result);
 }
 
 export type OutputAuditRow = {
