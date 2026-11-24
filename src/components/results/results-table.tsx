@@ -766,7 +766,13 @@ export function ResultsTable({
                       {days == null ? "—" : days}
                     </TableCell>
                     <TableCell className="w-28">
-                      <span title={fullySettledValue ? "Single-party settlement" : "Multi-party — not fully settled"}>
+                      <span
+                        title={
+                          fullySettledValue
+                            ? "Full Settlement (sheet column G) is Y — stage Settled"
+                            : "Full Settlement (sheet column G) is not Y — party settlement date alone is not enough"
+                        }
+                      >
                         {fullySettledValue ? "Yes" : "No"}
                       </span>
                     </TableCell>

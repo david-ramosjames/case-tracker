@@ -327,9 +327,13 @@ export function recordHasMultipleDisbursementParties(record: CaseRecord) {
   return hasMultipleDisbursements(record.tracker);
 }
 
-/** Single-party (or legacy) settlements count as fully settled; multi-party cases do not. */
+/**
+ * Fully settled = settlements sheet column G is Y, which syncs case stage to Settled.
+ * A party settlement date alone is not enough (e.g. 899 still Lit / G = N).
+ * Open disbursement does not make a Settled case partial.
+ */
 export function recordIsFullySettled(record: CaseRecord) {
-  return !recordHasMultipleDisbursementParties(record);
+  return record.tracker.caseStage === "Settled";
 }
 
 export type OutputAuditRow = {
