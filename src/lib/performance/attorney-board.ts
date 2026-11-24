@@ -14,6 +14,7 @@ import {
   shiftWeekStart,
   weekEndFromStart,
 } from "@/lib/performance/weeks";
+import { coerceDisbursementPlan } from "@/lib/results-workflow-ui";
 import { type CaseRecord, type DocketFlowScheduledEvent } from "@/lib/types";
 
 const LIT_COMPLETED_TYPES: PerformanceDeliverableType[] = [
@@ -169,6 +170,49 @@ function fromSettlement(input: {
   });
 }
 
+/** Results tab Plan → attorney Output board (This Week = committed, Next Week = in progress). */
+function fromDisbursementPlan(input: {
+  record: CaseRecord;
+  plannedDate: string;
+  workflowStatus: "committed" | "backlog";
+}): PerformanceDeliverable {
+  const iso = `${input.plannedDate}T18:00:00.000Z`;
+  const planLabel = input.workflowStatus === "committed" ? "This Week" : "Next Week";
+  return syntheticBase({
+    id: `disbursement-plan:${input.record.shared.id}`,
+    caseId: input.record.shared.id,
+    caseNumber: input.record.shared.caseNumber,
+    clientName: input.record.shared.clientName,
+    deliverableType: "disbursement",
+    attorneyUserId: input.record.shared.attorneyId,
+    assigneeUserId: input.record.shared.paralegalId,
+    workflowStatus: input.workflowStatus,
+    plannedDate: input.plannedDate,
+    completedAt: null,
+    createdAt: iso,
+    identifiedAt: iso,
+    docketEventId: null,
+    documentLabel: null,
+    notes: `Results plan: ${planLabel}`,
+    identityKey: `disbursement-plan:${input.record.shared.id}`,
+    identityLabel: `Disbursement (${planLabel})`,
+  });
+}
+
+function hasOpenDisbursementForCase(
+  deliverables: PerformanceDeliverable[],
+  personId: string,
+  caseId: string,
+) {
+  return deliverables.some(
+    (d) =>
+      d.attorneyUserId === personId &&
+      d.caseId === caseId &&
+      d.deliverableType === "disbursement" &&
+      (d.workflowStatus === "committed" || d.workflowStatus === "backlog"),
+  );
+}
+
 function dedupeById(rows: PerformanceDeliverable[]) {
   const seen = new Set<string>();
   const out: PerformanceDeliverable[] = [];
@@ -186,7 +230,9 @@ function dedupeById(rows: PerformanceDeliverable[]) {
  * Attorney Output board lists:
  * - Finished last week: verified completed lit events + settlements/disbursements dated last week
  * - Committed this week: DF lit events dated this week + settlements/disbursements dated/committed this week
+ *   + Results Plan = This Week (undisbursed)
  * - In progress: DF lit events dated next week and the week after (+1 / +2)
+ *   + Results Plan = Next Week (undisbursed)
  */
 export function buildAttorneyBoardBuckets(input: {
   weekStart: string;
@@ -306,6 +352,34 @@ export function buildAttorneyBoardBuckets(input: {
         );
       }
     }
+
+    // Results Plan drives undisbursed disbursement placement on the attorney board.
+    const result = record.tracker?.result;
+    if (result && result.disbursedStatus !== "Yes") {
+      const plan = coerceDisbursementPlan(result.disbursementPlan);
+      if (
+        (plan === "This Week" || plan === "Next Week") &&
+        !hasOpenDisbursementForCase(input.deliverables, input.personId, record.shared.id)
+      ) {
+        if (plan === "This Week") {
+          committed.push(
+            fromDisbursementPlan({
+              record,
+              plannedDate: input.weekStart,
+              workflowStatus: "committed",
+            }),
+          );
+        } else {
+          backlog.push(
+            fromDisbursementPlan({
+              record,
+              plannedDate: weekPlus1,
+              workflowStatus: "backlog",
+            }),
+          );
+        }
+      }
+    }
   }
 
   // Settlement / disbursement commitments, this-week completions, and backlog (attorney-only).
@@ -355,7 +429,12 @@ export function buildAttorneyBoardBuckets(input: {
 }
 
 export function isSyntheticBoardDeliverable(id: string | null | undefined) {
-  return typeof id === "string" && (id.startsWith("docket:") || id.startsWith("settlement-case:"));
+  return (
+    typeof id === "string" &&
+    (id.startsWith("docket:") ||
+      id.startsWith("settlement-case:") ||
+      id.startsWith("disbursement-plan:"))
+  );
 }
 
 export function attorneyBoardDateWindow(weekStart: string, lastWeekStart: string) {

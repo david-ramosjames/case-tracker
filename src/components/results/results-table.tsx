@@ -157,6 +157,7 @@ export function ResultsTable({
   const [check, setCheck] = useState("all");
   const [disbursed, setDisbursed] = useState(initialDisbursed);
   const [reductions, setReductions] = useState("all");
+  const [plan, setPlan] = useState("all");
   const [quarter, setQuarter] = useState("all");
   const [fullySettled, setFullySettled] = useState<FullySettledFilter>("yes");
   const [sortKey, setSortKey] = useState<SortKey>("daysSinceSettlement");
@@ -187,6 +188,7 @@ export function ResultsTable({
     check,
     disbursed,
     reductions,
+    plan,
     quarter,
     fullySettled !== "yes",
   ].filter((value) => value !== "all" && value !== false).length;
@@ -212,6 +214,7 @@ export function ResultsTable({
         if (check !== "all" && result.checkStatus !== check && !pinRow) return false;
         if (disbursed !== "all" && result.disbursedStatus !== disbursed && !pinRow) return false;
         if (reductions !== "all" && coerceReductionsStatus(result.reductionsStatus) !== reductions && !pinRow) return false;
+        if (plan !== "all" && coerceDisbursementPlan(result.disbursementPlan) !== plan && !pinRow) return false;
         if (quarter !== "all" && result.resultQuarter !== quarter && !pinRow) return false;
         if (fullySettled !== "all") {
           const isFull = recordIsFullySettled(record);
@@ -275,6 +278,7 @@ export function ResultsTable({
     disbursed,
     fullySettled,
     goals,
+    plan,
     quarter,
     reductions,
     release,
@@ -328,6 +332,7 @@ export function ResultsTable({
     setCheck("all");
     setDisbursed("all");
     setReductions("all");
+    setPlan("all");
     setQuarter("all");
     setFullySettled("yes");
   }
@@ -671,7 +676,17 @@ export function ResultsTable({
                     ]}
                   />
                 </TableHead>
-                <TableHead className="w-36">Plan</TableHead>
+                <TableHead className="w-36 align-top">
+                  <HeaderFilter
+                    label="Plan"
+                    value={plan}
+                    onChange={setPlan}
+                    options={[
+                      { value: "all", label: "All" },
+                      ...DISBURSEMENT_PLAN_OPTIONS.map((item) => ({ value: item, label: item })),
+                    ]}
+                  />
+                </TableHead>
                 <TableHead className="w-32 align-top">
                   <HeaderFilter
                     label="Disbursed"

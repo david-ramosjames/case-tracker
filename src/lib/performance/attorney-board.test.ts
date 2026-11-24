@@ -9,6 +9,8 @@ function record(partial: {
   caseNumber: string;
   attorneyId: string;
   settlementDate?: string | null;
+  disbursementPlan?: "This Week" | "Next Week" | "2+ Weeks";
+  disbursedStatus?: "Yes" | "No";
 }): CaseRecord {
   return {
     shared: {
@@ -19,7 +21,11 @@ function record(partial: {
       paralegalId: "para-1",
     },
     tracker: {
-      result: { settlementDate: partial.settlementDate ?? null },
+      result: {
+        settlementDate: partial.settlementDate ?? null,
+        disbursementPlan: partial.disbursementPlan ?? "2+ Weeks",
+        disbursedStatus: partial.disbursedStatus ?? "No",
+      },
       disbursements: [],
     },
   } as CaseRecord;
@@ -183,6 +189,59 @@ describe("buildAttorneyBoardBuckets", () => {
     assert.equal(buckets.committed.some((r) => r.id === "docket:ev-motion"), false);
     assert.equal(buckets.committed.some((r) => r.id === "docket:ev-trial"), true);
     assert.equal(buckets.backlog.some((r) => r.id === "docket:ev-future-notice"), false);
+  });
+
+  it("maps Results Plan This Week → committed and Next Week → in progress for undisbursed cases", () => {
+    const weekStart = "2026-11-23";
+    const lastWeekStart = "2026-11-16";
+    const personId = "atty";
+    const thisWeek = record({
+      id: "c-this",
+      caseNumber: "1201",
+      attorneyId: personId,
+      disbursementPlan: "This Week",
+    });
+    const nextWeek = record({
+      id: "c-next",
+      caseNumber: "978",
+      attorneyId: personId,
+      disbursementPlan: "Next Week",
+    });
+    const later = record({
+      id: "c-later",
+      caseNumber: "100",
+      attorneyId: personId,
+      disbursementPlan: "2+ Weeks",
+    });
+    const alreadyPaid = record({
+      id: "c-paid",
+      caseNumber: "200",
+      attorneyId: personId,
+      disbursementPlan: "This Week",
+      disbursedStatus: "Yes",
+    });
+
+    const buckets = buildAttorneyBoardBuckets({
+      weekStart,
+      lastWeekStart,
+      personId,
+      deliverables: [],
+      commitments: [],
+      records: [thisWeek, nextWeek, later, alreadyPaid],
+      eventsByCaseId: {},
+    });
+
+    assert.equal(
+      buckets.committed.some((r) => r.id === "disbursement-plan:c-this" && r.deliverableType === "disbursement"),
+      true,
+    );
+    assert.equal(
+      buckets.backlog.some((r) => r.id === "disbursement-plan:c-next" && r.deliverableType === "disbursement"),
+      true,
+    );
+    assert.equal(buckets.committed.some((r) => r.id === "disbursement-plan:c-later"), false);
+    assert.equal(buckets.backlog.some((r) => r.id === "disbursement-plan:c-later"), false);
+    assert.equal(buckets.committed.some((r) => r.id === "disbursement-plan:c-paid"), false);
   });
 
   it("paralegal finished pulls DF events created last week; committed/backlog stay deliverable-only", () => {

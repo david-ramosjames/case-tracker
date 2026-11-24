@@ -1,27 +1,30 @@
 /**
  * Backfill attorney plan lines + paralegal deliverables from RJL GOALS (3).xlsx
  *
- * Attorneys sheet → performance_attorney_plan_lines (weeks 2026-11-09 and 2026-11-16)
+ * Attorneys sheet → performance_attorney_plan_lines (LAST_WEEK + THIS_WEEK)
  * Paralegal pair tabs → performance_deliverables (+ commitments)
- *   Last Week              → done (week 11/09)
- *   To Be Completed This Week → committed (week 11/16), or done if struck / Completed This Week
+ *   Last Week              → done (LAST_WEEK)
+ *   To Be Completed This Week → committed (THIS_WEEK), or done if struck / Completed This Week
  *   In Progress            → backlog
  *
  * Usage:
  *   node scripts/import-goals-workplans.mjs [xlsx] [--json out.json] [--sql out.sql]
+ *
+ * Week anchors (meeting Monday = THIS_WEEK; prior work week = LAST_WEEK):
+ *   2026-11-23 meeting → LAST_WEEK 2026-11-16, THIS_WEEK 2026-11-23
  */
 import ExcelJS from "exceljs";
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-const LAST_WEEK = "2026-11-09";
-const THIS_WEEK = "2026-11-16";
+const LAST_WEEK = "2026-11-16";
+const THIS_WEEK = "2026-11-23";
 
 const ATTORNEY_COLS = [
   { col: 2, name: "Erin", id: "8387bf99-0b0e-48d4-89c3-ecf03034bbd0" },
   { col: 3, name: "Mike", id: "9bb43266-60f9-4070-b29f-ae07d946c8a8" },
   { col: 4, name: "Jesus", id: "52640070-5fb9-47cc-b0b7-ef5cb925269d" },
-  // col 5 = TBD (Travis) — skip empty
+  { col: 5, name: "Travis", id: "27374a3e-44ae-4a9c-a401-26938d9e0392" },
   { col: 6, name: "Ryan", id: "ca4a22fc-6f74-4b45-8089-843b114a70b3" },
 ];
 
@@ -351,7 +354,7 @@ function parseParalegalSheet(sheet, meta) {
 
 const args = process.argv.slice(2);
 const filePath = resolve(
-  args.find((a) => !a.startsWith("--")) || "C:/Users/david/Downloads/RJL 2026 GOALS (3).xlsx",
+  args.find((a) => !a.startsWith("--")) || "C:/Users/david/Downloads/RJL 2026 GOALS (4).xlsx",
 );
 const jsonIdx = args.indexOf("--json");
 const sqlIdx = args.indexOf("--sql");
