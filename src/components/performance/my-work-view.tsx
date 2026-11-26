@@ -621,6 +621,38 @@ export function MyWorkView({
     }
   }
 
+  async function confirmSyntheticDocket(d: PerformanceDeliverable) {
+    if (!d.docketEventId || !d.caseId) return;
+    setBusyId(d.id);
+    setError(null);
+    try {
+      const res = await fetch("/api/performance/confirm-progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          caseId: d.caseId,
+          caseNumber: d.caseNumber,
+          clientName: d.clientNameSnapshot,
+          deliverableType: d.deliverableType,
+          docketEventId: d.docketEventId,
+          eventTitle: d.documentLabel || d.identityLabel,
+          attorneyUserId: d.attorneyUserId,
+          assigneeUserId: d.assigneeUserId,
+          completedAt: d.plannedDate ? `${d.plannedDate}T18:00:00.000Z` : null,
+          notes: "Confirmed from board (DocketFlow calendar)",
+        }),
+      });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Confirm failed");
+      setHiddenSyntheticIds((prev) => new Set(prev).add(d.id));
+      if (boardBuckets) router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Confirm failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function removeSyntheticDocket(d: PerformanceDeliverable) {
     if (!d.docketEventId || !d.caseId) return;
     if (
@@ -655,6 +687,29 @@ export function MyWorkView({
       if (boardBuckets) router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Remove failed");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function updateDisbursementPlan(
+    d: PerformanceDeliverable,
+    plan: "This Week" | "Next Week",
+  ) {
+    if (!d.caseId || !d.id.startsWith("disbursement-plan:")) return;
+    setBusyId(d.id);
+    setError(null);
+    try {
+      const res = await fetch("/api/performance/disbursement-plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ caseId: d.caseId, plan }),
+      });
+      const body = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(body.error ?? "Plan update failed");
+      if (boardBuckets) router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Plan update failed");
     } finally {
       setBusyId(null);
     }
@@ -1015,18 +1070,56 @@ export function MyWorkView({
                     {mode !== "finished" && isSyntheticBoardDeliverable(d.id) ? (
                       <div className="flex flex-col items-start gap-1">
                         <span className="text-xs text-muted-foreground">
-                          {d.id.startsWith("docket:") ? "DocketFlow calendar" : "Case Tracker"}
+                          {d.id.startsWith("docket:")
+                            ? "DocketFlow calendar"
+                            : d.id.startsWith("disbursement-plan:")
+                              ? "Results plan"
+                              : "Case Tracker"}
                         </span>
                         {d.id.startsWith("docket:") ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 px-2 text-xs"
-                            disabled={busyId === d.id}
-                            onClick={() => void removeSyntheticDocket(d)}
-                          >
-                            Remove
-                          </Button>
+                          <div className="grid w-[12.5rem] grid-cols-2 gap-1">
+                            <Button
+                              size="sm"
+                              className="h-8 px-2 text-xs"
+                              disabled={busyId === d.id}
+                              onClick={() => void confirmSyntheticDocket(d)}
+                            >
+                              Confirm
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 px-2 text-xs"
+                              disabled={busyId === d.id}
+                              onClick={() => void removeSyntheticDocket(d)}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        ) : d.id.startsWith("disbursement-plan:") ? (
+                          <div className="grid w-[12.5rem] grid-cols-2 gap-1">
+                            {d.workflowStatus === "committed" ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2 text-xs"
+                                disabled={busyId === d.id}
+                                onClick={() => void updateDisbursementPlan(d, "Next Week")}
+                              >
+                                In progress
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2 text-xs"
+                                disabled={busyId === d.id}
+                                onClick={() => void updateDisbursementPlan(d, "This Week")}
+                              >
+                                To this week
+                              </Button>
+                            )}
+                          </div>
                         ) : null}
                       </div>
                     ) : null}

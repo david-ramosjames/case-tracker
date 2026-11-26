@@ -80,9 +80,11 @@ function evidenceFromCaseTracker(caseId: string, excerpt: string): Pick<
 export type AutoCompleteAction = {
   deliverableId: string;
   completedAt: string;
-  kind: "settlement" | "disbursement";
+  kind: "settlement" | "disbursement" | "lit_scheduled";
   caseNumber: string;
   label: string;
+  /** When set, stamp the DF event onto the deliverable before completing. */
+  docketEventId?: string | null;
 };
 
 const LIT_COMPLETED_TYPES: PerformanceDeliverableType[] = [
@@ -156,21 +158,10 @@ function inWeek(day: string | null | undefined, weekStart: string) {
   return ymd >= weekStart && ymd <= weekEndFromStart(weekStart);
 }
 
-function openPlannedItems(
-  deliverables: PerformanceDeliverable[],
-  commitments: PerformanceCommitment[],
-  weekStart: string,
-) {
-  const committedIds = new Set(
-    commitments
-      .filter((c) => c.weekStart === weekStart && (c.outcome === "promised" || c.outcome === "completed"))
-      .map((c) => c.deliverableId),
-  );
-  return deliverables.filter(
-    (d) =>
-      (d.workflowStatus === "committed" || d.workflowStatus === "backlog") &&
-      (committedIds.has(d.id) || d.workflowStatus === "committed"),
-  );
+function openPlannedItems(deliverables: PerformanceDeliverable[]) {
+  // Include both This Week (committed) and In progress (backlog) so DF creates
+  // can match Schedule Lit Event tasks that haven't been committed this week yet.
+  return deliverables.filter((d) => d.workflowStatus === "committed" || d.workflowStatus === "backlog");
 }
 
 function matchDeliverable(input: {
@@ -245,7 +236,7 @@ export function buildAutoProgress(input: {
   /** Docket events for assigned cases (include createdAt when available). */
   eventsByCaseId: Record<string, DocketFlowScheduledEvent[]>;
 }): { candidates: AutoProgressCandidate[]; autoCompletes: AutoCompleteAction[] } {
-  const open = openPlannedItems(input.deliverables, input.commitments, input.weekStart);
+  const open = openPlannedItems(input.deliverables);
   const doneKeys = new Set(
     input.deliverables
       .filter((d) => d.workflowStatus === "done")
@@ -439,6 +430,20 @@ export function buildAutoProgress(input: {
           role: "paralegal",
           docketEventId: event.id,
         });
+        // Matched Schedule Lit Event → auto-complete when DF event is created.
+        if (matched) {
+          autoCompletes.push({
+            deliverableId: matched.id,
+            completedAt: `${createdDay}T18:00:00.000Z`,
+            kind: "lit_scheduled",
+            caseNumber: record.shared.caseNumber,
+            label: event.title || "Litigation event scheduled",
+            docketEventId: event.id,
+          });
+          doneKeys.add(matched.id);
+          doneKeys.add(`docket:${event.id}`);
+          continue;
+        }
         candidates.push({
           id: `lit-scheduled:${event.id}`,
           kind: "lit_scheduled",
@@ -449,14 +454,12 @@ export function buildAutoProgress(input: {
           label: event.title || "Litigation event scheduled",
           signalDate: createdDay,
           requiresVerification: true,
-          deliverableId: matched?.id ?? null,
+          deliverableId: null,
           docketEventId: event.id,
           stageSuggestionId: null,
           attorneyUserId: record.shared.attorneyId,
           assigneeUserId: record.shared.paralegalId,
-          reason: matched
-            ? "DocketFlow event created this week matches a planned schedule item — confirm."
-            : "DocketFlow lit event created this week — confirm to count as scheduled.",
+          reason: "DocketFlow lit event created this week — confirm to count as scheduled.",
           ...evidenceFromDocket({
             caseId: record.shared.id,
             event,

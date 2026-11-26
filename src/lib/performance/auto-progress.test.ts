@@ -223,4 +223,98 @@ describe("auto-progress", () => {
     assert.ok(lit);
     assert.equal(lit?.requiresVerification, true);
   });
+
+  it("auto-completes in-progress Schedule Lit Event when DF event is created this week", () => {
+    const planned = deliverable({
+      id: "d-sched",
+      deliverableType: "lit_event_scheduled",
+      workflowStatus: "backlog",
+    });
+    const event: DocketFlowScheduledEvent = {
+      id: "ev-new",
+      caseId: "c1",
+      title: "Plaintiff Deposition",
+      date: "2026-12-01",
+      deadlineEndDate: null,
+      startDateTime: null,
+      endDateTime: null,
+      category: null,
+      eventKind: "deposition",
+      scheduleKind: "meeting",
+      included: true,
+      completed: false,
+      calendarOrigin: "docketflow",
+      createdAt: "2026-11-12T15:00:00.000Z",
+    };
+    const record = {
+      shared: { id: "c1", caseNumber: "100", clientName: "Client", attorneyId: "atty", paralegalId: "para" },
+      tracker: {
+        caseStage: "Lit",
+        result: { settlementDate: null, disburseDate: null },
+        disbursements: [],
+        closedAt: null,
+        detectedStageSignals: [],
+      },
+    } as unknown as CaseRecord;
+
+    const { autoCompletes, candidates } = buildAutoProgress({
+      role: "paralegal",
+      personId: "para",
+      weekStart: "2026-11-10",
+      records: [record],
+      deliverables: [planned],
+      commitments: [],
+      eventsByCaseId: { c1: [event] },
+    });
+
+    assert.equal(autoCompletes.length, 1);
+    assert.equal(autoCompletes[0]?.deliverableId, "d-sched");
+    assert.equal(autoCompletes[0]?.kind, "lit_scheduled");
+    assert.equal(autoCompletes[0]?.docketEventId, "ev-new");
+    assert.equal(candidates.filter((c) => c.kind === "lit_scheduled").length, 0);
+  });
+
+  it("requires confirm for unmatched DF lit creates (no planned Schedule Lit)", () => {
+    const event: DocketFlowScheduledEvent = {
+      id: "ev-orphan",
+      caseId: "c1",
+      title: "Mediation",
+      date: "2026-12-05",
+      deadlineEndDate: null,
+      startDateTime: null,
+      endDateTime: null,
+      category: null,
+      eventKind: "mediation",
+      scheduleKind: "meeting",
+      included: true,
+      completed: false,
+      calendarOrigin: "docketflow",
+      createdAt: "2026-11-13T12:00:00.000Z",
+    };
+    const record = {
+      shared: { id: "c1", caseNumber: "100", clientName: "Client", attorneyId: "atty", paralegalId: "para" },
+      tracker: {
+        caseStage: "Lit",
+        result: { settlementDate: null, disburseDate: null },
+        disbursements: [],
+        closedAt: null,
+        detectedStageSignals: [],
+      },
+    } as unknown as CaseRecord;
+
+    const { autoCompletes, candidates } = buildAutoProgress({
+      role: "paralegal",
+      personId: "para",
+      weekStart: "2026-11-10",
+      records: [record],
+      deliverables: [],
+      commitments: [],
+      eventsByCaseId: { c1: [event] },
+    });
+
+    assert.equal(autoCompletes.length, 0);
+    const lit = candidates.find((c) => c.kind === "lit_scheduled");
+    assert.ok(lit);
+    assert.equal(lit?.requiresVerification, true);
+  });
 });

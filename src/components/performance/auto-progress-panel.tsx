@@ -69,9 +69,20 @@ export function AutoProgressPanel({ role, personId, weekStart }: Props) {
       setNeedsConfirm((body.needsConfirm ?? []).filter((c) => !dismissed.has(c.id)));
       setApplied(body.applied ?? []);
       if ((body.applied?.length ?? 0) > 0) {
-        setMessage(
-          `Auto-completed ${body.applied!.length} item${body.applied!.length === 1 ? "" : "s"} from Case Tracker dates.`,
-        );
+        const litScheduled = body.applied!.filter((a) => a.kind === "lit_scheduled").length;
+        const other = body.applied!.length - litScheduled;
+        const parts: string[] = [];
+        if (litScheduled > 0) {
+          parts.push(
+            `${litScheduled} Schedule Lit Event${litScheduled === 1 ? "" : "s"} from DocketFlow creates`,
+          );
+        }
+        if (other > 0) {
+          parts.push(
+            `${other} item${other === 1 ? "" : "s"} from Case Tracker dates`,
+          );
+        }
+        setMessage(`Auto-completed ${parts.join(" and ")}.`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed");

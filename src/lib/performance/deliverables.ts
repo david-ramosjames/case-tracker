@@ -343,6 +343,8 @@ export async function completeDeliverable(input: {
   completionSource?: "manual" | "confirmed_event" | "system";
   /** ISO timestamp; defaults to now. Use to attribute completions to a prior week. */
   completedAt?: string | null;
+  /** Optional DocketFlow event to link when completing (e.g. Schedule Lit auto-match). */
+  docketEventId?: string | null;
 }): Promise<PerformanceDeliverable> {
   const client = await createPerformanceClient();
   const completedAt = input.completedAt?.trim() || new Date().toISOString();
@@ -362,6 +364,7 @@ export async function completeDeliverable(input: {
       completed_at: completedAt,
       completion_source: input.completionSource ?? "manual",
       updated_at: updatedAt,
+      ...(input.docketEventId ? { docket_event_id: input.docketEventId } : {}),
     })
     .eq("id", input.deliverableId)
     .select("*")

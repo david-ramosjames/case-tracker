@@ -9,14 +9,16 @@ import {
   listCommitmentsForWeek,
   listDeliverablesForPerson,
 } from "@/lib/performance/deliverables";
-import { asYmdPrefix, weekEndFromStart, weekStartMondayCt } from "@/lib/performance/weeks";
+import { asYmdPrefix, shiftWeekStart, weekEndFromStart, weekStartMondayCt } from "@/lib/performance/weeks";
 import { loadViewerCaseBundle } from "@/lib/data/viewer-data";
-import { listDocketFlowCaseEvents, getUsers } from "@/lib/supabase/services";
+import { listDocketFlowCaseEventsForCases, getUsers } from "@/lib/supabase/services";
+import { type DocketFlowScheduledEvent } from "@/lib/types";
 import { errorMessage } from "@/lib/utils";
 
 /**
  * Match planned/in-progress weekly goals to Case Tracker + DocketFlow + stage signals.
- * Auto-completes settlement/disbursement (no verification). Returns needs-confirm candidates.
+ * Auto-completes settlement/disbursement (no verification) and matched Schedule Lit Events
+ * when the DF event is created this week. Returns needs-confirm candidates for the rest.
  */
 export async function POST(request: Request) {
   try {
@@ -56,25 +58,35 @@ export async function POST(request: Request) {
       listCommitmentsForWeek(weekStart),
     ]);
 
-    const eventsByCaseId: Record<string, Awaited<ReturnType<typeof listDocketFlowCaseEvents>>> = {};
     const weekEnd = weekEndFromStart(weekStart);
-    await Promise.all(
-      assigned.slice(0, 40).map(async (record) => {
-        try {
-          const events = await listDocketFlowCaseEvents(record.shared.id);
-          eventsByCaseId[record.shared.id] = events.filter((ev) => {
-            const dateDay = asYmdPrefix(ev.date) || asYmdPrefix(ev.startDateTime) || "";
-            const createdDay = asYmdPrefix(ev.createdAt) || "";
-            return (
-              (dateDay >= weekStart && dateDay <= weekEnd) ||
-              (createdDay >= weekStart && createdDay <= weekEnd)
-            );
-          });
-        } catch {
-          eventsByCaseId[record.shared.id] = [];
-        }
-      }),
-    );
+    const nextWeekStart = shiftWeekStart(weekStart, 1);
+    const caseIds = assigned.map((r) => r.shared.id);
+    const eventsByCaseId: Record<string, DocketFlowScheduledEvent[]> = {};
+    for (const id of caseIds) eventsByCaseId[id] = [];
+
+    // Batch-load events for the whole caseload (date this week OR created this week).
+    try {
+      const [byDate, byCreated] = await Promise.all([
+        listDocketFlowCaseEventsForCases({
+          caseIds,
+          dateFrom: weekStart,
+          dateTo: weekEnd,
+        }),
+        listDocketFlowCaseEventsForCases({
+          caseIds,
+          createdFrom: weekStart,
+          createdToExclusive: nextWeekStart,
+        }),
+      ]);
+      const seen = new Set<string>();
+      for (const event of [...byDate, ...byCreated]) {
+        if (!event.caseId || seen.has(event.id)) continue;
+        seen.add(event.id);
+        (eventsByCaseId[event.caseId] ??= []).push(event);
+      }
+    } catch {
+      // Leave empty — sync still returns CT-based candidates.
+    }
 
     const { candidates, autoCompletes } = buildAutoProgress({
       role,
@@ -94,6 +106,7 @@ export async function POST(request: Request) {
           completionSource: "system",
           actorUserId: contact?.id,
           completedAt: action.completedAt,
+          docketEventId: action.docketEventId,
         });
         applied.push({
           deliverableId: action.deliverableId,
